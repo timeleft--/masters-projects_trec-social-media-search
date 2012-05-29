@@ -8,7 +8,7 @@ public class ASCIITokenIteratorTest {
 
 	@Test
 	public void testBasic() {
-		TokenIterator target = new TokenIterator("basic test");
+		TokenIterator target = new TokenIterator("Basic Test");
 		assertEquals("basic",target.next());
 		assertEquals("test",target.next());
 		assertFalse(target.hasNext());
@@ -16,7 +16,7 @@ public class ASCIITokenIteratorTest {
 	
 	@Test
 	public void oneWordShort(){
-		TokenIterator target = new TokenIterator("oneword");
+		TokenIterator target = new TokenIterator("OneWord");
 		assertEquals("oneword", target.next());
 		assertFalse(target.hasNext());
 	}
@@ -65,4 +65,6 @@ public class ASCIITokenIteratorTest {
 		assertEquals("trs", target.next());
 		assertFalse(target.hasNext());
 	}
+	
+
 }
