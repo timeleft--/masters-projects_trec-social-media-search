@@ -10,8 +10,25 @@ import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.Queues;
 
 public class TokenIterator extends AbstractIterator<String> {
+	
+	public static class ASCIITokenIterator extends TokenIterator {
 
-	//TODO: is it really better to work with ints?? or is char[] good?
+		public ASCIITokenIterator(String string) {
+			super(string);
+		}
+		
+		public ASCIITokenIterator(Text txt) {
+			super(txt);
+		}
+		
+		@Override
+		protected boolean isTokenChar(int c) {
+		
+			return super.isTokenChar(c) && c < 128;
+		}
+	}
+
+	//TODONE: is it really better to work with ints?? or is char[] good? Yes.. so that you can have -1 place holders
 	private final char[] chs;
 	private int cIx = 0;
 	private LinkedBlockingDeque<String> pendingRes = Queues
@@ -20,7 +37,7 @@ public class TokenIterator extends AbstractIterator<String> {
 	private int[] repeatedChs = Arrays.copyOf(BLANK_3CH,3);
 	
 	public TokenIterator(Text input) {
-		//TODO: create a map reduce step for language categorization first
+		//TODONOT: create a map reduce step for language categorization first
 //		TextCategorizer langCat = new TextCategorizer();
 //		if(!"english".equals(langCat.categorize(txt.toString()))){
 //			L.warn("Prunning non-english pattern: {}", txt);
@@ -28,6 +45,10 @@ public class TokenIterator extends AbstractIterator<String> {
 //		}
 		
 		this.chs = input.toString().toCharArray();
+	}
+
+	public TokenIterator(String string) {
+		this(new Text(string));
 	}
 
 	@Override
@@ -57,7 +78,7 @@ public class TokenIterator extends AbstractIterator<String> {
 					repeatedChs[2] = tch;
 				}
 				
-				result.append(tch);
+				result.append((char)tch);
 			} else {
 				
 				// reset repetition detector 
