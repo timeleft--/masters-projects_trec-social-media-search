@@ -29,6 +29,7 @@ import org.apache.mahout.common.Pair;
 import org.apache.mahout.common.Parameters;
 import org.apache.mahout.freqtermsets.PFPGrowth;
 import org.apache.mahout.freqtermsets.TransactionTree;
+import org.apache.mahout.freqtermsets.TokenIterator.ASCIITokenIterator;
 import org.apache.mahout.math.list.IntArrayList;
 import org.apache.mahout.math.map.OpenObjectIntHashMap;
 import org.apache.mahout.math.set.OpenIntHashSet;
@@ -41,7 +42,7 @@ import org.apache.mahout.math.set.OpenIntHashSet;
 public class ParallelFPGrowthMapper extends Mapper<LongWritable,Text,IntWritable,TransactionTree> {
 
   private final OpenObjectIntHashMap<String> fMap = new OpenObjectIntHashMap<String>();
-  private Pattern splitter;
+//  private Pattern splitter;
   private int maxPerGroup;
 
   private IntWritable wGroupID = new IntWritable();
@@ -50,11 +51,14 @@ public class ParallelFPGrowthMapper extends Mapper<LongWritable,Text,IntWritable
   protected void map(LongWritable offset, Text input, Context context)
     throws IOException, InterruptedException {
 
-    String[] items = splitter.split(input.toString());
+//    String[] items = splitter.split(input.toString());
 
     OpenIntHashSet itemSet = new OpenIntHashSet();
 
-    for (String item : items) {
+//    for (String item : items) {
+    ASCIITokenIterator items = new ASCIITokenIterator(input);
+    while (items.hasNext()) {
+      String item = items.next();
       if (fMap.containsKey(item) && !item.trim().isEmpty()) {
         itemSet.add(fMap.get(item));
       }
@@ -94,8 +98,8 @@ public class ParallelFPGrowthMapper extends Mapper<LongWritable,Text,IntWritable
     Parameters params = 
       new Parameters(context.getConfiguration().get(PFPGrowth.PFP_PARAMETERS, ""));
 
-    splitter = Pattern.compile(params.get(PFPGrowth.SPLIT_PATTERN,
-                                          PFPGrowth.SPLITTER.toString()));
+//    splitter = Pattern.compile(params.get(PFPGrowth.SPLIT_PATTERN,
+//                                          PFPGrowth.SPLITTER.toString()));
     
     maxPerGroup = Integer.valueOf(params.getInt(PFPGrowth.MAX_PER_GROUP, 0));
   }

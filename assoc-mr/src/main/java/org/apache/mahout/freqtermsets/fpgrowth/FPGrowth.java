@@ -21,10 +21,12 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Map.Entry;
 
 import com.google.common.collect.Lists;
@@ -47,6 +49,7 @@ import org.apache.mahout.freqtermsets.fpgrowth.FPTreeDepthCache;
 import org.apache.mahout.freqtermsets.fpgrowth.FrequentPatternMaxHeap;
 import org.apache.mahout.freqtermsets.fpgrowth.Pattern;
 import org.apache.mahout.math.map.OpenIntIntHashMap;
+import org.knallgrau.utils.textcat.TextCategorizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,6 +61,18 @@ import org.slf4j.LoggerFactory;
 public class FPGrowth<A extends Comparable<? super A>> {
 
   private static final Logger log = LoggerFactory.getLogger(FPGrowth.class);
+  
+  private final List<String> reverseMapping;
+  private final double superiorityRatio;
+  private final double superiorityRatioRecip;
+  private final Random rand = new Random(System.currentTimeMillis());
+  
+  public FPGrowth(List<String> pReverseMapping) {
+    this.reverseMapping = pReverseMapping;
+    this.superiorityRatio = 1.11;
+    superiorityRatioRecip = 1/superiorityRatio;
+  }
+
 
   public static List<Pair<String,TopKStringPatterns>> readFrequentPattern(Configuration conf, Path path) {
     List<Pair<String,TopKStringPatterns>> ret = Lists.newArrayList();
@@ -199,22 +214,88 @@ public class FPGrowth<A extends Comparable<? super A>> {
    *          integer to A
    * @return Top K Frequent Patterns for each feature and their support
    */
-  private Map<Integer,FrequentPatternMaxHeap> fpGrowth(FPTree tree,
+  private Map<String, Map<Integer, FrequentPatternMaxHeap>> fpGrowth(FPTree tree,
                                                        long minSupportValue,
                                                        int k,
                                                        Collection<Integer> requiredFeatures,
                                                        TopKPatternsOutputConverter<A> outputCollector,
                                                        StatusUpdater updater) throws IOException {
-
-    Map<Integer,FrequentPatternMaxHeap> patterns = Maps.newHashMap();
+    Map<String,Map<Integer,FrequentPatternMaxHeap>> result = Maps.newHashMap();
+//    Map<Integer,FrequentPatternMaxHeap> patterns = Maps.newHashMap();
+    TextCategorizer langCat = new TextCategorizer();
+    
     FPTreeDepthCache treeCache = new FPTreeDepthCache();
     for (int i = tree.getHeaderTableCount() - 1; i >= 0; i--) {
       int attribute = tree.getAttributeAtIndex(i);
       if (requiredFeatures.contains(attribute)) {
-        log.info("Mining FTree Tree for all patterns with {}", attribute);
+        log.info("Mining FTree Tree for all patterns with '{}'", reverseMapping.get(attribute)); //attribute);
         MutableLong minSupport = new MutableLong(minSupportValue);
         FrequentPatternMaxHeap frequentPatterns = growth(tree, minSupport, k,
                                                          treeCache, 0, attribute, updater);
+        
+        HashMap<String, MutableLong> langVotes = Maps.newHashMap();
+        StringBuilder patStr = new StringBuilder();
+        int majorityVoteCnt = (frequentPatterns.count() / 2) + 1;
+        String langSure = null;
+        
+        // Detect langauge for attribute by voting from different patterns
+        for (Pattern p : frequentPatterns.getHeap()) {
+          for(int item: p.getPattern()){
+            patStr.append(reverseMapping.get(item)).append(' ');
+          }
+          
+          String lang = langCat.categorize(patStr.toString());
+          if(!langVotes.containsKey(lang)){
+            langVotes.put(lang, new MutableLong(0));
+          }
+          MutableLong voteCnt = langVotes.get(lang);
+          voteCnt.add(1);
+          
+          if(voteCnt.longValue() == majorityVoteCnt){
+            langSure = lang;
+            break;
+          }
+          
+          patStr.setLength(0);
+        }
+          
+        if(langSure == null){
+          
+          int maxVote = Integer.MIN_VALUE;
+          List<String> langCandidates = Lists.newLinkedList();
+          
+          for(Entry<String, MutableLong> voteEntry: langVotes.entrySet()){
+            double ratio = voteEntry.getValue().doubleValue() / maxVote;
+            if(ratio >= superiorityRatio){
+              langCandidates.clear();
+            }
+            
+            if(ratio > superiorityRatioRecip) {
+              langCandidates.add(voteEntry.getKey());
+            }
+            
+            if (ratio > 1.0){
+              maxVote = voteEntry.getValue().intValue();
+            }
+          }
+          
+          langSure = langCandidates.get(rand.nextInt(langCandidates.size()));
+        }
+        
+        log.info("Detected language for attribute '{}' to be '{}'", reverseMapping.get(attribute), langSure);
+        
+        // TODO: support more than one language
+        if(!"english".equals(langSure) && !"unknown".equals(langSure)){
+          continue;
+        }
+        
+        Map<Integer,FrequentPatternMaxHeap> patterns = result.get(langSure);
+        
+        if(patterns == null){
+          patterns = Maps.newHashMap();
+          result.put(langSure, patterns);
+        }
+        
         patterns.put(attribute, frequentPatterns);
         outputCollector.collect(attribute, frequentPatterns);
 
@@ -225,7 +306,8 @@ public class FPGrowth<A extends Comparable<? super A>> {
     }
     log.info("Tree Cache: First Level: Cache hits={} Cache Misses={}",
       treeCache.getHits(), treeCache.getMisses());
-    return patterns;
+//    return patterns;
+    return result;
   }
 
   private static FrequentPatternMaxHeap generateSinglePathPatterns(FPTree tree,
@@ -273,7 +355,7 @@ public class FPGrowth<A extends Comparable<? super A>> {
    *          format to the corresponding A Format
    * @return Top K frequent patterns for each attribute
    */
-  private Map<Integer,FrequentPatternMaxHeap> generateTopKFrequentPatterns(
+  private Map<String, Map<Integer, FrequentPatternMaxHeap>> generateTopKFrequentPatterns(
     Iterator<Pair<int[],Long>> transactions,
     long[] attributeFrequency,
     long minSupport,

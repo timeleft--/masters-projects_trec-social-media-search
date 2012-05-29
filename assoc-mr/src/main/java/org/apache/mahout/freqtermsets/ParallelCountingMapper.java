@@ -18,13 +18,11 @@ w * Licensed to the Apache Software Foundation (ASF) under one or more
 package org.apache.mahout.freqtermsets;
 
 import java.io.IOException;
-import java.util.regex.Pattern;
 
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Mapper;
-import org.apache.mahout.common.Parameters;
-import org.apache.mahout.freqtermsets.PFPGrowth;
+import org.apache.mahout.freqtermsets.TokenIterator.ASCIITokenIterator;
 
 /**
  * 
@@ -33,18 +31,18 @@ import org.apache.mahout.freqtermsets.PFPGrowth;
  * 
  */
 public class ParallelCountingMapper extends
-		Mapper<LongWritable, Text, Text, LongWritable> {
+		Mapper<Text, Text, Text, LongWritable> {
 
 	private static final LongWritable ONE = new LongWritable(1);
 
 	// private Pattern splitter;
 
 	@Override
-	protected void map(LongWritable offset, Text input, Context context)
+	protected void map(Text key, Text input, Context context)
 			throws IOException, InterruptedException {
 
 		// String[] items = splitter.split(input.toString());
-		TokenIterator items = new TokenIterator(input);
+		ASCIITokenIterator items = new ASCIITokenIterator(input);
 		while (items.hasNext()) {
 			String item = items.next();
 //			if (item.trim().isEmpty()) {

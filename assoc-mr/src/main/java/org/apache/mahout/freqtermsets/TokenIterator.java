@@ -115,7 +115,7 @@ public class TokenIterator extends AbstractIterator<String> {
 	}
 
 //	protected boolean isStopWord(String token){
-//		//TODO: do we need synchronization or multiple copies?
+//		//do we need synchronization or multiple copies?
 //		return stopWords.contains(token);
 //	}
 //	

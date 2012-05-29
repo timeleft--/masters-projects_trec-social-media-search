@@ -216,7 +216,7 @@ public class SimulateTwitterHose {
 
 			PrintStream out = new PrintStream(System.out, true, "UTF-8");
 
-			String htmlseqPath = "D:\\datasets\\twitter-trec2011\\html";
+			String htmlseqPath = "/u2/yaboulnaga/Shared/datasets/twitter-trec2011/html";
 
 			FileSystem fs = FileSystem.get(new Configuration());
 			Path file = new Path(htmlseqPath);

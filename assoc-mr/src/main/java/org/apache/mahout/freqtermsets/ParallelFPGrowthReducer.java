@@ -59,7 +59,7 @@ public class ParallelFPGrowthReducer extends Reducer<IntWritable,TransactionTree
   private int numFeatures;
   private int maxPerGroup;
 
-  private boolean useFP2;
+  private boolean useFP2 = true;
 
   private static class IteratorAdapter implements Iterator<Pair<List<Integer>,Long>> {
     private Iterator<Pair<IntArrayList,Long>> innerIter;
@@ -103,7 +103,7 @@ public class ParallelFPGrowthReducer extends Reducer<IntWritable,TransactionTree
     
     if (useFP2) {
       org.apache.mahout.freqtermsets.fpgrowth2.FPGrowthIds fpGrowth = 
-        new org.apache.mahout.freqtermsets.fpgrowth2.FPGrowthIds();
+        new org.apache.mahout.freqtermsets.fpgrowth2.FPGrowthIds(featureReverseMap);
       fpGrowth.generateTopKFrequentPatterns(
           cTree.iterator(),
           freqList,
@@ -115,7 +115,7 @@ public class ParallelFPGrowthReducer extends Reducer<IntWritable,TransactionTree
               featureReverseMap),
           new ContextStatusUpdater<IntWritable,TransactionTree,Text,TopKStringPatterns>(context));
     } else {
-      FPGrowth<Integer> fpGrowth = new FPGrowth<Integer>();
+      FPGrowth<Integer> fpGrowth = new FPGrowth<Integer>(featureReverseMap);
       fpGrowth.generateTopKFrequentPatterns(
           new IteratorAdapter(cTree.iterator()),
           localFList,
@@ -148,5 +148,6 @@ public class ParallelFPGrowthReducer extends Reducer<IntWritable,TransactionTree
     maxPerGroup = params.getInt(PFPGrowth.MAX_PER_GROUP, 0);
     numFeatures = featureReverseMap.size();
     useFP2 = "true".equals(params.get(PFPGrowth.USE_FPG2));
+//    useFP2 = !"false".equals(params.get(PFPGrowth.USE_FPG2));
   }
 }

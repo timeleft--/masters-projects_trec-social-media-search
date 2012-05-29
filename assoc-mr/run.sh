@@ -1,0 +1,1 @@
+hadoop jar assoc-mr-0.0.1-SNAPSHOT-job.jar org.apache.mahout.freqtermsets.FPGrowthDriver --input /u2/yaboulnaga/Shared/datasets/twitter-trec2011/html --output /u2/yaboulnaga/Shared/datasets/twitter-trec2011/assoc-mr

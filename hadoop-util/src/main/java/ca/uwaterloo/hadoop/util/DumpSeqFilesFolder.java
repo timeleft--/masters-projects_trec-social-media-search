@@ -10,7 +10,7 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.Writable;
 import org.apache.mahout.common.Pair;
-import org.apache.mahout.fpm.pfpgrowth.convertors.string.TopKStringPatterns;
+import org.apache.mahout.freqtermsets.convertors.string.TopKStringPatterns;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,10 +25,12 @@ public class DumpSeqFilesFolder {
 
 		int pHeapSize = 5000;
 		PrintStream out = new PrintStream(new FileOutputStream(
-				"D:\\datasets\\twitter-trec2011\\freq-item-sets_supp5-k2500.csv"), true,
-				"UTF-8");
+		    "/u2/yaboulnaga/Shared/datasets/twitter-trec2011/assoc-mr.csv"),
+//				"D:\\datasets\\twitter-trec2011\\freq-item-sets_supp5-k2500.csv"), 
+				true, "UTF-8");
 
-		String seqPath = "D:\\datasets\\twitter-trec2011\\freq-terms_supp5-k25000";
+		String seqPath = "/u2/yaboulnaga/Shared/datasets/twitter-trec2011/assoc-mr/fpgrowth"; 
+//		    "D:\\datasets\\twitter-trec2011\\freq-terms_supp5-k25000";
 
 		FileSystem fs = FileSystem.get(new Configuration());
 		Path file = new Path(seqPath);
