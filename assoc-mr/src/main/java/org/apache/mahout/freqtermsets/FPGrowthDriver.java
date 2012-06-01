@@ -83,7 +83,11 @@ public final class FPGrowthDriver extends AbstractJob {
     addOption("method", "method", "Method of processing: sequential|mapreduce", "mapreduce"); //"sequential");
     addOption("encoding", "e", "(Optional) The file encoding.  Default value: UTF-8", "UTF-8");
     addFlag("useFPG2", "2", "Use an alternate FPG implementation");
-
+    addOption(PFPGrowth.COUNT_IN, "cnt", "(Optional) In case of mapreduce, if this is set parallel counting will be skipped and counts will be read from the path specified");
+//    addFlag(PFPGrowth.PSEUDO, "ps", "Running on a Pseudo-Cluster (one machine). Uses hardcoded configurations for each job.");
+    addOption(PFPGrowth.GROUP_FIS_IN, "gfis", "(Optional) In case of mapreduce, if this is set execution will start from the aggregation phase, and group dependent frequent itemsets will be read from the path specified");
+     
+    
     if (parseArguments(args) == null) {
       return -1;
     }
@@ -121,6 +125,18 @@ public final class FPGrowthDriver extends AbstractJob {
 
     if (hasOption("useFPG2")) {
       params.set(PFPGrowth.USE_FPG2, "true");
+    }
+    
+    if(hasOption(PFPGrowth.COUNT_IN)){
+      params.set(PFPGrowth.COUNT_IN, getOption(PFPGrowth.COUNT_IN));
+    }
+    
+//    if(hasOption(PFPGrowth.PSEUDO)){
+//      params.set(PFPGrowth.PSEUDO, "true");
+//    }
+    
+    if(hasOption(PFPGrowth.GROUP_FIS_IN)) {
+      params.set(PFPGrowth.GROUP_FIS_IN, getOption(PFPGrowth.GROUP_FIS_IN));
     }
 
     Path inputDir = getInputPath();

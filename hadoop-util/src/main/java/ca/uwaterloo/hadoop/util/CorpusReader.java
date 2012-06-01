@@ -5,6 +5,7 @@ import java.io.IOException;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.PathFilter;
 import org.apache.hadoop.io.Writable;
 import org.apache.mahout.common.Pair;
 import org.apache.mahout.common.iterator.sequencefile.SequenceFileIterable;
@@ -22,7 +23,7 @@ public class CorpusReader<K extends Writable, V extends Writable> {
 	private int nextFile = 0;
 	private SequenceFileIterator<K, V> currentBlock = null;
 
-	public CorpusReader(Path directory, FileSystem fs) throws IOException {
+	public CorpusReader(Path directory, FileSystem fs, final String pattern) throws IOException {
 		Preconditions.checkNotNull(directory);
 		this.fs = Preconditions.checkNotNull(fs);
 		if (!fs.getFileStatus(directory).isDir()) {
@@ -30,7 +31,12 @@ public class CorpusReader<K extends Writable, V extends Writable> {
 					+ " to be a directory!");
 		}
 
-		files = fs.listStatus(directory);
+		files = fs.listStatus(directory,new PathFilter() {
+      
+      public boolean accept(Path p) {
+        return p.getName().matches(pattern);
+      }
+    });
 
 		if (files.length == 0) {
 			throw new IOException(directory + " does not contain any files!");

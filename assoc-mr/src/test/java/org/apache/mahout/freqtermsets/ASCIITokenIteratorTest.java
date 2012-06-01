@@ -38,7 +38,7 @@ public class ASCIITokenIteratorTest {
 	
 	@Test
 	public void testShortenning(){
-		TokenIterator target = new TokenIterator("coooool");
+		TokenIterator target = new TokenIterator("coooooooooooooooooool");
 		assertEquals("coool", target.next());
 		assertFalse(target.hasNext());
 	}
@@ -47,7 +47,7 @@ public class ASCIITokenIteratorTest {
 	public void testMentions(){
 		TokenIterator target = new TokenIterator("@younos");
 		assertEquals("@younos", target.next());
-		assertEquals("younos", target.next());
+//		assertEquals("younos", target.next());
 		assertFalse(target.hasNext());
 	}
 	

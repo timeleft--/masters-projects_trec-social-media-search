@@ -78,11 +78,14 @@ public final class PFPGrowth {
   public static final String PARALLEL_COUNTING = "parallelcounting";
   public static final String SPLIT_PATTERN = "splitPattern";
   public static final String USE_FPG2 = "use_fpg2";
-  public static final String MAX_DF_PCT = "maxDFPct";
-  public static final int MAX_DF_PCT_DEFAULT = 95;
-  
+//YA 
+  //  public static final String MAX_DF_PCT = "maxDFPct";
+//  public static final int MAX_DF_PCT_DEFAULT = 95;
+  // All those setting are cluster level and cannot be set per job
+//  public static final String PSEUDO = "pseudo";
+  public static final String COUNT_IN = "countIn";
+  public static final String GROUP_FIS_IN = "gfisIn";
   // public static final Pattern SPLITTER = Pattern.compile("[ ,\t]*[,|\t][ ,\t]*");
-  public static final Pattern TWEET_EXTRACTOR = Pattern.compile("[ ,\t]*[,|\t][ ,\t]*");
   
   private PFPGrowth() {
   }
@@ -156,7 +159,11 @@ public final class PFPGrowth {
     int minSupport = Integer.valueOf(params.get(MIN_SUPPORT, "3"));
     Configuration conf = new Configuration();
     
-    Path parallelCountingPath = new Path(params.get(OUTPUT), PARALLEL_COUNTING);
+    String countIn = params.get(COUNT_IN);
+    if(countIn == null){
+       countIn = params.get(OUTPUT);
+    }
+    Path parallelCountingPath = new Path(countIn, PARALLEL_COUNTING);
     
     PriorityQueue<Pair<String, Long>> queue = new PriorityQueue<Pair<String, Long>>(11,
         new Comparator<Pair<String, Long>>() {
@@ -203,7 +210,7 @@ public final class PFPGrowth {
     while (!queue.isEmpty()) {
       fList.add(queue.poll());
     }
-    return fList.subList(0, fList.size());
+    return fList; // This prevents a null exception when using FP2 --> .subList(0, fList.size());
   }
   
   public static int getGroup(int itemId, int maxPerGroup) {
@@ -258,22 +265,27 @@ public final class PFPGrowth {
     Configuration conf = new Configuration();
     conf.set("io.serializations", "org.apache.hadoop.io.serializer.JavaSerialization,"
         + "org.apache.hadoop.io.serializer.WritableSerialization");
-    startParallelCounting(params, conf);
     
-    // save feature list to dcache
-    List<Pair<String, Long>> fList = readFList(params);
-    saveFList(fList, params, conf);
+    if(params.get(COUNT_IN) == null){
+      startParallelCounting(params, conf);
+    }
     
-    // set param to control group size in MR jobs
-    int numGroups = params.getInt(PFPGrowth.NUM_GROUPS,
-        PFPGrowth.NUM_GROUPS_DEFAULT);
-    int maxPerGroup = fList.size() / numGroups;
-    if (fList.size() % numGroups != 0)
-      maxPerGroup++;
-    params.set(MAX_PER_GROUP, Integer.toString(maxPerGroup));
-    fList = null;
-    
-    startParallelFPGrowth(params, conf);
+    if (params.get(GROUP_FIS_IN) == null) {
+      // save feature list to dcache
+      List<Pair<String, Long>> fList = readFList(params);
+      saveFList(fList, params, conf);
+      
+      // set param to control group size in MR jobs
+      int numGroups = params.getInt(PFPGrowth.NUM_GROUPS,
+          PFPGrowth.NUM_GROUPS_DEFAULT);
+      int maxPerGroup = fList.size() / numGroups;
+      if (fList.size() % numGroups != 0)
+        maxPerGroup++;
+      params.set(MAX_PER_GROUP, Integer.toString(maxPerGroup));
+      fList = null;
+      
+      startParallelFPGrowth(params, conf);
+    }
     startAggregating(params, conf);
   }
   
@@ -288,8 +300,19 @@ public final class PFPGrowth {
     conf.set(PFP_PARAMETERS, params.toString());
     conf.set("mapred.compress.map.output", "true");
     conf.set("mapred.output.compression.type", "BLOCK");
+    //YA    
+//    if(Boolean.parseBoolean(params.get(PFPGrowth.PSEUDO, "false"))){
+//      conf.set("mapred.tasktracker.map.tasks.maximum", "6");
+//      conf.set("mapred.map.child.java.opts", "-Xmx1000M");
+//      conf.set("mapred.tasktracker.reduce.tasks.maximum", "6");
+//      conf.set("mapred.reduce.child.java.opts", "-Xmx1000M");
+//    }
+    conf.setInt("mapred.max.map.failures.percent", 10);
+    // END YA
     
-    Path input = new Path(params.get(OUTPUT), FPGROWTH);
+    String gfisIn = params.get(PFPGrowth.GROUP_FIS_IN, params.get(OUTPUT));
+    
+    Path input = new Path(gfisIn, FPGROWTH);
     Job job = new Job(conf, "PFP Aggregator Driver running over input: " + input);
     job.setJarByClass(PFPGrowth.class);
     
@@ -322,6 +345,14 @@ public final class PFPGrowth {
     
     conf.set("mapred.compress.map.output", "true");
     conf.set("mapred.output.compression.type", "BLOCK");
+    
+//    if(Boolean.parseBoolean(params.get(PFPGrowth.PSEUDO, "false"))){
+//      conf.set("mapred.tasktracker.map.tasks.maximum", "3");
+//      conf.set("mapred.tasktracker.reduce.tasks.maximum", "3");
+//      conf.set("mapred.map.child.java.opts", "-Xmx777M");
+//      conf.set("mapred.reduce.child.java.opts", "-Xmx777M");
+//      conf.setInt("mapred.max.map.failures.percent", 0);
+//    }
     
     String input = params.get(INPUT);
     Job job = new Job(conf, "Parallel Counting Driver running over input: " + input);
@@ -358,6 +389,17 @@ public final class PFPGrowth {
     conf.set(PFP_PARAMETERS, params.toString());
     conf.set("mapred.compress.map.output", "true");
     conf.set("mapred.output.compression.type", "BLOCK");
+    
+    // YA
+//    if(Boolean.parseBoolean(params.get(PFPGrowth.PSEUDO, "false"))){
+//      conf.set("mapred.tasktracker.map.tasks.maximum", "6");
+//      conf.set("mapred.map.child.java.opts", "-Xmx1000M");
+//      conf.set("mapred.tasktracker.reduce.tasks.maximum", "6");
+//      conf.set("mapred.reduce.child.java.opts", "-Xmx1000M");
+//    }
+    conf.setInt("mapred.max.map.failures.percent", 10);
+    // END YA
+    
     Path input = new Path(params.get(INPUT));
     Job job = new Job(conf, "PFP Growth Driver running over input" + input);
     job.setJarByClass(PFPGrowth.class);

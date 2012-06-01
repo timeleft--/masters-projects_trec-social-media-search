@@ -94,7 +94,7 @@ public class TokenIterator extends AbstractIterator<String> {
 			return computeNext();
 		}
 
-		if (result.charAt(0) == '#' || result.charAt(0) == '@') {
+		if (result.charAt(0) == '#') { // || result.charAt(0) == '@') {
 			pendingRes.addLast(result.substring(1));
 		}
 

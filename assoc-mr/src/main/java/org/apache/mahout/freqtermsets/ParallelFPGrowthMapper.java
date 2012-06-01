@@ -66,7 +66,10 @@ public class ParallelFPGrowthMapper extends Mapper<LongWritable,Text,IntWritable
 
     IntArrayList itemArr = new IntArrayList(itemSet.size());
     itemSet.keys(itemArr);
-    itemArr.sort();
+    //YA: why is sort needed here? won't group dependent transactions (below) become
+    // just monotonically increasing lists of items because of this?
+    itemArr.sort(); 
+      
 
     OpenIntHashSet groups = new OpenIntHashSet();
     for (int j = itemArr.size() - 1; j >= 0; j--) {
