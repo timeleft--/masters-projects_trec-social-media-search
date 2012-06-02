@@ -76,7 +76,7 @@ public final class PFPGrowth {
   public static final String FPGROWTH = "fpgrowth";
   public static final String FREQUENT_PATTERNS = "frequentpatterns";
   public static final String PARALLEL_COUNTING = "parallelcounting";
-  public static final String SPLIT_PATTERN = "splitPattern";
+//  public static final String SPLIT_PATTERN = "splitPattern";
   public static final String USE_FPG2 = "use_fpg2";
 //YA 
   //  public static final String MAX_DF_PCT = "maxDFPct";
@@ -416,7 +416,7 @@ public final class PFPGrowth {
     
     HadoopUtil.delete(conf, outPath);
     
-    job.setInputFormatClass(TextInputFormat.class);
+    job.setInputFormatClass(HtmlTweetInputFormat.class);
     job.setMapperClass(ParallelFPGrowthMapper.class);
     job.setCombinerClass(ParallelFPGrowthCombiner.class);
     job.setReducerClass(ParallelFPGrowthReducer.class);

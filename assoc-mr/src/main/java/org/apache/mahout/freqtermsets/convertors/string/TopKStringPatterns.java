@@ -21,6 +21,7 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 
@@ -53,7 +54,7 @@ public final class TopKStringPatterns implements Writable {
     return frequentPatterns;
   }
   
-  public TopKStringPatterns merge(TopKStringPatterns pattern, int heapSize) {
+  public TopKStringPatterns mergeFreq(TopKStringPatterns pattern, int heapSize) {
     List<Pair<List<String>,Long>> patterns = Lists.newArrayList();
     Iterator<Pair<List<String>,Long>> myIterator = frequentPatterns.iterator();
     Iterator<Pair<List<String>,Long>> otherIterator = pattern.iterator();
@@ -80,6 +81,46 @@ public final class TopKStringPatterns implements Writable {
             }
           }
         }
+        if (cmp <= 0) {
+          patterns.add(otherItem);
+          if (cmp == 0) {
+            myItem = null;
+          }
+          otherItem = null;
+        } else if (cmp > 0) {
+          patterns.add(myItem);
+          myItem = null;
+        }
+      } else if (myItem != null) {
+        patterns.add(myItem);
+        myItem = null;
+      } else if (otherItem != null) {
+        patterns.add(otherItem);
+        otherItem = null;
+      } else {
+        break;
+      }
+    }
+    return new TopKStringPatterns(patterns);
+  }
+  
+  public TopKStringPatterns merge(TopKStringPatterns pattern, int heapSize, Comparator<Pair<List<String>,Long>> comparator) {
+    List<Pair<List<String>,Long>> patterns = Lists.newArrayList();
+    Iterator<Pair<List<String>,Long>> myIterator = frequentPatterns.iterator();
+    Iterator<Pair<List<String>,Long>> otherIterator = pattern.iterator();
+    Pair<List<String>,Long> myItem = null;
+    Pair<List<String>,Long> otherItem = null;
+    for (int i = 0; i < heapSize; i++) {
+      if (myItem == null && myIterator.hasNext()) {
+        myItem = myIterator.next();
+      }
+      if (otherItem == null && otherIterator.hasNext()) {
+        otherItem = otherIterator.next();
+      }
+      if (myItem != null && otherItem != null) {
+        
+        int cmp = comparator.compare(myItem, otherItem);
+
         if (cmp <= 0) {
           patterns.add(otherItem);
           if (cmp == 0) {

@@ -25,11 +25,11 @@ public class DumpSeqFilesFolder {
 
 		int pHeapSize = 5000;
 		PrintStream out = new PrintStream(new FileOutputStream(
-		    "/u2/yaboulnaga/Shared/datasets/twitter-trec2011/assoc-mr_0601-1115.csv"),
+		    "/u2/yaboulnaga/Shared/datasets/twitter-trec2011/assoc-mr_debug.csv"),
 //				"D:\\datasets\\twitter-trec2011\\freq-item-sets_supp5-k2500.csv"), 
 				true, "UTF-8");
 
-		String seqPath = "/u2/yaboulnaga/Shared/datasets/twitter-trec2011/assoc-mr_0601-1115/frequentpatterns"; 
+		String seqPath = "/u2/yaboulnaga/Shared/datasets/twitter-trec2011/assoc-mr/frequentpatterns"; 
 //		    "D:\\datasets\\twitter-trec2011\\freq-terms_supp5-k25000";
 
 		FileSystem fs = FileSystem.get(new Configuration());

@@ -60,6 +60,8 @@ public class ParallelFPGrowthReducer extends Reducer<IntWritable,TransactionTree
   private int maxPerGroup;
 
   private boolean useFP2 = true;
+  private int minWordsForLangDetection;
+  private double superiorityRatio;
 
   private static class IteratorAdapter implements Iterator<Pair<List<Integer>,Long>> {
     private Iterator<Pair<IntArrayList,Long>> innerIter;
@@ -115,7 +117,7 @@ public class ParallelFPGrowthReducer extends Reducer<IntWritable,TransactionTree
               featureReverseMap),
           new ContextStatusUpdater<IntWritable,TransactionTree,Text,TopKStringPatterns>(context));
     } else {
-      FPGrowth<Integer> fpGrowth = new FPGrowth<Integer>(featureReverseMap);
+      FPGrowth<Integer> fpGrowth = new FPGrowth<Integer>(featureReverseMap, minWordsForLangDetection, superiorityRatio);
       fpGrowth.generateTopKFrequentPatterns(
           new IteratorAdapter(cTree.iterator()),
           localFList,
@@ -148,6 +150,8 @@ public class ParallelFPGrowthReducer extends Reducer<IntWritable,TransactionTree
     maxPerGroup = params.getInt(PFPGrowth.MAX_PER_GROUP, 0);
     numFeatures = featureReverseMap.size();
     useFP2 = "true".equals(params.get(PFPGrowth.USE_FPG2));
+    minWordsForLangDetection = params.getInt(FPGrowth.MIN_ACCOMPANYING_WORDS_PARAM, 3);
+    superiorityRatio = Double.parseDouble(params.get(FPGrowth.SUPERIORITY_RATIO_PARAM, "1.11"));
 //    useFP2 = !"false".equals(params.get(PFPGrowth.USE_FPG2));
   }
 }

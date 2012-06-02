@@ -86,7 +86,7 @@ public final class FPGrowthDriver extends AbstractJob {
     addOption(PFPGrowth.COUNT_IN, "cnt", "(Optional) In case of mapreduce, if this is set parallel counting will be skipped and counts will be read from the path specified");
 //    addFlag(PFPGrowth.PSEUDO, "ps", "Running on a Pseudo-Cluster (one machine). Uses hardcoded configurations for each job.");
     addOption(PFPGrowth.GROUP_FIS_IN, "gfis", "(Optional) In case of mapreduce, if this is set execution will start from the aggregation phase, and group dependent frequent itemsets will be read from the path specified");
-     
+    addFlag(AggregatorReducer.MUTUAL_INFO_FLAG, "mi", "Set to selec the top K patterns based on the Normalized Mutual Information rather than frequency of pattern"); 
     
     if (parseArguments(args) == null) {
       return -1;
@@ -137,6 +137,10 @@ public final class FPGrowthDriver extends AbstractJob {
     
     if(hasOption(PFPGrowth.GROUP_FIS_IN)) {
       params.set(PFPGrowth.GROUP_FIS_IN, getOption(PFPGrowth.GROUP_FIS_IN));
+    }
+    
+    if(hasOption(AggregatorReducer.MUTUAL_INFO_FLAG)){
+      params.set(AggregatorReducer.MUTUAL_INFO_FLAG, "true");
     }
 
     Path inputDir = getInputPath();

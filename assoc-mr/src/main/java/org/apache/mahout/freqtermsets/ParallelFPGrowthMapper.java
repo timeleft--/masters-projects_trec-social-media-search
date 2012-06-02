@@ -18,18 +18,14 @@
 package org.apache.mahout.freqtermsets;
 
 import java.io.IOException;
-import java.util.regex.Pattern;
 
 import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.mahout.common.Pair;
-
 import org.apache.mahout.common.Parameters;
-import org.apache.mahout.freqtermsets.PFPGrowth;
-import org.apache.mahout.freqtermsets.TransactionTree;
-import org.apache.mahout.freqtermsets.TokenIterator.ASCIITokenIterator;
+import org.apache.mahout.freqtermsets.TokenIterator.LatinTokenIterator;
 import org.apache.mahout.math.list.IntArrayList;
 import org.apache.mahout.math.map.OpenObjectIntHashMap;
 import org.apache.mahout.math.set.OpenIntHashSet;
@@ -39,7 +35,7 @@ import org.apache.mahout.math.set.OpenIntHashSet;
  * outputs the group id as key and the transaction as value
  * 
  */
-public class ParallelFPGrowthMapper extends Mapper<LongWritable,Text,IntWritable,TransactionTree> {
+public class ParallelFPGrowthMapper extends Mapper<Text,Text,IntWritable,TransactionTree> {
 
   private final OpenObjectIntHashMap<String> fMap = new OpenObjectIntHashMap<String>();
 //  private Pattern splitter;
@@ -48,7 +44,7 @@ public class ParallelFPGrowthMapper extends Mapper<LongWritable,Text,IntWritable
   private IntWritable wGroupID = new IntWritable();
 
   @Override
-  protected void map(LongWritable offset, Text input, Context context)
+  protected void map(Text key, Text input, Context context)
     throws IOException, InterruptedException {
 
 //    String[] items = splitter.split(input.toString());
@@ -56,7 +52,7 @@ public class ParallelFPGrowthMapper extends Mapper<LongWritable,Text,IntWritable
     OpenIntHashSet itemSet = new OpenIntHashSet();
 
 //    for (String item : items) {
-    ASCIITokenIterator items = new ASCIITokenIterator(input);
+    LatinTokenIterator items = new LatinTokenIterator(input);
     while (items.hasNext()) {
       String item = items.next();
       if (fMap.containsKey(item) && !item.trim().isEmpty()) {

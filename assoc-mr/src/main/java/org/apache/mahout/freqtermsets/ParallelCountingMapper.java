@@ -22,7 +22,7 @@ import java.io.IOException;
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Mapper;
-import org.apache.mahout.freqtermsets.TokenIterator.ASCIITokenIterator;
+import org.apache.mahout.freqtermsets.TokenIterator.LatinTokenIterator;
 
 /**
  * 
@@ -42,7 +42,7 @@ public class ParallelCountingMapper extends
 			throws IOException, InterruptedException {
 
 		// String[] items = splitter.split(input.toString());
-		ASCIITokenIterator items = new ASCIITokenIterator(input);
+		LatinTokenIterator items = new LatinTokenIterator(input);
 		while (items.hasNext()) {
 			String item = items.next();
 //			if (item.trim().isEmpty()) {

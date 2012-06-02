@@ -10,23 +10,43 @@ import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.Queues;
 
 public class TokenIterator extends AbstractIterator<String> {
-	
-	public static class ASCIITokenIterator extends TokenIterator {
 
-		public ASCIITokenIterator(String string) {
-			super(string);
-		}
-		
-		public ASCIITokenIterator(Text txt) {
-			super(txt);
-		}
-		
-		@Override
-		protected boolean isTokenChar(int c) {
-		
-			return super.isTokenChar(c) && c < 128;
-		}
-	}
+// This is a bad idea since the latin languages cannot be disambiguated 
+//	public static class ASCIITokenIterator extends TokenIterator {
+//
+//		public ASCIITokenIterator(String string) {
+//			super(string);
+//		}
+//		
+//		public ASCIITokenIterator(Text txt) {
+//			super(txt);
+//		}
+//		
+//		@Override
+//		protected boolean isTokenChar(int c) {
+//		
+//			return super.isTokenChar(c) && c < 128;
+//		}
+//	}
+  
+public static class LatinTokenIterator extends TokenIterator {
+
+  public LatinTokenIterator(String string) {
+    super(string);
+  }
+  
+  public LatinTokenIterator(Text txt) {
+    super(txt);
+  }
+  
+  @Override
+  protected boolean isTokenChar(int c) {
+    // Latin and Latin extended are all below '\u024F'
+    return super.isTokenChar(c) && c <= (int) '\u024F';
+  }
+}
+
+  private static final String URL_PLACEHOLDER = "URL";
 
 	//TODONE: is it really better to work with ints?? or is char[] good? Yes.. so that you can have -1 place holders
 	private final char[] chs;
@@ -90,15 +110,20 @@ public class TokenIterator extends AbstractIterator<String> {
 			}
 		}
 
-		if (result.length() < 3) {// || isStopWord(res)) {
+		if (result.length() == 0) { // < 3) {// || isStopWord(res)) {
 			return computeNext();
 		}
 
-		if (result.charAt(0) == '#') { // || result.charAt(0) == '@') {
+		if (result.charAt(0) == '#' && result.length() > 1) { // || result.charAt(0) == '@') {
 			pendingRes.addLast(result.substring(1));
 		}
 
-		return result.toString();
+		String ret = result.toString();
+		if(ret.startsWith("http") || ret.startsWith("www")){
+		  ret = URL_PLACEHOLDER;
+		}
+		
+		return ret;
 	}
 
 	protected boolean isDelimiter(int c) {

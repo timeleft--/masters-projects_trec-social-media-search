@@ -37,6 +37,7 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.Writable;
 import org.apache.hadoop.mapred.OutputCollector;
 import org.apache.mahout.common.Pair;
+import org.apache.mahout.common.Parameters;
 import org.apache.mahout.common.iterator.sequencefile.SequenceFileIterable;
 import org.apache.mahout.freqtermsets.CountDescendingPairComparator;
 import org.apache.mahout.freqtermsets.convertors.StatusUpdater;
@@ -63,15 +64,22 @@ public class FPGrowth<A extends Comparable<? super A>> {
   
   private static final Logger log = LoggerFactory.getLogger(FPGrowth.class);
   
+  public static final String MIN_ACCOMPANYING_WORDS_PARAM = "minWordsForLangDetection";
+
+  public static final String SUPERIORITY_RATIO_PARAM = "superiorityRatioInVotes";
+  
   private final List<String> reverseMapping;
   private final double superiorityRatio;
   private final double superiorityRatioRecip;
   private final Random rand = new Random(System.currentTimeMillis());
   
-  public FPGrowth(List<String> pReverseMapping) {
+  private int minAccompWordsForLangDetect;
+  
+  public FPGrowth(List<String> pReverseMapping, int pMinWordsForLangDetection, double pLangSuperiorityRatio) {
     this.reverseMapping = pReverseMapping;
-    this.superiorityRatio = 1.11;
-    superiorityRatioRecip = 1 / superiorityRatio;
+    this.superiorityRatio = pLangSuperiorityRatio;
+    this.superiorityRatioRecip = 1 / superiorityRatio;
+    this.minAccompWordsForLangDetect = pMinWordsForLangDetection;
   }
   
   public static List<Pair<String, TopKStringPatterns>> readFrequentPattern(Configuration conf,
@@ -238,65 +246,78 @@ public class FPGrowth<A extends Comparable<? super A>> {
         FrequentPatternMaxHeap frequentPatterns = growth(tree, minSupport, k,
             treeCache, 0, attribute, updater);
         
-        HashMap<String, MutableLong> langVotes = Maps.newHashMap();
-        StringBuilder patStr = new StringBuilder();
-        int majorityVoteCnt = (frequentPatterns.count() / 2) + 1;
-        String langSure = null;
-        
         // YA: Detect langauge for attribute by voting from different patterns
+        String langSure = null;
+        int accompanyingWords = 0;
+        
         for (Pattern p : frequentPatterns.getHeap()) {
-          for (int item : p.getPattern()) {
-            String token = reverseMapping.get(item);
-            char ch0 = token.charAt(0);
-            if (ch0 == '#' || ch0 == '@') {
-              continue;
-            }
-            patStr.append(token).append(' ');
-          }
-          
-          String lang = langCat.categorize(patStr.toString());
-          if (!langVotes.containsKey(lang)) {
-            langVotes.put(lang, new MutableLong(0));
-          }
-          MutableLong voteCnt = langVotes.get(lang);
-          voteCnt.add(1);
-          
-          if (voteCnt.longValue() == majorityVoteCnt) {
-            langSure = lang;
+          accompanyingWords += p.getPattern().length - 1;
+          if (accompanyingWords >= minAccompWordsForLangDetect) {
             break;
           }
-          
-          patStr.setLength(0);
         }
         
-        if (frequentPatterns.count() > 0 && langSure == null) {
+        if (accompanyingWords >= minAccompWordsForLangDetect) {
+          HashMap<String, MutableLong> langVotes = Maps.newHashMap();
+          StringBuilder patStr = new StringBuilder();
+          int majorityVoteCnt = (frequentPatterns.count() / 2) + 1;
           
-          int maxVote = Integer.MIN_VALUE;
-          List<String> langCandidates = Lists.newLinkedList();
-          
-          for (Entry<String, MutableLong> voteEntry : langVotes.entrySet()) {
-            double ratio = voteEntry.getValue().doubleValue() / maxVote;
-            if (ratio >= superiorityRatio) {
-              langCandidates.clear();
+          for (Pattern p : frequentPatterns.getHeap()) {
+            for (int item : p.getPattern()) {
+              String token = reverseMapping.get(item);
+              char ch0 = token.charAt(0);
+              if (ch0 == '#' || ch0 == '@') {
+                continue;
+              }
+              patStr.append(token).append(' ');
             }
             
-            if (ratio > superiorityRatioRecip) {
-              langCandidates.add(voteEntry.getKey());
+            String lang = langCat.categorize(patStr.toString());
+            if (!langVotes.containsKey(lang)) {
+              langVotes.put(lang, new MutableLong(0));
+            }
+            MutableLong voteCnt = langVotes.get(lang);
+            voteCnt.add(1);
+            
+            if (voteCnt.longValue() == majorityVoteCnt) {
+              langSure = lang;
+              break;
             }
             
-            if (ratio > 1.0) {
-              maxVote = voteEntry.getValue().intValue();
-            }
+            patStr.setLength(0);
           }
           
-          if (langCandidates.size() > 0) {
-            langSure = langCandidates.get(rand.nextInt(langCandidates.size()));
-          } else {
-            log.warn("Language Candidates is empty! Using 'unknown'. freqPatterns: {}, langVotes: {}",
-                frequentPatterns.getHeap(),
-                langVotes);
-            langSure = "unknown";
+          if (frequentPatterns.count() > 0 && langSure == null) {
+            
+            double maxVote = 1e-9;
+            List<String> langCandidates = Lists.newLinkedList();
+            
+            for (Entry<String, MutableLong> voteEntry : langVotes.entrySet()) {
+              double ratio = voteEntry.getValue().doubleValue() / maxVote;
+              if (ratio >= superiorityRatio) {
+                langCandidates.clear();
+              }
+              
+              if (ratio > superiorityRatioRecip) {
+                langCandidates.add(voteEntry.getKey());
+              }
+              
+              if (ratio > 1.0) {
+                maxVote = voteEntry.getValue().intValue();
+              }
+            }
+            
+            if (langCandidates.size() > 0) {
+              langSure = langCandidates.get(rand.nextInt(langCandidates.size()));
+            } else {
+              log.warn("Language Candidates is empty! Using 'unknown'. freqPatterns: {}, langVotes: {}",
+                  frequentPatterns.getHeap(),
+                  langVotes);
+              langSure = "unknown";
+            }
           }
+        } else {
+          langSure = "unknown";
         }
         
         log.info("Detected language for attribute '{}' to be '{}'",
@@ -428,9 +449,10 @@ public class FPGrowth<A extends Comparable<? super A>> {
     }
     
     // YA: The frequent pattern returned should be k PER item.. so the total
-    // size of the heap should be k * number of items (headerTableCount - i) 
-    int headerTableCount = tree.getHeaderTableCount();    
-    FrequentPatternMaxHeap frequentPatterns = new FrequentPatternMaxHeap(k * (headerTableCount - i),
+    // size of the heap should be k * number of items (headerTableCount - i)
+    int headerTableCount = tree.getHeaderTableCount();
+    FrequentPatternMaxHeap frequentPatterns = new FrequentPatternMaxHeap(
+        k * (headerTableCount - i),
         true);
     
     while (i < headerTableCount) {
