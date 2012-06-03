@@ -4,6 +4,11 @@
   <artifactId>hadoop-util</artifactId>
   <version>0.0.1-SNAPSHOT</version>
   <dependencies>
+		<dependency>
+			<groupId>trec2012</groupId>
+			<artifactId>assoc-mr</artifactId>
+			<version>0.0.1-SNAPSHOT</version>
+		</dependency>
   		<dependency>
 			<groupId>org.slf4j</groupId>
 			<artifactId>slf4j-api</artifactId>
@@ -40,4 +45,38 @@
 			<version>1.2.16</version>
 		</dependency>
   </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>2.5</version>
+        <configuration>
+          <source>1.6</source>
+          <target>1.6</target>
+        </configuration>
+      </plugin>
+<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-shade-plugin</artifactId>
+				<version>1.7</version>
+				<executions>
+					<execution>
+						<phase>package</phase>
+						<goals>
+							<goal>shade</goal>
+						</goals>
+						<configuration>
+							<transformers>
+								<transformer
+									implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+									<mainClass>ca.uwaterloo.hadoop.util.DumpSeqFilesFolder</mainClass>
+								</transformer>
+							</transformers>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+    </plugins>
+  </build>
 </project>

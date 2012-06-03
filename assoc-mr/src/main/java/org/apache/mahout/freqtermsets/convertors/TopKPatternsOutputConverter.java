@@ -1,13 +1,13 @@
 /**
  * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
+ * contributor license agreements. See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.
  * The ASF licenses this file to You under the Apache License, Version 2.0
  * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
+ * the License. You may obtain a copy of the License at
+ * 
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * 
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -23,11 +23,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 
-import com.google.common.collect.Lists;
 import org.apache.hadoop.mapred.OutputCollector;
 import org.apache.mahout.common.Pair;
 import org.apache.mahout.freqtermsets.fpgrowth.FrequentPatternMaxHeap;
 import org.apache.mahout.freqtermsets.fpgrowth.Pattern;
+import org.knallgrau.utils.textcat.TextCategorizer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 
 /**
  * An output converter which converts the output patterns and collects them in a
@@ -36,21 +41,19 @@ import org.apache.mahout.freqtermsets.fpgrowth.Pattern;
  * @param <A>
  */
 public final class TopKPatternsOutputConverter<A extends Comparable<? super A>> implements
-    OutputCollector<Integer,FrequentPatternMaxHeap> {
+    OutputCollector<Integer, FrequentPatternMaxHeap> {
+  private final OutputCollector<A, List<Pair<List<A>, Long>>> collector;
+  private final Map<Integer, A> reverseMapping;
   
-  private final OutputCollector<A,List<Pair<List<A>,Long>>> collector;
-  
-  private final Map<Integer,A> reverseMapping;
-  
-  public TopKPatternsOutputConverter(OutputCollector<A,List<Pair<List<A>,Long>>> collector,
-                                     Map<Integer,A> reverseMapping) {
+  public TopKPatternsOutputConverter(OutputCollector<A, List<Pair<List<A>, Long>>> collector,
+      Map<Integer, A> reverseMapping){
     this.collector = collector;
     this.reverseMapping = reverseMapping;
   }
   
   @Override
   public void collect(Integer key, FrequentPatternMaxHeap value) throws IOException {
-    List<Pair<List<A>,Long>> perAttributePatterns = Lists.newArrayList();
+    List<Pair<List<A>, Long>> perAttributePatterns = Lists.newArrayList();
     PriorityQueue<Pattern> t = value.getHeap();
     while (!t.isEmpty()) {
       Pattern itemSet = t.poll();
@@ -60,7 +63,8 @@ public final class TopKPatternsOutputConverter<A extends Comparable<? super A>> 
       }
       Collections.sort(frequentPattern);
       
-      Pair<List<A>,Long> returnItemSet = new Pair<List<A>,Long>(frequentPattern, itemSet.support());
+      Pair<List<A>, Long> returnItemSet = new Pair<List<A>, Long>(frequentPattern,
+          itemSet.support());
       perAttributePatterns.add(returnItemSet);
     }
     Collections.reverse(perAttributePatterns);

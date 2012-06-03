@@ -49,6 +49,11 @@ import org.apache.mahout.math.list.LongArrayList;
  */
 public class ParallelFPGrowthReducer extends Reducer<IntWritable,TransactionTree,Text,TopKStringPatterns> {
 
+  public static final String MIN_ACCOMPANYING_WORDS_PARAM = "minWordsForLangDetection";
+  
+  public static final String SUPERIORITY_RATIO_PARAM = "superiorityRatioInVotes";
+
+  
   private final List<String> featureReverseMap = Lists.newArrayList();
   private final LongArrayList freqList = new LongArrayList();
   
@@ -114,10 +119,10 @@ public class ParallelFPGrowthReducer extends Reducer<IntWritable,TransactionTree
           PFPGrowth.getGroupMembers(key.get(), maxPerGroup, numFeatures),
           new IntegerStringOutputConverter(
               new ContextWriteOutputCollector<IntWritable,TransactionTree,Text,TopKStringPatterns>(context),
-              featureReverseMap),
+              featureReverseMap,minWordsForLangDetection/*, superiorityRatio*/),
           new ContextStatusUpdater<IntWritable,TransactionTree,Text,TopKStringPatterns>(context));
     } else {
-      FPGrowth<Integer> fpGrowth = new FPGrowth<Integer>(featureReverseMap, minWordsForLangDetection, superiorityRatio);
+      FPGrowth<Integer> fpGrowth = new FPGrowth<Integer>();
       fpGrowth.generateTopKFrequentPatterns(
           new IteratorAdapter(cTree.iterator()),
           localFList,
@@ -128,7 +133,7 @@ public class ParallelFPGrowthReducer extends Reducer<IntWritable,TransactionTree
                                                          numFeatures).toList()),
           new IntegerStringOutputConverter(
               new ContextWriteOutputCollector<IntWritable,TransactionTree,Text,TopKStringPatterns>(context),
-              featureReverseMap),
+              featureReverseMap,minWordsForLangDetection/*, superiorityRatio*/),
           new ContextStatusUpdater<IntWritable,TransactionTree,Text,TopKStringPatterns>(context));
     }
   }
@@ -150,8 +155,8 @@ public class ParallelFPGrowthReducer extends Reducer<IntWritable,TransactionTree
     maxPerGroup = params.getInt(PFPGrowth.MAX_PER_GROUP, 0);
     numFeatures = featureReverseMap.size();
     useFP2 = "true".equals(params.get(PFPGrowth.USE_FPG2));
-    minWordsForLangDetection = params.getInt(FPGrowth.MIN_ACCOMPANYING_WORDS_PARAM, 3);
-    superiorityRatio = Double.parseDouble(params.get(FPGrowth.SUPERIORITY_RATIO_PARAM, "1.11"));
+    minWordsForLangDetection = params.getInt(MIN_ACCOMPANYING_WORDS_PARAM, 3);
+    superiorityRatio = Double.parseDouble(params.get(SUPERIORITY_RATIO_PARAM, "1.11"));
 //    useFP2 = !"false".equals(params.get(PFPGrowth.USE_FPG2));
   }
 }

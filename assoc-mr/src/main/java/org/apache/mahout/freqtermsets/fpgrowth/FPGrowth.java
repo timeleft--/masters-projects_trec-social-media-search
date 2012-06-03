@@ -64,24 +64,6 @@ public class FPGrowth<A extends Comparable<? super A>> {
   
   private static final Logger log = LoggerFactory.getLogger(FPGrowth.class);
   
-  public static final String MIN_ACCOMPANYING_WORDS_PARAM = "minWordsForLangDetection";
-
-  public static final String SUPERIORITY_RATIO_PARAM = "superiorityRatioInVotes";
-  
-  private final List<String> reverseMapping;
-  private final double superiorityRatio;
-  private final double superiorityRatioRecip;
-  private final Random rand = new Random(System.currentTimeMillis());
-  
-  private int minAccompWordsForLangDetect;
-  
-  public FPGrowth(List<String> pReverseMapping, int pMinWordsForLangDetection, double pLangSuperiorityRatio) {
-    this.reverseMapping = pReverseMapping;
-    this.superiorityRatio = pLangSuperiorityRatio;
-    this.superiorityRatioRecip = 1 / superiorityRatio;
-    this.minAccompWordsForLangDetect = pMinWordsForLangDetection;
-  }
-  
   public static List<Pair<String, TopKStringPatterns>> readFrequentPattern(Configuration conf,
       Path path) {
     List<Pair<String, TopKStringPatterns>> ret = Lists.newArrayList();
@@ -225,129 +207,45 @@ public class FPGrowth<A extends Comparable<? super A>> {
    * @param outputCollector
    *          the Collector class which converts the given frequent pattern in
    *          integer to A
-   * @return Top K Frequent Patterns for each feature and their support
    */
-  private Map<String, Map<Integer, FrequentPatternMaxHeap>> fpGrowth(FPTree tree,
+  private void fpGrowth(FPTree tree,
       long minSupportValue,
       int k,
       Collection<Integer> requiredFeatures,
       TopKPatternsOutputConverter<A> outputCollector,
       StatusUpdater updater) throws IOException {
-    Map<String, Map<Integer, FrequentPatternMaxHeap>> result = Maps.newHashMap();
+    // Map<String, Map<Integer, FrequentPatternMaxHeap>> result = Maps.newHashMap();
     // Map<Integer,FrequentPatternMaxHeap> patterns = Maps.newHashMap();
-    TextCategorizer langCat = new TextCategorizer();
     
     FPTreeDepthCache treeCache = new FPTreeDepthCache();
     for (int i = tree.getHeaderTableCount() - 1; i >= 0; i--) {
       int attribute = tree.getAttributeAtIndex(i);
       if (requiredFeatures.contains(attribute)) {
-        log.info("Mining FTree Tree for all patterns with '{}'", reverseMapping.get(attribute)); // attribute);
+        log.info("Mining FTree Tree for all patterns with '{}'", attribute);
         MutableLong minSupport = new MutableLong(minSupportValue);
         FrequentPatternMaxHeap frequentPatterns = growth(tree, minSupport, k,
             treeCache, 0, attribute, updater);
         
-        // YA: Detect langauge for attribute by voting from different patterns
-        String langSure = null;
-        int accompanyingWords = 0;
-        
-        for (Pattern p : frequentPatterns.getHeap()) {
-          accompanyingWords += p.getPattern().length - 1;
-          if (accompanyingWords >= minAccompWordsForLangDetect) {
-            break;
-          }
-        }
-        
-        if (accompanyingWords >= minAccompWordsForLangDetect) {
-          HashMap<String, MutableLong> langVotes = Maps.newHashMap();
-          StringBuilder patStr = new StringBuilder();
-          int majorityVoteCnt = (frequentPatterns.count() / 2) + 1;
-          
-          for (Pattern p : frequentPatterns.getHeap()) {
-            for (int item : p.getPattern()) {
-              String token = reverseMapping.get(item);
-              char ch0 = token.charAt(0);
-              if (ch0 == '#' || ch0 == '@') {
-                continue;
-              }
-              patStr.append(token).append(' ');
-            }
-            
-            String lang = langCat.categorize(patStr.toString());
-            if (!langVotes.containsKey(lang)) {
-              langVotes.put(lang, new MutableLong(0));
-            }
-            MutableLong voteCnt = langVotes.get(lang);
-            voteCnt.add(1);
-            
-            if (voteCnt.longValue() == majorityVoteCnt) {
-              langSure = lang;
-              break;
-            }
-            
-            patStr.setLength(0);
-          }
-          
-          if (frequentPatterns.count() > 0 && langSure == null) {
-            
-            double maxVote = 1e-9;
-            List<String> langCandidates = Lists.newLinkedList();
-            
-            for (Entry<String, MutableLong> voteEntry : langVotes.entrySet()) {
-              double ratio = voteEntry.getValue().doubleValue() / maxVote;
-              if (ratio >= superiorityRatio) {
-                langCandidates.clear();
-              }
-              
-              if (ratio > superiorityRatioRecip) {
-                langCandidates.add(voteEntry.getKey());
-              }
-              
-              if (ratio > 1.0) {
-                maxVote = voteEntry.getValue().intValue();
-              }
-            }
-            
-            if (langCandidates.size() > 0) {
-              langSure = langCandidates.get(rand.nextInt(langCandidates.size()));
-            } else {
-              log.warn("Language Candidates is empty! Using 'unknown'. freqPatterns: {}, langVotes: {}",
-                  frequentPatterns.getHeap(),
-                  langVotes);
-              langSure = "unknown";
-            }
-          }
-        } else {
-          langSure = "unknown";
-        }
-        
-        log.info("Detected language for attribute '{}' to be '{}'",
-            reverseMapping.get(attribute),
-            langSure);
-        
-        // TODO: support more than one language
-        if (!"english".equals(langSure) && !"unknown".equals(langSure)) {
-          continue;
-        }
-        
-        Map<Integer, FrequentPatternMaxHeap> patterns = result.get(langSure);
-        
-        if (patterns == null) {
-          patterns = Maps.newHashMap();
-          result.put(langSure, patterns);
-        }
-        // END YA lang detect
-        patterns.put(attribute, frequentPatterns);
+        // Map<Integer, FrequentPatternMaxHeap> patterns = result.get(langSure);
+        //
+        // if (patterns == null) {
+        // patterns = Maps.newHashMap();
+        // result.put(langSure, patterns);
+        // }
+        //
+        // patterns.put(attribute, frequentPatterns);
         outputCollector.collect(attribute, frequentPatterns);
         
         minSupportValue = Math.max(minSupportValue, minSupport.longValue() / 2);
-        log.info("Found {} Patterns with Least Support {}", patterns.get(
-            attribute).count(), patterns.get(attribute).leastSupport());
+        log.info("Found {} Patterns with Least Support {}",
+            frequentPatterns.count(),
+            frequentPatterns.leastSupport());
       }
     }
     log.info("Tree Cache: First Level: Cache hits={} Cache Misses={}",
         treeCache.getHits(), treeCache.getMisses());
     // return patterns;
-    return result;
+//    return result;
   }
   
   private static FrequentPatternMaxHeap generateSinglePathPatterns(FPTree tree,
@@ -393,9 +291,8 @@ public class FPGrowth<A extends Comparable<? super A>> {
    * @param topKPatternsOutputCollector
    *          the outputCollector which transforms the given Pattern in integer
    *          format to the corresponding A Format
-   * @return Top K frequent patterns for each attribute
    */
-  private Map<String, Map<Integer, FrequentPatternMaxHeap>> generateTopKFrequentPatterns(
+  private void generateTopKFrequentPatterns(
       Iterator<Pair<int[], Long>> transactions,
       long[] attributeFrequency,
       long minSupport,
@@ -431,7 +328,8 @@ public class FPGrowth<A extends Comparable<? super A>> {
     
     log.info("Number of Nodes in the FP Tree: {}", nodecount);
     
-    return fpGrowth(tree, minSupport, k, returnFeatures, topKPatternsOutputCollector, updater);
+//    return 
+     fpGrowth(tree, minSupport, k, returnFeatures, topKPatternsOutputCollector, updater);
   }
   
   private static FrequentPatternMaxHeap growth(FPTree tree,

@@ -1,5 +1,6 @@
 package ca.uwaterloo.hadoop.util;
 
+import java.io.File;
 import java.io.FileOutputStream;
 import java.io.PrintStream;
 import java.util.HashMap;
@@ -23,14 +24,16 @@ public class DumpSeqFilesFolder {
 	 */
 	public static void main(String[] args) throws Exception {
 
-		int pHeapSize = 5000;
-		PrintStream out = new PrintStream(new FileOutputStream(
-		    "/u2/yaboulnaga/Shared/datasets/twitter-trec2011/assoc-mr_debug.csv"),
-//				"D:\\datasets\\twitter-trec2011\\freq-item-sets_supp5-k2500.csv"), 
-				true, "UTF-8");
+//		int pHeapSize = 5000;
 
-		String seqPath = "/u2/yaboulnaga/Shared/datasets/twitter-trec2011/assoc-mr/frequentpatterns"; 
-//		    "D:\\datasets\\twitter-trec2011\\freq-terms_supp5-k25000";
+		String seqPath = args[0];
+
+		PrintStream out = new PrintStream(new FileOutputStream(
+						 seqPath + File.separator + "assoc.csv"), 
+						true, "UTF-8");
+		seqPath += File.separator + "frequentpatterns";
+		
+
 
 		FileSystem fs = FileSystem.get(new Configuration());
 		Path file = new Path(seqPath);
