@@ -23,7 +23,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.PriorityQueue;
-import java.util.regex.Pattern;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.filecache.DistributedCache;
@@ -37,7 +36,6 @@ import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.hadoop.mapreduce.lib.input.SequenceFileInputFormat;
-import org.apache.hadoop.mapreduce.lib.input.TextInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.mapreduce.lib.output.SequenceFileOutputFormat;
 import org.apache.mahout.common.HadoopUtil;
@@ -76,17 +74,22 @@ public final class PFPGrowth {
   public static final String FPGROWTH = "fpgrowth";
   public static final String FREQUENT_PATTERNS = "frequentpatterns";
   public static final String PARALLEL_COUNTING = "parallelcounting";
-//  public static final String SPLIT_PATTERN = "splitPattern";
+  
   public static final String USE_FPG2 = "use_fpg2";
-//YA 
-  //  public static final String MAX_DF_PCT = "maxDFPct";
-//  public static final int MAX_DF_PCT_DEFAULT = 95;
+  // YA
+  public static final String PRUNE_PCTILE = "percentile";
+  public static final int PRUNE_PCTILE_DEFAULT = 95;
+  public static final String MIN_FREQ = "minFreq";
+  public static final int MIN_FREQ_DEFAULT = 33;
   // All those setting are cluster level and cannot be set per job
-//  public static final String PSEUDO = "pseudo";
+  // public static final String PSEUDO = "pseudo";
   public static final String COUNT_IN = "countIn";
   public static final String GROUP_FIS_IN = "gfisIn";
-  // public static final Pattern SPLITTER = Pattern.compile("[ ,\t]*[,|\t][ ,\t]*");
   
+  // Not text input anymore
+  // public static final String SPLIT_PATTERN = "splitPattern";
+  // public static final Pattern SPLITTER = Pattern.compile("[ ,\t]*[,|\t][ ,\t]*");
+  // END YA
   private PFPGrowth() {
   }
   
@@ -119,10 +122,23 @@ public final class PFPGrowth {
       }
       fListLocalPath = new Path(filesURIs[0].getPath());
     }
+    
+    //YA: Lang independent stop words removal
+    // FIXME: as below
+    Parameters params = new Parameters(conf.get("pfp.parameters", ""));
+    int minFr = params.getInt(MIN_FREQ, MIN_FREQ_DEFAULT);
+    int prunePct = params.getInt(PRUNE_PCTILE, PRUNE_PCTILE_DEFAULT);
+
+    long maxFr = new SequenceFileIterable<Text, LongWritable>(
+        fListLocalPath, true, conf).iterator().next().getSecond().get() * prunePct / 100;
     for (Pair<Text, LongWritable> record : new SequenceFileIterable<Text, LongWritable>(
         fListLocalPath, true, conf)) {
+      if (record.getSecond().get() < minFr || record.getSecond().get() > maxFr) {
+        continue;
+      }
       list.add(new Pair<String, Long>(record.getFirst().toString(), record.getSecond().get()));
     }
+    // END YA
     return list;
   }
   
@@ -160,8 +176,8 @@ public final class PFPGrowth {
     Configuration conf = new Configuration();
     
     String countIn = params.get(COUNT_IN);
-    if(countIn == null){
-       countIn = params.get(OUTPUT);
+    if (countIn == null) {
+      countIn = params.get(OUTPUT);
     }
     Path parallelCountingPath = new Path(countIn, PARALLEL_COUNTING);
     
@@ -177,35 +193,23 @@ public final class PFPGrowth {
           }
         });
     
+    // YA: language indipendent stop words.. the 5% most frequent
+    // FIXME: this will remove words from only the mostly used lang
+    // i.e. cannot be used for a multilingual task
+    int minFr = params.getInt(MIN_FREQ, MIN_FREQ_DEFAULT);
+    int prunePct = params.getInt(PRUNE_PCTILE, PRUNE_PCTILE_DEFAULT);
+    long maxFreq = new SequenceFileDirIterable<Text, LongWritable>(
+        new Path(parallelCountingPath, FILE_PATTERN),
+        PathType.GLOB, null, null, true, conf).iterator().next().getSecond().get() * prunePct / 100;
     for (Pair<Text, LongWritable> record : new SequenceFileDirIterable<Text, LongWritable>(
         new Path(parallelCountingPath, FILE_PATTERN),
         PathType.GLOB, null, null, true, conf)) {
       long value = record.getSecond().get();
-      if (value >= minSupport) {
+      if (value >= minFr /* Support */&& value <= maxFreq) {
         queue.add(new Pair<String, Long>(record.getFirst().toString(), value));
       }
     }
     
-    // // FIXME: this will remove words from only the mostly used lang
-    // // i.e. cannot be used for a multilingual task
-    // // YA: language indipendent stop words.. the 5% most frequent..
-    // int maxDocFreqPct = params.getInt(PFPGrowth.MAX_DF_PCT,
-    // PFPGrowth.MAX_DF_PCT_DEFAULT);;
-    // int stopWordsSize = queue.size() * maxDocFreqPct / 100;
-    // int i = 0;
-    //
-    // List<Pair<String,Long>> fList = Lists.newArrayList();
-    //
-    // while (!queue.isEmpty()) {
-    //
-    // if(i<stopWordsSize){
-    // queue.poll();
-    // ++i;
-    // }
-    //
-    // fList.add(queue.poll());
-    // }
-    // return fList.subList(0, fList.size());
     List<Pair<String, Long>> fList = Lists.newArrayList();
     while (!queue.isEmpty()) {
       fList.add(queue.poll());
@@ -266,7 +270,7 @@ public final class PFPGrowth {
     conf.set("io.serializations", "org.apache.hadoop.io.serializer.JavaSerialization,"
         + "org.apache.hadoop.io.serializer.WritableSerialization");
     
-    if(params.get(COUNT_IN) == null){
+    if (params.get(COUNT_IN) == null) {
       startParallelCounting(params, conf);
     }
     
@@ -300,13 +304,13 @@ public final class PFPGrowth {
     conf.set(PFP_PARAMETERS, params.toString());
     conf.set("mapred.compress.map.output", "true");
     conf.set("mapred.output.compression.type", "BLOCK");
-    //YA    
-//    if(Boolean.parseBoolean(params.get(PFPGrowth.PSEUDO, "false"))){
-//      conf.set("mapred.tasktracker.map.tasks.maximum", "6");
-//      conf.set("mapred.map.child.java.opts", "-Xmx1000M");
-//      conf.set("mapred.tasktracker.reduce.tasks.maximum", "6");
-//      conf.set("mapred.reduce.child.java.opts", "-Xmx1000M");
-//    }
+    // YA
+    // if(Boolean.parseBoolean(params.get(PFPGrowth.PSEUDO, "false"))){
+    // conf.set("mapred.tasktracker.map.tasks.maximum", "6");
+    // conf.set("mapred.map.child.java.opts", "-Xmx1000M");
+    // conf.set("mapred.tasktracker.reduce.tasks.maximum", "6");
+    // conf.set("mapred.reduce.child.java.opts", "-Xmx1000M");
+    // }
     conf.setInt("mapred.max.map.failures.percent", 10);
     // END YA
     
@@ -346,13 +350,13 @@ public final class PFPGrowth {
     conf.set("mapred.compress.map.output", "true");
     conf.set("mapred.output.compression.type", "BLOCK");
     
-//    if(Boolean.parseBoolean(params.get(PFPGrowth.PSEUDO, "false"))){
-//      conf.set("mapred.tasktracker.map.tasks.maximum", "3");
-//      conf.set("mapred.tasktracker.reduce.tasks.maximum", "3");
-//      conf.set("mapred.map.child.java.opts", "-Xmx777M");
-//      conf.set("mapred.reduce.child.java.opts", "-Xmx777M");
-//      conf.setInt("mapred.max.map.failures.percent", 0);
-//    }
+    // if(Boolean.parseBoolean(params.get(PFPGrowth.PSEUDO, "false"))){
+    // conf.set("mapred.tasktracker.map.tasks.maximum", "3");
+    // conf.set("mapred.tasktracker.reduce.tasks.maximum", "3");
+    // conf.set("mapred.map.child.java.opts", "-Xmx777M");
+    // conf.set("mapred.reduce.child.java.opts", "-Xmx777M");
+    // conf.setInt("mapred.max.map.failures.percent", 0);
+    // }
     
     String input = params.get(INPUT);
     Job job = new Job(conf, "Parallel Counting Driver running over input: " + input);
@@ -391,12 +395,12 @@ public final class PFPGrowth {
     conf.set("mapred.output.compression.type", "BLOCK");
     
     // YA
-//    if(Boolean.parseBoolean(params.get(PFPGrowth.PSEUDO, "false"))){
-//      conf.set("mapred.tasktracker.map.tasks.maximum", "6");
-//      conf.set("mapred.map.child.java.opts", "-Xmx1000M");
-//      conf.set("mapred.tasktracker.reduce.tasks.maximum", "6");
-//      conf.set("mapred.reduce.child.java.opts", "-Xmx1000M");
-//    }
+    // if(Boolean.parseBoolean(params.get(PFPGrowth.PSEUDO, "false"))){
+    // conf.set("mapred.tasktracker.map.tasks.maximum", "6");
+    // conf.set("mapred.map.child.java.opts", "-Xmx1000M");
+    // conf.set("mapred.tasktracker.reduce.tasks.maximum", "6");
+    // conf.set("mapred.reduce.child.java.opts", "-Xmx1000M");
+    // }
     conf.setInt("mapred.max.map.failures.percent", 10);
     // END YA
     
