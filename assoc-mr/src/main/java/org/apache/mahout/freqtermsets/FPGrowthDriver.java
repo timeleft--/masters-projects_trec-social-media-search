@@ -17,35 +17,16 @@
 
 package org.apache.mahout.freqtermsets;
 
-import com.google.common.io.Closeables;
+import java.io.IOException;
+
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.io.SequenceFile;
-import org.apache.hadoop.io.Text;
 import org.apache.hadoop.util.ToolRunner;
 import org.apache.mahout.common.AbstractJob;
 import org.apache.mahout.common.HadoopUtil;
-import org.apache.mahout.common.Pair;
 import org.apache.mahout.common.Parameters;
-import org.apache.mahout.common.iterator.FileLineIterable;
-import org.apache.mahout.common.iterator.StringRecordIterator;
-import org.apache.mahout.freqtermsets.FPGrowthDriver;
-import org.apache.mahout.freqtermsets.PFPGrowth;
-import org.apache.mahout.freqtermsets.convertors.ContextStatusUpdater;
-import org.apache.mahout.freqtermsets.convertors.SequenceFileOutputCollector;
-import org.apache.mahout.freqtermsets.convertors.string.StringOutputConverter;
-import org.apache.mahout.freqtermsets.convertors.string.TopKStringPatterns;
-import org.apache.mahout.freqtermsets.fpgrowth.FPGrowth;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.io.File;
-import java.io.IOException;
-import java.nio.charset.Charset;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.List;
 
 public final class FPGrowthDriver extends AbstractJob {
 
@@ -80,13 +61,18 @@ public final class FPGrowthDriver extends AbstractJob {
             + " tree building. (Warning) a first level conditional FP-Tree might consume a lot of memory, "
             + "so keep this value small, but big enough to prevent duplicate tree building. "
             + "Default Value:5 Recommended Values: [5-10]", "5");
-    addOption("method", "method", "Method of processing: sequential|mapreduce", "mapreduce"); //"sequential");
+//    addOption("method", "method", "Method of processing: sequential|mapreduce", "mapreduce"); //"sequential");
     addOption("encoding", "e", "(Optional) The file encoding.  Default value: UTF-8", "UTF-8");
-    addFlag("useFPG2", "2", "Use an alternate FPG implementation");
+//    addFlag("useFPG2", "2", "Use an alternate FPG implementation");
     addOption(PFPGrowth.COUNT_IN, "cnt", "(Optional) In case of mapreduce, if this is set parallel counting will be skipped and counts will be read from the path specified");
 //    addFlag(PFPGrowth.PSEUDO, "ps", "Running on a Pseudo-Cluster (one machine). Uses hardcoded configurations for each job.");
     addOption(PFPGrowth.GROUP_FIS_IN, "gfis", "(Optional) In case of mapreduce, if this is set execution will start from the aggregation phase, and group dependent frequent itemsets will be read from the path specified");
-    addFlag(AggregatorReducer.MUTUAL_INFO_FLAG, "mi", "Set to selec the top K patterns based on the Normalized Mutual Information rather than frequency of pattern"); 
+    addFlag(AggregatorReducer.MUTUAL_INFO_FLAG, "mi", "Set to selec the top K patterns based on the Normalized Mutual Information rather than frequency of pattern");
+    addOption(ParallelFPGrowthReducer.MIN_WORDS_FOR_LANG_ID, "lid", "The mimun length of a pattern that would be used for language identification");
+    addOption(PFPGrowth.MIN_FREQ, "mf", "The minimum frequency of a token. Any token with less frequency will be pruned from the begining.");
+    addOption(PFPGrowth.PRUNE_PCTILE, "pct", "The percentile of frequencies that will be considered; any token with a higher frequency will be pruned");
+    addFlag(TokenIterator.PARAM_REPEAT_HASHTAG, "rht", "If set, each hashtag is repeated, removing the # sign from the second token returned for the same hashtag");
+    
     
     if (parseArguments(args) == null) {
       return -1;
@@ -123,9 +109,9 @@ public final class FPGrowthDriver extends AbstractJob {
     }
     params.set("encoding", encoding);
 
-    if (hasOption("useFPG2")) {
-      params.set(PFPGrowth.USE_FPG2, "true");
-    }
+//    if (hasOption("useFPG2")) {
+//      params.set(PFPGrowth.USE_FPG2, "true");
+//    }
     
     if(hasOption(PFPGrowth.COUNT_IN)){
       params.set(PFPGrowth.COUNT_IN, getOption(PFPGrowth.COUNT_IN));
@@ -141,22 +127,40 @@ public final class FPGrowthDriver extends AbstractJob {
     
     if(hasOption(AggregatorReducer.MUTUAL_INFO_FLAG)){
       params.set(AggregatorReducer.MUTUAL_INFO_FLAG, "true");
+    } else {
+      params.set(AggregatorReducer.MUTUAL_INFO_FLAG, "false");
     }
-
+    
+    if(hasOption(ParallelFPGrowthReducer.MIN_WORDS_FOR_LANG_ID)){
+      params.set(ParallelFPGrowthReducer.MIN_WORDS_FOR_LANG_ID, getOption(ParallelFPGrowthReducer.MIN_WORDS_FOR_LANG_ID));
+    }
+    
+    if(hasOption(PFPGrowth.MIN_FREQ)){
+      params.set(PFPGrowth.MIN_FREQ, getOption(PFPGrowth.MIN_FREQ));
+    }
+    
+    if(hasOption(PFPGrowth.PRUNE_PCTILE)){
+      params.set(PFPGrowth.PRUNE_PCTILE, getOption(PFPGrowth.PRUNE_PCTILE));
+    }
+    
+    if(hasOption(TokenIterator.PARAM_REPEAT_HASHTAG)){
+      params.set(TokenIterator.PARAM_REPEAT_HASHTAG, "true");
+    }
+      
     Path inputDir = getInputPath();
     Path outputDir = getOutputPath();
 
     params.set("input", inputDir.toString());
     params.set("output", outputDir.toString());
 
-    String classificationMethod = getOption("method");
-    if ("sequential".equalsIgnoreCase(classificationMethod)) {
-      runFPGrowth(params);
-    } else if ("mapreduce".equalsIgnoreCase(classificationMethod)) {
+//    String classificationMethod = getOption("method");
+//    if ("sequential".equalsIgnoreCase(classificationMethod)) {
+//      runFPGrowth(params);
+//    } else if ("mapreduce".equalsIgnoreCase(classificationMethod)) {
       Configuration conf = new Configuration();
       HadoopUtil.delete(conf, outputDir);
       PFPGrowth.runPFPGrowth(params);
-    }
+//    }
 
     return 0;
   }

@@ -39,6 +39,9 @@ public class AggregatorMapper extends Mapper<Text,TopKStringPatterns,Text,TopKSt
                                                                           InterruptedException {
     for (Pair<List<String>,Long> pattern : values.getPatterns()) {
       for (String item : pattern.getFirst()) {
+        if(item.charAt(0) == AggregatorReducer.METADATA_PREFIX){
+          continue;
+        }
         List<Pair<List<String>,Long>> patternSingularList = Lists.newArrayList();
         patternSingularList.add(pattern);
         context.setStatus("Aggregator Mapper:Grouping Patterns for " + item);

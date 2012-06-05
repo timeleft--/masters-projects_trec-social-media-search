@@ -19,7 +19,6 @@ package org.apache.mahout.freqtermsets;
 
 import java.io.IOException;
 import java.util.Comparator;
-import java.util.Iterator;
 import java.util.List;
 
 import org.apache.commons.io.FileUtils;
@@ -42,7 +41,7 @@ import org.apache.mahout.math.map.OpenObjectLongHashMap;
  * 
  */
 public class AggregatorReducer extends Reducer<Text, TopKStringPatterns, Text, TopKStringPatterns> {
-  
+  public static final char METADATA_PREFIX = '_';
   public static final String MUTUAL_INFO_FLAG = "mutualInfo";
   private int maxHeapSize = 50;
   private final OpenObjectLongHashMap<String> fMap = new OpenObjectLongHashMap<String>();
@@ -56,25 +55,42 @@ public class AggregatorReducer extends Reducer<Text, TopKStringPatterns, Text, T
       throws IOException,
       InterruptedException {
     
+    // YA get data to do more than freq merge
+    int myMaxHeapSize = maxHeapSize;
     Configuration conf = context.getConfiguration();
     FileSystem fs = FileSystem.getLocal(conf);
     String cachePath = FilenameUtils.concat(FileUtils.getTempDirectory().toURI().toString(), Thread
         .currentThread().getName() + "_" + key.hashCode() + "_patterns");
-    
     org.apache.hadoop.io.ArrayFile.Writer cacheWr = new ArrayFile.Writer(conf, fs, cachePath,
         TopKStringPatterns.class);
-    
     final String keyStr = key.toString();
     final OpenObjectLongHashMap<String> jointFreq = new OpenObjectLongHashMap<String>();
+    
+    TopKStringPatterns metaPatterns = new TopKStringPatterns();
+    
     for (TopKStringPatterns value : values) {
-      cacheWr.append(value);
-      Iterator<Pair<List<String>, Long>> iter = value.iterator();
-      while (iter.hasNext()) {
-        Pair<List<String>, Long> pattern = iter.next();
+      
+      List<Pair<List<String>, Long>> vPatterns = value.getPatterns();
+      for(int p = vPatterns.size() - 1; p >= 0; --p){
+        Pair<List<String>, Long> pattern = vPatterns.get(p);
         if (pattern == null) {
           continue; // just like their merge
         }
         for (String other : pattern.getFirst()) {
+          if(other.charAt(0) == METADATA_PREFIX){
+            // Keep metadata out of merge
+            vPatterns.remove(p);
+            
+            // Make sure it has space to be merged
+            ++myMaxHeapSize;
+            
+            // Store the metadata temporarily.. we will add it in the end
+            // where it can't be pruned out
+            metaPatterns.getPatterns().add(pattern);
+            
+            // done processing metadata itemset
+            break;
+          }
           if (keyStr.equals(other)) {
             continue;
           }
@@ -85,17 +101,22 @@ public class AggregatorReducer extends Reducer<Text, TopKStringPatterns, Text, T
           jointFreq.put(other, freq);
         }
       }
+      
+      cacheWr.append(value);
     }
     cacheWr.close();
     
     org.apache.hadoop.io.ArrayFile.Reader cacheRd = new ArrayFile.Reader(fs, cachePath, conf);
+    // END YA get data
     
     TopKStringPatterns patterns = new TopKStringPatterns();
     TopKStringPatterns value = new TopKStringPatterns();
     while (cacheRd.next(value) != null) {
       context.setStatus("Aggregator Reducer: Selecting TopK patterns for: " + key);
+      
+      // YA Mutual info merge.. TODO: more metrics passed as class name of comparator
       if (sortByMutualInfo) {
-        patterns = patterns.merge(value, maxHeapSize, new Comparator<Pair<List<String>, Long>>() {
+        patterns = patterns.merge(value, myMaxHeapSize, new Comparator<Pair<List<String>, Long>>() {
           
           private double calcNormalizedMutualInfo(String[] bagOfTokens) {
             double numer = 0;
@@ -145,13 +166,24 @@ public class AggregatorReducer extends Reducer<Text, TopKStringPatterns, Text, T
             return result;
           }
         });
+        // END YA Mutual info merge
       } else {
-        patterns = patterns.mergeFreq(value, maxHeapSize);
+        patterns = patterns.mergeFreq(value, myMaxHeapSize);
       }
     }
     
+    // YA get data
     cacheRd.close();
     fs.delete(new Path(cachePath), true);
+    
+    patterns = patterns.merge(metaPatterns, myMaxHeapSize, new Comparator<Pair<List<String>,Long>>() {
+      @Override
+      public int compare(Pair<List<String>, Long> o1, Pair<List<String>, Long> o2) {
+        // Force the metadata to be accepted
+        return -1;
+      }
+    });
+    // END YA get data
     
     context.write(key, patterns);
   }

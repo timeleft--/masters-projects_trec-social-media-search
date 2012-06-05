@@ -86,6 +86,7 @@ public final class PFPGrowth {
   public static final String COUNT_IN = "countIn";
   public static final String GROUP_FIS_IN = "gfisIn";
   
+  
   // Not text input anymore
   // public static final String SPLIT_PATTERN = "splitPattern";
   // public static final Pattern SPLITTER = Pattern.compile("[ ,\t]*[,|\t][ ,\t]*");
@@ -133,10 +134,12 @@ public final class PFPGrowth {
         fListLocalPath, true, conf).iterator().next().getSecond().get() * prunePct / 100;
     for (Pair<Text, LongWritable> record : new SequenceFileIterable<Text, LongWritable>(
         fListLocalPath, true, conf)) {
-      if (record.getSecond().get() < minFr || record.getSecond().get() > maxFr) {
+      String token = record.getFirst().toString();
+      char ch0 = token.charAt(0); 
+      if ((ch0 != '#' && ch0 != '@') && (record.getSecond().get() < minFr || record.getSecond().get() > maxFr)) {
         continue;
       }
-      list.add(new Pair<String, Long>(record.getFirst().toString(), record.getSecond().get()));
+      list.add(new Pair<String, Long>(token, record.getSecond().get()));
     }
     // END YA
     return list;
@@ -204,9 +207,11 @@ public final class PFPGrowth {
     for (Pair<Text, LongWritable> record : new SequenceFileDirIterable<Text, LongWritable>(
         new Path(parallelCountingPath, FILE_PATTERN),
         PathType.GLOB, null, null, true, conf)) {
+      String token = record.getFirst().toString();
+      char ch0 = token.charAt(0);
       long value = record.getSecond().get();
-      if (value >= minFr /* Support */&& value <= maxFreq) {
-        queue.add(new Pair<String, Long>(record.getFirst().toString(), value));
+      if ((ch0 == '#' || ch0 == '@') || (value >= minFr /* Support */&& value <= maxFreq)) {
+        queue.add(new Pair<String, Long>(token, value));
       }
     }
     

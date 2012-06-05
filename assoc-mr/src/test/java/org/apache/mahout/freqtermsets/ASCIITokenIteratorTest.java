@@ -54,8 +54,17 @@ public class ASCIITokenIteratorTest {
   }
   
   @Test
-  public void testHashtags() {
+  public void testHashtagsNorep() {
     TokenIterator target = new TokenIterator("#hashtag");
+    target.setRepeatHashTag(false);
+    assertEquals("#hashtag", target.next());
+    assertFalse(target.hasNext());
+  }
+
+  @Test
+  public void testHashtagsRepeat() {
+    TokenIterator target = new TokenIterator("#hashtag");
+    target.setRepeatHashTag(true);
     assertEquals("#hashtag", target.next());
     assertEquals("hashtag", target.next());
     assertFalse(target.hasNext());

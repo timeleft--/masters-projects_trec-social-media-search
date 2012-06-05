@@ -49,10 +49,8 @@ import org.apache.mahout.math.list.LongArrayList;
  */
 public class ParallelFPGrowthReducer extends Reducer<IntWritable,TransactionTree,Text,TopKStringPatterns> {
 
-  public static final String MIN_ACCOMPANYING_WORDS_PARAM = "minWordsForLangDetection";
-  
-  public static final String SUPERIORITY_RATIO_PARAM = "superiorityRatioInVotes";
-
+  public static final String MIN_WORDS_FOR_LANG_ID = "lenLangId";
+  public static final int MIN_WORDS_FOR_LANG_ID_DEFAULT = 3;
   
   private final List<String> featureReverseMap = Lists.newArrayList();
   private final LongArrayList freqList = new LongArrayList();
@@ -64,9 +62,10 @@ public class ParallelFPGrowthReducer extends Reducer<IntWritable,TransactionTree
   private int numFeatures;
   private int maxPerGroup;
 
-  private boolean useFP2 = true;
+//  private boolean useFP2 = true;
   private int minWordsForLangDetection;
-  private double superiorityRatio;
+//  private double superiorityRatio;
+  private boolean repeatHashTag;
 
   private static class IteratorAdapter implements Iterator<Pair<List<Integer>,Long>> {
     private Iterator<Pair<IntArrayList,Long>> innerIter;
@@ -108,20 +107,20 @@ public class ParallelFPGrowthReducer extends Reducer<IntWritable,TransactionTree
     
     Collections.sort(localFList, new CountDescendingPairComparator<Integer,Long>());
     
-    if (useFP2) {
-      org.apache.mahout.freqtermsets.fpgrowth2.FPGrowthIds fpGrowth = 
-        new org.apache.mahout.freqtermsets.fpgrowth2.FPGrowthIds(featureReverseMap);
-      fpGrowth.generateTopKFrequentPatterns(
-          cTree.iterator(),
-          freqList,
-          minSupport,
-          maxHeapSize,
-          PFPGrowth.getGroupMembers(key.get(), maxPerGroup, numFeatures),
-          new IntegerStringOutputConverter(
-              new ContextWriteOutputCollector<IntWritable,TransactionTree,Text,TopKStringPatterns>(context),
-              featureReverseMap,minWordsForLangDetection/*, superiorityRatio*/),
-          new ContextStatusUpdater<IntWritable,TransactionTree,Text,TopKStringPatterns>(context));
-    } else {
+//    if (useFP2) {
+//      org.apache.mahout.freqtermsets.fpgrowth2.FPGrowthIds fpGrowth = 
+//        new org.apache.mahout.freqtermsets.fpgrowth2.FPGrowthIds(featureReverseMap);
+//      fpGrowth.generateTopKFrequentPatterns(
+//          cTree.iterator(),
+//          freqList,
+//          minSupport,
+//          maxHeapSize,
+//          PFPGrowth.getGroupMembers(key.get(), maxPerGroup, numFeatures),
+//          new IntegerStringOutputConverter(
+//              new ContextWriteOutputCollector<IntWritable,TransactionTree,Text,TopKStringPatterns>(context),
+//              featureReverseMap,minWordsForLangDetection/*, superiorityRatio*/),
+//          new ContextStatusUpdater<IntWritable,TransactionTree,Text,TopKStringPatterns>(context));
+//    } else {
       FPGrowth<Integer> fpGrowth = new FPGrowth<Integer>();
       fpGrowth.generateTopKFrequentPatterns(
           new IteratorAdapter(cTree.iterator()),
@@ -133,9 +132,9 @@ public class ParallelFPGrowthReducer extends Reducer<IntWritable,TransactionTree
                                                          numFeatures).toList()),
           new IntegerStringOutputConverter(
               new ContextWriteOutputCollector<IntWritable,TransactionTree,Text,TopKStringPatterns>(context),
-              featureReverseMap,minWordsForLangDetection/*, superiorityRatio*/),
+              featureReverseMap,minWordsForLangDetection/*, superiorityRatio*/, repeatHashTag),
           new ContextStatusUpdater<IntWritable,TransactionTree,Text,TopKStringPatterns>(context));
-    }
+//    }
   }
   
   @Override
@@ -154,9 +153,10 @@ public class ParallelFPGrowthReducer extends Reducer<IntWritable,TransactionTree
 
     maxPerGroup = params.getInt(PFPGrowth.MAX_PER_GROUP, 0);
     numFeatures = featureReverseMap.size();
-    useFP2 = "true".equals(params.get(PFPGrowth.USE_FPG2));
-    minWordsForLangDetection = params.getInt(MIN_ACCOMPANYING_WORDS_PARAM, 3);
-    superiorityRatio = Double.parseDouble(params.get(SUPERIORITY_RATIO_PARAM, "1.11"));
+//    useFP2 = "true".equals(params.get(PFPGrowth.USE_FPG2));
+    minWordsForLangDetection = params.getInt(MIN_WORDS_FOR_LANG_ID, MIN_WORDS_FOR_LANG_ID_DEFAULT);
+//    superiorityRatio = Double.parseDouble(params.get(SUPERIORITY_RATIO_PARAM, "1.11"));
 //    useFP2 = !"false".equals(params.get(PFPGrowth.USE_FPG2));
+    repeatHashTag = Boolean.parseBoolean(params.get(TokenIterator.PARAM_REPEAT_HASHTAG, "false"));
   }
 }
