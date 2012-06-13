@@ -6,7 +6,10 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.Map.Entry;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 
 import org.apache.commons.cli.CommandLine;
@@ -32,22 +35,25 @@ import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.MMapDirectory;
 import org.apache.lucene.util.Version;
 import org.apache.mahout.common.Pair;
+import org.apache.mahout.math.list.IntArrayList;
 import org.apache.mahout.math.map.OpenIntFloatHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
+import com.google.common.collect.Sets.SetView;
 
 public class QueryExpander {
   private static Logger LOG = LoggerFactory.getLogger(QueryExpander.class);
   
   private static final String INDEX_OPTION = "index";
   
-  // private static final String BASE_BOOST_OPTION = "base_boost";
-  private static final float BASE_BOOST_DEFAULT = 10.0f;
+  // private static final String BASE_PARAM_OPTION = "base_param";
+  private static final float BASE_PARAM_DEFAULT = 60.0f;
   
-  private static final String MIN_SCORE_OPTION = "base_boost";
-  private static final float MIN_SCORE_DEFAULT = 1.0f;
+  private static final String MIN_SCORE_OPTION = "min_score";
+  private static final float MIN_SCORE_DEFAULT = 3.0f;
   
   private static final int NUM_HITS_DEFAULT = 100;
   
@@ -67,7 +73,7 @@ public class QueryExpander {
     options.addOption(OptionBuilder.withArgName("path").hasArg()
         .withDescription("index location").create(INDEX_OPTION));
     // options.addOption(OptionBuilder.withArgName("float").hasArg()
-    // .withDescription("boost that would be given to top level queries and reduced in lower levels").create(BASE_BOOST_OPTION));
+    // .withDescription("parameter that would be used to rank top level queries and reduced in lower levels").create(BASE_PARAM_OPTION));
     options.addOption(OptionBuilder.withArgName("float").hasArg()
         .withDescription("score for accepting a document into the resultset")
         .create(MIN_SCORE_OPTION));
@@ -93,14 +99,14 @@ public class QueryExpander {
       System.exit(-1);
     }
     
-    // float baseBoost = BASE_BOOST_DEFAULT;
+    // float baseBoost = BASE_PARAM_DEFAULT;
     // try {
-    // if (cmdline.hasOption(BASE_BOOST_OPTION)) {
-    // baseBoost = Float.parseFloat(cmdline.getOptionValue(BASE_BOOST_OPTION));
+    // if (cmdline.hasOption(BASE_PARAM_OPTION)) {
+    // baseBoost = Float.parseFloat(cmdline.getOptionValue(BASE_PARAM_OPTION));
     // }
     // } catch (NumberFormatException e) {
-    // System.err.println("Invalid " + BASE_BOOST_OPTION + ": "
-    // + cmdline.getOptionValue(BASE_BOOST_OPTION));
+    // System.err.println("Invalid " + BASE_PARAM_OPTION + ": "
+    // + cmdline.getOptionValue(BASE_PARAM_OPTION));
     // System.exit(-1);
     // }
     
@@ -136,14 +142,14 @@ public class QueryExpander {
         continue;
       }
       
-      TreeSet<ScoreIxObj<Integer>> rs = qEx.relatedItemsets(query.toString(), minScore);
-      Pair<String[], Float>[] itemsets = qEx.convertResultToItemsets(rs);
+      OpenIntFloatHashMap rs = qEx.relatedItemsets(query.toString(), minScore);
+      LinkedHashMap<Set<String>, Float> itemsets = qEx.convertResultToItemsets(rs,-1);
       
       out.println();
       out.println(">" + query.toString());
       int i = 0;
-      for (Pair<String[], Float> hit : itemsets) {
-        out.println(++i + " (" + hit.getSecond() + "): " + Arrays.toString(hit.getFirst()));
+      for (Entry<Set<String>, Float> hit : itemsets.entrySet()) {
+        out.println(++i + " (" + hit.getValue() + "): " + hit.getKey().toString());
         // + "\t"
         // + hit.get(IndexBuilder.AssocField.RANK.name) + "\t"
         // + hit.get(IndexBuilder.AssocField.SUPPORT.name));
@@ -158,7 +164,7 @@ public class QueryExpander {
   private IndexReader ixReader;
   
   private int numHits = NUM_HITS_DEFAULT;
-  private float baseBoost = BASE_BOOST_DEFAULT;
+  private float baseRankingParam = BASE_PARAM_DEFAULT;
   
   private ItemSetSimilariry similarity;
   
@@ -175,7 +181,7 @@ public class QueryExpander {
     qparser.setDefaultOperator(Operator.AND);
   }
   
-  public TreeSet<ScoreIxObj<Integer>> relatedItemsets(String queryStr, float minScore)
+  public OpenIntFloatHashMap relatedItemsets(String queryStr, float minScore)
       throws IOException,
       org.apache.lucene.queryParser.ParseException {
     if (queryStr == null || queryStr.isEmpty()) {
@@ -207,38 +213,34 @@ public class QueryExpander {
       for (int i = 0; i < queryTerms.size() - 1; ++i) {
         for (int j = i + 1; j < queryTerms.size(); ++j) {
           Query pairQuery = qparser.parse(queryArr[i] + " " + queryArr[j]);
-          pairQuery.setBoost((2.0f / queryTerms.size()) * baseBoost);
+          pairQuery.setBoost((2.0f / queryTerms.size())); // * baseBoost);
           query.add(pairQuery, Occur.SHOULD);
         }
       }
       queryArr = null;
     }
     
-    TreeSet<ScoreIxObj<Integer>> result = Sets.<ScoreIxObj<Integer>> newTreeSet();
+    OpenIntFloatHashMap resultSet = new OpenIntFloatHashMap();
     TopDocs rs = searcher.search(query, numHits);
     
-    Set<ScoreIxObj<String>> extraTerms = Sets.<ScoreIxObj<String>> newHashSet();
+    Set<ScoreIxObj<String>> extraTerms = Sets.<ScoreIxObj<String>>newHashSet();
     
-    int levelHits = addQualifiedResults(rs, result, queryTerms, extraTerms, minScore);
+    int levelHits = addQualifiedResults(rs, resultSet, queryTerms, extraTerms, minScore, baseRankingParam);
     LOG.debug("Added {} results from the query {}", levelHits, query.toString());
     
     Set<ScoreIxObj<String>> doneTerms = Sets.<ScoreIxObj<String>> newHashSet();
     
-    int level = 1;
-    while (extraTerms.size() > 0 && result.size() < numHits) {
-      float boost = (baseBoost - level) * (1.5f / queryTerms.size());
-      if (boost <= 0) {
-        break;
-      }
-      
+    int level = 0;
+    while (extraTerms.size() > 0) {
+      ++level;
+      float fusionK = (float) (baseRankingParam + Math.pow(10, level));
       extraTerms = expandRecursive(queryTerms,
           extraTerms,
           doneTerms,
-          result,
+          resultSet,
           numHits,
           minScore,
-          boost);
-      ++level;
+          fusionK);
     }
     
     // for (int i = levelHits; i < rs.scoreDocs.length && result.size() < numHits; ++i) {
@@ -246,19 +248,32 @@ public class QueryExpander {
     // ScoreIxObj<Integer>(rs.scoreDocs[i].doc,rs.scoreDocs[i].score,rs.scoreDocs[i].shardIndex));
     // }
     
-    return result;
+    return resultSet;
   }
   
-  public Pair<String[], Float>[] convertResultToItemsets(TreeSet<ScoreIxObj<Integer>> rs)
+  /**
+   * Side effect: removes duplicates after converting docids to actual itemsets
+   * @param rs
+   * @return
+   * @throws IOException
+   */
+  public LinkedHashMap<Set<String>, Float> convertResultToItemsets(OpenIntFloatHashMap rs, int numResults)
       throws IOException {
-    Pair<String[], Float>[] result = new Pair[rs.size()];
+    LinkedHashMap<Set<String>, Float> result = Maps.<Set<String>, Float>newLinkedHashMap();
     
-    int i = 0;
-    for (ScoreIxObj<Integer> doc : rs) {
-      TermFreqVector terms = ixReader.getTermFreqVector(doc.obj,
+    IntArrayList keyList = new IntArrayList(rs.size());
+    rs.keysSortedByValue(keyList);
+    
+    int i = rs.size()-1;
+    if(numResults > 0 && i > numResults-1){
+      i = numResults-1;
+    }
+    while(i>=0){
+      int doc = keyList.getQuick(i);
+      TermFreqVector terms = ixReader.getTermFreqVector(doc,
           IndexBuilder.AssocField.ITEMSET.name);
-      result[i] = new Pair<String[], Float>(terms.getTerms(), doc.score);
-      ++i;
+      result.put(Sets.newHashSet(terms.getTerms()), rs.get(doc));
+      --i;
     }
     // Could also use something like toString then .replaceAll("[\\,\\[\\]]", "");
     return result;
@@ -283,17 +298,13 @@ public class QueryExpander {
       }
       ++rank;
       
-      ScoreIxObj<Integer> scoreIxObj = new ScoreIxObj<Integer>(scoreDoc.doc,
-          1.0f / (fusionK + rank), 
-//          scoreDoc.score,
-          scoreDoc.shardIndex);
-      
-      if (!result.contains(scoreIxObj)) {
-        result.add(scoreIxObj);
-        ++levelHits;        
-      } else {
-        result.remove(o)
+      if(!result.containsKey(scoreDoc.doc)){
+        ++levelHits;    
       }
+      
+      float fusion = result.get(scoreDoc.doc);
+      fusion += 1.0f / (fusionK + rank);
+      result.put(scoreDoc.doc, fusion);
       
       TermFreqVector termVector = ixReader.getTermFreqVector(scoreDoc.doc,
           IndexBuilder.AssocField.ITEMSET.name);
@@ -301,17 +312,20 @@ public class QueryExpander {
         if (queryTerms.contains(term)) {
           continue;
         }
-        extraTerms.add(new ScoreIxObj<String>(term, scoreDoc.score));
+        extraTerms.add(new ScoreIxObj<String>(term, fusion));
+//        fusion = extraTerms.get(term);
+//        fusion += 1.0f / (fusionK + rank);
+//        extraTerms.put(term,fusion);
       }
     }
     
     return levelHits;
   }
   
-  private Set<ScoreIxObj<String>> expandRecursive(Set<String> queryTerms,
+  private SetView<ScoreIxObj<String>> expandRecursive(Set<String> queryTerms,
       Set<ScoreIxObj<String>> extraTerms,
       Set<ScoreIxObj<String>> doneTerms,
-      TreeSet<ScoreIxObj<Integer>> result, int numHits, float minScore, float boost)
+      OpenIntFloatHashMap resultSet, int levelNumHits, float levelMinScore, float levelRankingParam)
       throws org.apache.lucene.queryParser.ParseException,
       IOException {
     
@@ -368,25 +382,20 @@ public class QueryExpander {
     // LOG.debug("Added {} results from the query {}", levelHits, query.toString());
     
     for (String qterm : queryTerms) {
-      float qtermBoost = boost * similarity.idf(ixReader.docFreq(new
-          Term(IndexBuilder.AssocField.ITEMSET.name, qterm)), ixReader.numDocs());
       for (ScoreIxObj<String> xterm : extraTerms) {
         assert !doneTerms.contains(xterm);
         
-        Query xtermQuery = qparser.parse(qterm + "^" + qtermBoost + " " + xterm.obj + "^"
-            + (xterm.score * boost));
-        // Score doesn't have any effect this way
-        // xtermQuery.setBoost(xterm.score * boost);
+        Query xtermQuery = qparser.parse(qterm + " " + xterm.toString());
         
-        TopDocs rs = searcher.search(xtermQuery, numHits);
+        TopDocs rs = searcher.search(xtermQuery, levelNumHits);
         
-        int levelHits = addQualifiedResults(rs, result, queryTerms, extraTerms2, minScore);
+        int levelHits = addQualifiedResults(rs, resultSet, queryTerms, extraTerms2, levelMinScore, levelRankingParam);
         LOG.debug("Added {} results from the query {}", levelHits, xtermQuery.toString());
       }
     }
     
     doneTerms.addAll(extraTerms);
-    return Sets.difference(extraTerms2, doneTerms);
+    return Sets.difference(extraTerms2, doneTerms); 
     
   }
   
