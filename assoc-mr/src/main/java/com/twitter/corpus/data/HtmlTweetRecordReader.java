@@ -32,13 +32,13 @@ public class HtmlTweetRecordReader extends RecordReader<Text, Text>  {
     if(reader.nextKeyValue()){
       HtmlStatus origValue = reader.getCurrentValue();
       int httpStatus = origValue.getHttpStatusCode();
-      if(httpStatus >= 400){
+      
+      // Note that http status code 302 indicates a redirect, which indicates a retweet. I.e.,
+      // the status redirects to the original retweeted status. Note that this is not currently
+      // handled. We neglect retweets. 301 indicates a changed username, but content is null
+      if(httpStatus >= 300){
         return nextKeyValue();
       } else {
-        // TODO: Note that http status code 302 indicates a redirect, which indicates a retweet. I.e.,
-        // the status redirects to the original retweeted status. Note that this is not currently
-        // handled.
-
         PairOfLongString origKey = reader.getCurrentKey();
         myKey = new Text(origKey.getRightElement() + "/" + origKey.getLeftElement());
         String html = origValue.getHtml();

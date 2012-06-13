@@ -174,7 +174,7 @@ public final class PFPGrowth {
    * 
    * @return Feature Frequency List
    */
-  public static List<Pair<String, Long>> readFList(Parameters params) {
+  public static List<Pair<String, Long>> readFList(Parameters params) throws IOException {
     int minSupport = Integer.valueOf(params.get(MIN_SUPPORT, "3"));
     Configuration conf = new Configuration();
     
@@ -201,12 +201,15 @@ public final class PFPGrowth {
     // i.e. cannot be used for a multilingual task
     int minFr = params.getInt(MIN_FREQ, MIN_FREQ_DEFAULT);
     int prunePct = params.getInt(PRUNE_PCTILE, PRUNE_PCTILE_DEFAULT);
-    long maxFreq = new SequenceFileDirIterable<Text, LongWritable>(
-        new Path(parallelCountingPath, FILE_PATTERN),
+Path path = new Path(parallelCountingPath, FILE_PATTERN);
+// if(!FileSystem.get(path.toUri(),conf).exists(path)){
+// throw new IOException("Cannot find flist file: " + path);
+// }
+	long maxFreq = new SequenceFileDirIterable<Text, LongWritable>(
+        path,
         PathType.GLOB, null, null, true, conf).iterator().next().getSecond().get() * prunePct / 100;
     for (Pair<Text, LongWritable> record : new SequenceFileDirIterable<Text, LongWritable>(
-        new Path(parallelCountingPath, FILE_PATTERN),
-        PathType.GLOB, null, null, true, conf)) {
+        path,PathType.GLOB, null, null, true, conf)) {
       String token = record.getFirst().toString();
       char ch0 = token.charAt(0);
       long value = record.getSecond().get();
