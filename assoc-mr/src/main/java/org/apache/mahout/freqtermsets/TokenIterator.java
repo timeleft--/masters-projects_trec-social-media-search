@@ -72,7 +72,7 @@ public class TokenIterator extends AbstractIterator<String> {
     // }
     
     this.chs = input.toString().toCharArray();
-    String punctuationStr = "!\"$%&'()*+,-./:;<=>?[\\]^_`{|}~";
+    String punctuationStr = "!$%&()*+,./:;<=>?[\\]^{|}~\"'`"; //removed _-
     punctuation = new OpenCharHashSet(punctuationStr.length(), 0, 0.999);
     for (char ch : punctuationStr.toCharArray()) {
       punctuation.add(ch);

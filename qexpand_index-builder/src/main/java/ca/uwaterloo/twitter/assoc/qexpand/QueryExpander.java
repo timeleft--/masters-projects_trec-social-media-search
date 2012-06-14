@@ -5,12 +5,11 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
-import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map.Entry;
 import java.util.Set;
-import java.util.TreeMap;
-import java.util.TreeSet;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
@@ -20,6 +19,8 @@ import org.apache.commons.cli.OptionBuilder;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.TermFreqVector;
@@ -27,19 +28,21 @@ import org.apache.lucene.queryParser.QueryParser;
 import org.apache.lucene.queryParser.QueryParser.Operator;
 import org.apache.lucene.search.BooleanClause.Occur;
 import org.apache.lucene.search.BooleanQuery;
+import org.apache.lucene.search.DefaultSimilarity;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.search.Similarity;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.MMapDirectory;
 import org.apache.lucene.util.Version;
-import org.apache.mahout.common.Pair;
 import org.apache.mahout.math.list.IntArrayList;
 import org.apache.mahout.math.map.OpenIntFloatHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.common.collect.Sets.SetView;
@@ -47,19 +50,38 @@ import com.google.common.collect.Sets.SetView;
 public class QueryExpander {
   private static Logger LOG = LoggerFactory.getLogger(QueryExpander.class);
   
-  private static final String INDEX_OPTION = "index";
+  private static final String FIS_INDEX_OPTION = "fis_index";
+  private static final String TWT_INDEX_OPTION = "twt_index";
   
   // private static final String BASE_PARAM_OPTION = "base_param";
-  private static final float BASE_PARAM_DEFAULT = 60.0f;
+  private static final float FIS_BASE_RANK_PARAM_DEFAULT = 60.0f;
   
   private static final String MIN_SCORE_OPTION = "min_score";
-  private static final float MIN_SCORE_DEFAULT = Float.MIN_VALUE; //3.0f;
+  private static final float MIN_SCORE_DEFAULT = Float.MIN_VALUE; // 3.0f;
   
-  private static final int NUM_HITS_DEFAULT = 100;
+  private static final int NUM_HITS_DEFAULT = 1000;
   
   private static final Analyzer ANALYZER = new ItemsetAnalyzer();// new
                                                                  // EnglishAnalyzer(Version.LUCENE_36);
   private static final boolean CHAR_BY_CHAR = false;
+  
+  private static final int MIN_ITEMSET_SIZE = 1;
+  
+  private static final String RETWEET_QUERY = "RT";
+  
+  public static enum TweetField {
+    ID("id"),
+    SCREEN_NAME("screen_name"),
+    CREATED_AT("create_at"),
+    TEXT("text"),
+    DAY("day");
+    
+    public final String name;
+    
+    TweetField(String s) {
+      name = s;
+    }
+  };
   
   /**
    * @param args
@@ -71,7 +93,9 @@ public class QueryExpander {
       org.apache.lucene.queryParser.ParseException {
     Options options = new Options();
     options.addOption(OptionBuilder.withArgName("path").hasArg()
-        .withDescription("index location").create(INDEX_OPTION));
+        .withDescription("frequent itemsets index location").create(FIS_INDEX_OPTION));
+    options.addOption(OptionBuilder.withArgName("path").hasArg()
+        .withDescription("twitter index location").create(TWT_INDEX_OPTION));
     // options.addOption(OptionBuilder.withArgName("float").hasArg()
     // .withDescription("parameter that would be used to rank top level queries and reduced in lower levels").create(BASE_PARAM_OPTION));
     options.addOption(OptionBuilder.withArgName("float").hasArg()
@@ -87,15 +111,21 @@ public class QueryExpander {
       System.exit(-1);
     }
     
-    if (!cmdline.hasOption(INDEX_OPTION)) {
+    if (!(cmdline.hasOption(FIS_INDEX_OPTION) && cmdline.hasOption(TWT_INDEX_OPTION))) {
       HelpFormatter formatter = new HelpFormatter();
       formatter.printHelp(QueryExpander.class.getName(), options);
       System.exit(-1);
     }
     
-    File indexLocation = new File(cmdline.getOptionValue(INDEX_OPTION));
-    if (!indexLocation.exists()) {
-      System.err.println("Error: " + indexLocation + " does not exist!");
+    File fisIndexLocation = new File(cmdline.getOptionValue(FIS_INDEX_OPTION));
+    if (!fisIndexLocation.exists()) {
+      System.err.println("Error: " + fisIndexLocation + " does not exist!");
+      System.exit(-1);
+    }
+    
+    File twtIndexLocation = new File(cmdline.getOptionValue(TWT_INDEX_OPTION));
+    if (!twtIndexLocation.exists()) {
+      System.err.println("Error: " + twtIndexLocation + " does not exist!");
       System.exit(-1);
     }
     
@@ -122,63 +152,136 @@ public class QueryExpander {
     }
     
     PrintStream out = new PrintStream(System.out, true, "UTF-8");
-    QueryExpander qEx = new QueryExpander(indexLocation);
-    StringBuilder query = new StringBuilder();
-    do {
-      if (CHAR_BY_CHAR) {
-        int ch = System.in.read();
-        if (ch == '\r' || ch == '\n') {
+    QueryExpander qEx = null;
+    try {
+      qEx = new QueryExpander(fisIndexLocation, twtIndexLocation);
+      
+      StringBuilder query = new StringBuilder();
+      do {
+        if (CHAR_BY_CHAR) {
+          int ch = System.in.read();
+          if (ch == '\r' || ch == '\n') {
+            query.setLength(0);
+            continue;
+          }
+          query.append((char) ch);
+        } else {
           query.setLength(0);
+          BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
+          query.append(reader.readLine());
+        }
+        
+        if (query.length() == 0) {
           continue;
         }
-        query.append((char) ch);
-      } else {
-        query.setLength(0);
-        BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
-        query.append(reader.readLine());
-      }
-      
-      if (query.length() == 0) {
-        continue;
-      }
-      
-      OpenIntFloatHashMap rs = qEx.relatedItemsets(query.toString(), minScore);
-      LinkedHashMap<Set<String>, Float> itemsets = qEx.convertResultToItemsets(rs,-1);//100);
-      
-      out.println();
-      out.println(">" + query.toString());
-      int i = 0;
-      for (Entry<Set<String>, Float> hit : itemsets.entrySet()) {
-        out.println(++i + " (" + hit.getValue() + "): " + hit.getKey().toString());
-        // + "\t"
-        // + hit.get(IndexBuilder.AssocField.RANK.name) + "\t"
-        // + hit.get(IndexBuilder.AssocField.SUPPORT.name));
-      }
-      
-    } while (true);
-    
+        
+        int mode = -1;
+        String cmd = query.substring(0, 2);
+        if (cmd.equals("i:")) {
+          mode = 0; // itemsets
+        } else if (cmd.equals("r:")) {
+          mode = 1; // results
+        } else if (cmd.equals("e:")) {
+          mode = 2; // expanded
+        } else {
+          out.println("Must prefix either i: or r: or e:");
+          continue;
+        }
+        
+        query.delete(0, 2);
+        
+        out.println();
+        out.println(">" + query.toString());
+        OpenIntFloatHashMap fisRs = null;
+        if (mode == 0 || mode == 2) {
+          fisRs = qEx.relatedItemsets(query.toString(), minScore);
+        }
+        
+        BooleanQuery twtQ = null;
+        if (mode == 0) {
+          LinkedHashMap<Set<String>, Float> itemsets = qEx.convertResultToItemsets(fisRs, -1);
+          // NUM_HITS_DEFAULT);
+          
+          int i = 0;
+          for (Entry<Set<String>, Float> hit : itemsets.entrySet()) {
+            out.println(++i + " (" + hit.getValue() + "): " + hit.getKey().toString());
+          }
+        } else {
+          twtQ = new BooleanQuery();
+          twtQ.add(qEx.twtQparser.parse(RETWEET_QUERY), Occur.MUST_NOT);
+          
+          if (mode == 1) {
+            twtQ.add(qEx.twtQparser.parse(query.toString()), Occur.MUST);
+          } else if (mode == 2) {
+            twtQ.add(qEx.convertResultToBooleanQuery(fisRs, NUM_HITS_DEFAULT), Occur.SHOULD);
+            twtQ.setMinimumNumberShouldMatch(1);
+          }
+          
+          LOG.debug("Querying Twitter by: " + twtQ.toString());
+          int t = 0;
+          for (ScoreDoc scoreDoc : qEx.twtSearcher.search(twtQ, NUM_HITS_DEFAULT).scoreDocs) {
+            Document hit = qEx.twtSearcher.doc(scoreDoc.doc);
+            Field created = hit.getField(TweetField.CREATED_AT.name);
+            out.println();
+            out.println(String.format("%4d (%.4f): %s\t%s\t%s\t%s",
+                ++t,
+                scoreDoc.score,
+                hit.getField(TweetField.ID.name).stringValue(),
+                hit.getField(TweetField.SCREEN_NAME.name).stringValue(),
+                (created == null ? "" : created.stringValue()),
+                hit.getField(TweetField.TEXT.name).stringValue()));
+            
+            if(t%100 == 0){
+              LOG.trace(t + " woohoo, here's another " + 100);
+            }
+          }
+        }
+      } while (true);
+    } finally {
+      if (qEx != null)
+        qEx.close();
+    }
   }
   
-  private QueryParser qparser;
-  private IndexSearcher searcher;
-  private IndexReader ixReader;
+  private final QueryParser fisQparser;
+  private final IndexSearcher fisSearcher;
+  private final IndexReader fisIxReader;
   
-  private int numHits = NUM_HITS_DEFAULT;
-  private float baseRankingParam = BASE_PARAM_DEFAULT;
+  private final int fisNumHits = NUM_HITS_DEFAULT;
+  private final float fisBaseRankingParam = FIS_BASE_RANK_PARAM_DEFAULT;
   
-  private ItemSetSimilariry similarity;
+  private final Similarity fisSimilarity;
   
-  public QueryExpander(File indexLocation) throws IOException {
-    Directory dir = new MMapDirectory(indexLocation);
+  private final QueryParser twtQparser;
+  private final IndexSearcher twtSearcher;
+  private final IndexReader twtIxReader;
+  
+  // private final int twtNumHits = NUM_HITS_DEFAULT;
+  
+  private final Similarity twtSimilarity;
+  
+  public QueryExpander(File fisIndexLocation, File twtIndexLocation) throws IOException {
+    Directory fisdir = new MMapDirectory(fisIndexLocation);
+    fisIxReader = IndexReader.open(fisdir);
+    fisSearcher = new IndexSearcher(fisIxReader);
+    fisSimilarity = new ItemSetSimilariry();
+    fisSearcher.setSimilarity(fisSimilarity);
     
-    ixReader = IndexReader.open(dir);
-    searcher = new IndexSearcher(ixReader);
-    similarity = new ItemSetSimilariry();
-    searcher.setSimilarity(similarity);
-    
-    qparser = new QueryParser(Version.LUCENE_36, IndexBuilder.AssocField.ITEMSET.name,
+    fisQparser = new QueryParser(Version.LUCENE_36,
+        IndexBuilder.AssocField.ITEMSET.name,
         ANALYZER);
-    qparser.setDefaultOperator(Operator.AND);
+    fisQparser.setDefaultOperator(Operator.AND);
+    
+    Directory twtdir = new MMapDirectory(twtIndexLocation);
+    twtIxReader = IndexReader.open(twtdir);
+    twtSearcher = new IndexSearcher(twtIxReader);
+    twtSimilarity = new DefaultSimilarity();
+    twtSearcher.setSimilarity(twtSimilarity);
+    
+    twtQparser = new QueryParser(Version.LUCENE_36, TweetField.TEXT.name, ANALYZER);
+    twtQparser.setDefaultOperator(Operator.AND);
+    
+    BooleanQuery.setMaxClauseCount(fisNumHits * fisNumHits);
   }
   
   public OpenIntFloatHashMap relatedItemsets(String queryStr, float minScore)
@@ -191,9 +294,9 @@ public class QueryExpander {
     // throw new IllegalArgumentException("Minimum score must be positive");
     // }
     
-    Query allQuery = qparser.parse(queryStr);
+    Query allQuery = fisQparser.parse(queryStr);
     // allQuery.setBoost(baseBoost);
-    allQuery = allQuery.rewrite(ixReader);
+    allQuery = allQuery.rewrite(fisIxReader);
     
     Set<Term> queryTermsTemp = Sets.<Term> newHashSet();
     Set<String> queryTerms = Sets.<String> newHashSet();
@@ -212,7 +315,7 @@ public class QueryExpander {
       String[] queryArr = queryTerms.toArray(new String[0]);
       for (int i = 0; i < queryTerms.size() - 1; ++i) {
         for (int j = i + 1; j < queryTerms.size(); ++j) {
-          Query pairQuery = qparser.parse(queryArr[i] + " " + queryArr[j]);
+          Query pairQuery = fisQparser.parse(queryArr[i] + " " + queryArr[j]);
           pairQuery.setBoost((2.0f / queryTerms.size())); // * baseBoost);
           query.add(pairQuery, Occur.SHOULD);
         }
@@ -221,11 +324,16 @@ public class QueryExpander {
     }
     
     OpenIntFloatHashMap resultSet = new OpenIntFloatHashMap();
-    TopDocs rs = searcher.search(query, numHits);
+    TopDocs rs = fisSearcher.search(query, fisNumHits);
     
-    Set<ScoreIxObj<String>> extraTerms = Sets.<ScoreIxObj<String>>newHashSet();
+    Set<ScoreIxObj<String>> extraTerms = Sets.<ScoreIxObj<String>> newHashSet();
     
-    int levelHits = addQualifiedResults(rs, resultSet, queryTerms, extraTerms, minScore, baseRankingParam);
+    int levelHits = addQualifiedResults(rs,
+        resultSet,
+        queryTerms,
+        extraTerms,
+        minScore,
+        fisBaseRankingParam);
     LOG.debug("Added {} results from the query {}", levelHits, query.toString());
     
     Set<ScoreIxObj<String>> doneTerms = Sets.<ScoreIxObj<String>> newHashSet();
@@ -233,12 +341,12 @@ public class QueryExpander {
     int level = 0;
     while (extraTerms.size() > 0) {
       ++level;
-      float fusionK = (float) (baseRankingParam + Math.pow(10, level));
+      float fusionK = (float) (fisBaseRankingParam + Math.pow(10, level));
       extraTerms = expandRecursive(queryTerms,
           extraTerms,
           doneTerms,
           resultSet,
-          numHits,
+          fisNumHits,
           minScore,
           fusionK);
     }
@@ -253,31 +361,71 @@ public class QueryExpander {
   
   /**
    * Side effect: removes duplicates after converting docids to actual itemsets
+   * 
    * @param rs
    * @return
    * @throws IOException
    */
-  public LinkedHashMap<Set<String>, Float> convertResultToItemsets(OpenIntFloatHashMap rs, int numResults)
+  public LinkedHashMap<Set<String>, Float> convertResultToItemsets(OpenIntFloatHashMap rs,
+      int numResults)
       throws IOException {
-    LinkedHashMap<Set<String>, Float> result = Maps.<Set<String>, Float>newLinkedHashMap();
+    LinkedHashMap<Set<String>, Float> result = Maps.<Set<String>, Float> newLinkedHashMap();
     
     IntArrayList keyList = new IntArrayList(rs.size());
     rs.keysSortedByValue(keyList);
-    
-    for(int i = rs.size()-1;i>=0 && (numResults <= 0 || result.size() < numResults); --i){
+    int rank = 0;
+    for (int i = rs.size() - 1; i >= 0 && (numResults <= 0 || result.size() < numResults); --i) {
       int doc = keyList.getQuick(i);
-      TermFreqVector terms = ixReader.getTermFreqVector(doc,
+      TermFreqVector terms = fisIxReader.getTermFreqVector(doc,
           IndexBuilder.AssocField.ITEMSET.name);
-      result.put(Sets.newHashSet(terms.getTerms()), rs.get(doc));
+      if (terms.size() < MIN_ITEMSET_SIZE) {
+        continue;
+      }
+      HashSet<String> termSet = Sets.newHashSet(terms.getTerms());
+      
+      Float weight = result.get(termSet);
+      if (weight == null) {
+        weight = 0.0f;
+      }
+      weight += 1 / (FIS_BASE_RANK_PARAM_DEFAULT + ++rank);// rs.get(doc));
+      result.put(termSet, weight);
     }
-    // Could also use something like toString then .replaceAll("[\\,\\[\\]]", "");
-   
+    // Could also use something like toString then ;
+    
+    return result;
+  }
+  
+  public Query convertResultToBooleanQuery(OpenIntFloatHashMap rs, int numResults)
+      throws IOException, org.apache.lucene.queryParser.ParseException {
+    BooleanQuery result = new BooleanQuery();
+    for (Entry<Set<String>, Float> e : convertResultToItemsets(rs, numResults).entrySet()) {
+      Query itemsetQuer = twtQparser.parse(e.getKey().toString().replaceAll("[\\,\\[\\]]", ""));
+      itemsetQuer.setBoost(e.getValue());
+      result.add(itemsetQuer, Occur.SHOULD);
+    }
+    return result;
+  }
+  
+  public List<Query> convertResultToQueries(OpenIntFloatHashMap rs, int numResults)
+      throws IOException, org.apache.lucene.queryParser.ParseException {
+    List<Query> result = Lists.<Query> newLinkedList();
+    for (Entry<Set<String>, Float> e : convertResultToItemsets(rs, numResults).entrySet()) {
+      Query itemsetQuer = twtQparser.parse(e.getKey().toString().replaceAll("[\\,\\[\\]]", ""));
+      itemsetQuer.setBoost(e.getValue());
+      result.add(itemsetQuer);
+    }
     return result;
   }
   
   public void close() throws IOException {
-    searcher.close();
-    ixReader.close();
+    if (fisSearcher != null)
+      fisSearcher.close();
+    if (fisIxReader != null)
+      fisIxReader.close();
+    if (twtSearcher != null)
+      twtSearcher.close();
+    if (twtIxReader != null)
+      twtIxReader.close();
   }
   
   private int addQualifiedResults(TopDocs rs, OpenIntFloatHashMap result,
@@ -294,22 +442,22 @@ public class QueryExpander {
       }
       ++rank;
       
-      if(!result.containsKey(scoreDoc.doc)){
-        ++levelHits;    
+      if (!result.containsKey(scoreDoc.doc)) {
+        ++levelHits;
       }
       
       float fusion = result.get(scoreDoc.doc);
       fusion += 1.0f / (fusionK + rank);
       result.put(scoreDoc.doc, fusion);
       
-      TermFreqVector termVector = ixReader.getTermFreqVector(scoreDoc.doc,
+      TermFreqVector termVector = fisIxReader.getTermFreqVector(scoreDoc.doc,
           IndexBuilder.AssocField.ITEMSET.name);
       for (String term : termVector.getTerms()) {
         if (queryTerms.contains(term)) {
           continue;
         }
         // scoreDoc.score or fusion didn't change performance in a visible way
-        extraTerms.add(new ScoreIxObj<String>(term,fusion)); 
+        extraTerms.add(new ScoreIxObj<String>(term, fusion));
       }
     }
     
@@ -325,71 +473,86 @@ public class QueryExpander {
     
     Set<ScoreIxObj<String>> extraTerms2 = Sets.<ScoreIxObj<String>> newHashSet();
     
-    // This could have improvement speed, but it causes the scores to drop because of low overlap
-    // even when multiplying the boost by the number of extra terms (to overcome the overlap)
+    // // Perform only one query per qTerm, written as simple as possible
     // for (String qterm : queryTerms) {
     // BooleanQuery query = new BooleanQuery(true);
     //
-    // Query qtermQuery = qparser.parse(qterm);
-    // qtermQuery.setBoost(similarity.idf(ixReader.docFreq(new
-    // Term(IndexBuilder.AssocField.ITEMSET.name,qterm)),ixReader.numDocs()));
+    // // Must match at least one of the xterms beside the qterm
+    // query.setMinimumNumberShouldMatch(1);
+    //
+    // Query qtermQuery = fisQparser.parse(qterm);
+    // // qtermQuery.setBoost(similarity.idf(ixReader.docFreq(new
+    // // Term(IndexBuilder.AssocField.ITEMSET.name, qterm)), ixReader.numDocs()));
     //
     // query.add(qtermQuery, Occur.MUST);
     //
     // for (ScoreIxObj<String> xterm : extraTerms) {
     // assert !doneTerms.contains(xterm);
     //
-    // Query xtermQuery = qparser.parse(xterm.obj);
-    // xtermQuery.setBoost(xterm.score); //* extraTerms.size());
+    // Query xtermQuery = fisQparser.parse(xterm.toString());
+    // // xtermQuery.setBoost(xterm.score); // * extraTerms.size());
     //
     // query.add(xtermQuery, Occur.SHOULD);
     // }
     //
-    // // Does this have any effect at all?
-    // query.setBoost(boost);
+    // // // Does this have any effect at all?
+    // // query.setBoost(boost);
     //
-    // TopDocs rs = searcher.search(query, numHits);
+    // TopDocs rs = fisSearcher.search(query, fisNumHits);
     //
-    // int levelHits = addQualifiedResults(rs, result, queryTerms, extraTerms2, minScore);
+    // int levelHits = addQualifiedResults(rs, resultSet, queryTerms, extraTerms2, levelMinScore,
+    // levelRankingParam);
     // LOG.debug("Added {} results from the query {}", levelHits, query.toString());
     // }
     
-    // This also improves performance by doing only one query (a long one)
-    // but have an anecdotally low recall, a high precision though
-    // BooleanQuery query = new BooleanQuery(); //This adds trash: true);
-    // for (String qterm : queryTerms) {
-    // for (ScoreIxObj<String> xterm : extraTerms) {
-    // assert !doneTerms.contains(xterm);
-    //
-    // Query xtermQuery = qparser.parse(qterm + " " + xterm.obj);
-    // xtermQuery.setBoost(xterm.score);
-    //
-    // query.add(xtermQuery, Occur.SHOULD);
-    // }
-    // }
-    // // Does this have any effect at all?
-    // query.setBoost(boost);
-    //
-    // TopDocs rs = searcher.search(query, numHits);
-    //
-    // int levelHits = addQualifiedResults(rs, result, queryTerms, extraTerms2, minScore);
-    // LOG.debug("Added {} results from the query {}", levelHits, query.toString());
-    
+    // Only one query (a long one), of pairs of query and extra
+    // Seems to be getting high precision pairs, and performs best
+    BooleanQuery query = new BooleanQuery(); // This adds trash: true);
     for (String qterm : queryTerms) {
       for (ScoreIxObj<String> xterm : extraTerms) {
         assert !doneTerms.contains(xterm);
         
-        Query xtermQuery = qparser.parse(qterm + " " + xterm.toString());
+        Query xtermQuery = fisQparser.parse(qterm + " " + xterm.obj);
+        xtermQuery.setBoost(xterm.score);
+        // Scoring the term not the query "+ xterm.toString()" causes an early topic drift
         
-        TopDocs rs = searcher.search(xtermQuery, levelNumHits);
-        
-        int levelHits = addQualifiedResults(rs, resultSet, queryTerms, extraTerms2, levelMinScore, levelRankingParam);
-        LOG.debug("Added {} results from the query {}", levelHits, xtermQuery.toString());
+        query.add(xtermQuery, Occur.SHOULD);
       }
     }
+    // // Does this have any effect at all?
+    // query.setBoost(boost);
+    
+    TopDocs rs = fisSearcher.search(query, fisNumHits);
+    
+    int levelHits = addQualifiedResults(rs,
+        resultSet,
+        queryTerms,
+        extraTerms2,
+        levelMinScore,
+        levelRankingParam);
+    LOG.debug("Added {} results from the query {}", levelHits, query.toString());
+    
+    // This is the proof of concept that hits the index with as many queries as terms
+    // for (String qterm : queryTerms) {
+    // for (ScoreIxObj<String> xterm : extraTerms) {
+    // assert !doneTerms.contains(xterm);
+    //
+    // Query xtermQuery = fisQparser.parse(qterm + " " + xterm.toString());
+    //
+    // TopDocs rs = fisSearcher.search(xtermQuery, levelNumHits);
+    //
+    // int levelHits = addQualifiedResults(rs,
+    // resultSet,
+    // queryTerms,
+    // extraTerms2,
+    // levelMinScore,
+    // levelRankingParam);
+    // LOG.debug("Added {} results from the query {}", levelHits, xtermQuery.toString());
+    // }
+    // }
     
     doneTerms.addAll(extraTerms);
-    return Sets.difference(extraTerms2, doneTerms); 
+    return Sets.difference(extraTerms2, doneTerms);
     
   }
   
