@@ -53,7 +53,7 @@ public class QueryExpander {
   private static final float BASE_PARAM_DEFAULT = 60.0f;
   
   private static final String MIN_SCORE_OPTION = "min_score";
-  private static final float MIN_SCORE_DEFAULT = 3.0f;
+  private static final float MIN_SCORE_DEFAULT = Float.MIN_VALUE; //3.0f;
   
   private static final int NUM_HITS_DEFAULT = 100;
   
@@ -143,7 +143,7 @@ public class QueryExpander {
       }
       
       OpenIntFloatHashMap rs = qEx.relatedItemsets(query.toString(), minScore);
-      LinkedHashMap<Set<String>, Float> itemsets = qEx.convertResultToItemsets(rs,-1);
+      LinkedHashMap<Set<String>, Float> itemsets = qEx.convertResultToItemsets(rs,-1);//100);
       
       out.println();
       out.println(">" + query.toString());
@@ -264,18 +264,14 @@ public class QueryExpander {
     IntArrayList keyList = new IntArrayList(rs.size());
     rs.keysSortedByValue(keyList);
     
-    int i = rs.size()-1;
-    if(numResults > 0 && i > numResults-1){
-      i = numResults-1;
-    }
-    while(i>=0){
+    for(int i = rs.size()-1;i>=0 && (numResults <= 0 || result.size() < numResults); --i){
       int doc = keyList.getQuick(i);
       TermFreqVector terms = ixReader.getTermFreqVector(doc,
           IndexBuilder.AssocField.ITEMSET.name);
       result.put(Sets.newHashSet(terms.getTerms()), rs.get(doc));
-      --i;
     }
     // Could also use something like toString then .replaceAll("[\\,\\[\\]]", "");
+   
     return result;
   }
   
@@ -312,10 +308,8 @@ public class QueryExpander {
         if (queryTerms.contains(term)) {
           continue;
         }
-        extraTerms.add(new ScoreIxObj<String>(term, fusion));
-//        fusion = extraTerms.get(term);
-//        fusion += 1.0f / (fusionK + rank);
-//        extraTerms.put(term,fusion);
+        // scoreDoc.score or fusion didn't change performance in a visible way
+        extraTerms.add(new ScoreIxObj<String>(term,fusion)); 
       }
     }
     
