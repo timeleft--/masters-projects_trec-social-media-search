@@ -73,6 +73,8 @@ public class QueryExpander {
   private static final int MIN_ITEMSET_SIZE = 1;
   
   private static final String RETWEET_QUERY = "RT";
+
+  private static final float AVG_LENGTH_DEFAULT = 5;
   
   public static enum TweetField {
     ID("id"),
@@ -286,6 +288,8 @@ public class QueryExpander {
   // private final int twtNumHits = NUM_HITS_DEFAULT;
   
   private final Similarity twtSimilarity;
+
+  private float avgLenght = AVG_LENGTH_DEFAULT;
   
   public QueryExpander(File fisIndexLocation, File twtIndexLocation) throws IOException {
     Directory fisdir = new MMapDirectory(fisIndexLocation);
@@ -401,11 +405,11 @@ public class QueryExpander {
     
     LinkedHashMap<Set<String>, Float> result = Maps.<Set<String>, Float> newLinkedHashMap();
     
-    float lenWght = 0;
-    for (String qToken : queryFreq.keys()) {
-      lenWght += queryFreq.get(qToken);
-    }
-    lenWght = 1 / lenWght;
+    float lenWght = 1;
+//    for (String qToken : queryFreq.keys()) {
+//      lenWght += queryFreq.get(qToken);
+//    }
+//    lenWght = 1 / lenWght;
     
     IntArrayList keyList = new IntArrayList(rs.size());
     rs.keysSortedByValue(keyList);
@@ -441,7 +445,7 @@ public class QueryExpander {
         weight = 0.0f;
       }
       weight += (overlap * /* rs.get(hit) * */(FIS_BASE_RANK_PARAM_DEFAULT + 1)) /
-          (FIS_BASE_RANK_PARAM_DEFAULT * ((1 - lenWght) + termSet.size() /* avgLenght */* lenWght)
+          (FIS_BASE_RANK_PARAM_DEFAULT * ((1 - lenWght) + (termSet.size() / avgLenght) * lenWght)
           + avgRank);
       
       result.put(termSet, weight);
