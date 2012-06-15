@@ -5,6 +5,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
+import java.io.StringReader;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -19,6 +20,8 @@ import org.apache.commons.cli.OptionBuilder;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.index.IndexReader;
@@ -39,6 +42,7 @@ import org.apache.lucene.store.MMapDirectory;
 import org.apache.lucene.util.Version;
 import org.apache.mahout.math.list.IntArrayList;
 import org.apache.mahout.math.map.OpenIntFloatHashMap;
+import org.apache.mahout.math.map.OpenObjectIntHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -59,7 +63,8 @@ public class QueryExpander {
   private static final String MIN_SCORE_OPTION = "min_score";
   private static final float MIN_SCORE_DEFAULT = Float.MIN_VALUE; // 3.0f;
   
-  private static final int NUM_HITS_DEFAULT = 1000;
+  private static final int NUM_HITS_INTERNAL_DEFAULT = 1000;
+  private static final int NUM_HITS_SHOWN_DEFAULT = 1000;
   
   private static final Analyzer ANALYZER = new ItemsetAnalyzer();// new
                                                                  // EnglishAnalyzer(Version.LUCENE_36);
@@ -197,9 +202,30 @@ public class QueryExpander {
           fisRs = qEx.relatedItemsets(query.toString(), minScore);
         }
         
-        BooleanQuery twtQ = null;
+        Query parsedQuery = qEx.twtQparser.parse(query.toString());
+        
+        // String[] queryTokens = query.toString().split("\\W");
+        TokenStream queryTokens = ANALYZER.tokenStream(TweetField.TEXT.name,
+            new StringReader(query.toString()));
+        queryTokens.reset();
+        
+        // Set<Term> queryTerms = Sets.newHashSet();
+        // parsedQuery.extractTerms(queryTerms);
+        
+        OpenObjectIntHashMap<String> queryFreq = new OpenObjectIntHashMap<String>();
+        while (queryTokens.incrementToken()) {
+          CharTermAttribute attr = (CharTermAttribute) queryTokens.getAttribute(queryTokens
+              .getAttributeClassesIterator().next());
+          String token = attr.toString();
+          
+          int freq = queryFreq.get(token);
+          queryFreq.put(token, ++freq);
+        }
+        
         if (mode == 0) {
-          LinkedHashMap<Set<String>, Float> itemsets = qEx.convertResultToItemsets(fisRs, -1);
+          LinkedHashMap<Set<String>, Float> itemsets = qEx.convertResultToItemsets(fisRs,
+              queryFreq,
+              -1);
           // NUM_HITS_DEFAULT);
           
           int i = 0;
@@ -207,31 +233,32 @@ public class QueryExpander {
             out.println(++i + " (" + hit.getValue() + "): " + hit.getKey().toString());
           }
         } else {
-          twtQ = new BooleanQuery();
-          twtQ.add(qEx.twtQparser.parse(RETWEET_QUERY), Occur.MUST_NOT);
+          BooleanQuery twtQ = new BooleanQuery();
+          twtQ.add(qEx.twtQparser.parse(RETWEET_QUERY).rewrite(qEx.twtIxReader), Occur.MUST_NOT);
           
           if (mode == 1) {
-            twtQ.add(qEx.twtQparser.parse(query.toString()), Occur.MUST);
+            twtQ.add(parsedQuery, Occur.MUST);
           } else if (mode == 2) {
-            twtQ.add(qEx.convertResultToBooleanQuery(fisRs, NUM_HITS_DEFAULT), Occur.SHOULD);
+            twtQ.add(qEx.convertResultToBooleanQuery(fisRs, queryFreq, NUM_HITS_INTERNAL_DEFAULT),
+                Occur.SHOULD);
             twtQ.setMinimumNumberShouldMatch(1);
           }
           
           LOG.debug("Querying Twitter by: " + twtQ.toString());
           int t = 0;
-          for (ScoreDoc scoreDoc : qEx.twtSearcher.search(twtQ, NUM_HITS_DEFAULT).scoreDocs) {
+          for (ScoreDoc scoreDoc : qEx.twtSearcher.search(twtQ, NUM_HITS_SHOWN_DEFAULT).scoreDocs) {
             Document hit = qEx.twtSearcher.doc(scoreDoc.doc);
             Field created = hit.getField(TweetField.CREATED_AT.name);
             out.println();
             out.println(String.format("%4d (%.4f): %s\t%s\t%s\t%s",
                 ++t,
                 scoreDoc.score,
-                hit.getField(TweetField.ID.name).stringValue(),
+                hit.getField(TweetField.TEXT.name).stringValue(),
                 hit.getField(TweetField.SCREEN_NAME.name).stringValue(),
                 (created == null ? "" : created.stringValue()),
-                hit.getField(TweetField.TEXT.name).stringValue()));
+                hit.getField(TweetField.ID.name).stringValue()));
             
-            if(t%100 == 0){
+            if (t % 100 == 0) {
               LOG.trace(t + " woohoo, here's another " + 100);
             }
           }
@@ -247,7 +274,7 @@ public class QueryExpander {
   private final IndexSearcher fisSearcher;
   private final IndexReader fisIxReader;
   
-  private final int fisNumHits = NUM_HITS_DEFAULT;
+  private final int fisNumHits = NUM_HITS_INTERNAL_DEFAULT;
   private final float fisBaseRankingParam = FIS_BASE_RANK_PARAM_DEFAULT;
   
   private final Similarity fisSimilarity;
@@ -275,7 +302,7 @@ public class QueryExpander {
     Directory twtdir = new MMapDirectory(twtIndexLocation);
     twtIxReader = IndexReader.open(twtdir);
     twtSearcher = new IndexSearcher(twtIxReader);
-    twtSimilarity = new DefaultSimilarity();
+    twtSimilarity = new TwitterSimilarity();
     twtSearcher.setSimilarity(twtSimilarity);
     
     twtQparser = new QueryParser(Version.LUCENE_36, TweetField.TEXT.name, ANALYZER);
@@ -363,31 +390,60 @@ public class QueryExpander {
    * Side effect: removes duplicates after converting docids to actual itemsets
    * 
    * @param rs
+   * @param queryTerms
+   * @param queryFreq
    * @return
    * @throws IOException
    */
   public LinkedHashMap<Set<String>, Float> convertResultToItemsets(OpenIntFloatHashMap rs,
-      int numResults)
+      OpenObjectIntHashMap<String> queryFreq, int numResults)
       throws IOException {
+    
     LinkedHashMap<Set<String>, Float> result = Maps.<Set<String>, Float> newLinkedHashMap();
+    
+    float lenWght = 0;
+    for (String qToken : queryFreq.keys()) {
+      lenWght += queryFreq.get(qToken);
+    }
+    lenWght = 1 / lenWght;
     
     IntArrayList keyList = new IntArrayList(rs.size());
     rs.keysSortedByValue(keyList);
     int rank = 0;
     for (int i = rs.size() - 1; i >= 0 && (numResults <= 0 || result.size() < numResults); --i) {
-      int doc = keyList.getQuick(i);
-      TermFreqVector terms = fisIxReader.getTermFreqVector(doc,
+      int hit = keyList.getQuick(i);
+      TermFreqVector terms = fisIxReader.getTermFreqVector(hit,
           IndexBuilder.AssocField.ITEMSET.name);
       if (terms.size() < MIN_ITEMSET_SIZE) {
         continue;
       }
       HashSet<String> termSet = Sets.newHashSet(terms.getTerms());
       
+      // Using corpus weight really hurts precision.. "cairo egypt" gets a weight of 300+ for evac
+      // Document doc = fisIxReader.document(hit);
+      // weight +=
+      // Float.parseFloat(doc.getFieldable(IndexBuilder.AssocField.SUPPORT.name).stringValue()) /
+      // termSet.size();
+      // float avgRank = (Float.parseFloat(doc.getFieldable(IndexBuilder.AssocField.RANK.name)
+      // .stringValue())
+      // + rank) / 2.0f;
+      float avgRank = rank;
+      
+      float overlap = 0;
+      for (String qToken : queryFreq.keys()) {
+        if (termSet.contains(qToken)) {
+          overlap += queryFreq.get(qToken);
+        }
+      }
+      
       Float weight = result.get(termSet);
       if (weight == null) {
         weight = 0.0f;
       }
-      weight += 1 / (FIS_BASE_RANK_PARAM_DEFAULT + ++rank);// rs.get(doc));
+      weight += (overlap * /* rs.get(hit) * */(FIS_BASE_RANK_PARAM_DEFAULT + 1)) /
+          (FIS_BASE_RANK_PARAM_DEFAULT * ((1 - lenWght) + termSet.size() /* avgLenght */* lenWght)
+          + avgRank);
+      
       result.put(termSet, weight);
     }
     // Could also use something like toString then ;
@@ -395,10 +451,12 @@ public class QueryExpander {
     return result;
   }
   
-  public Query convertResultToBooleanQuery(OpenIntFloatHashMap rs, int numResults)
+  public Query convertResultToBooleanQuery(OpenIntFloatHashMap rs,
+      OpenObjectIntHashMap<String> queryFreq, int numResults)
       throws IOException, org.apache.lucene.queryParser.ParseException {
     BooleanQuery result = new BooleanQuery();
-    for (Entry<Set<String>, Float> e : convertResultToItemsets(rs, numResults).entrySet()) {
+    for (Entry<Set<String>, Float> e : convertResultToItemsets(rs, queryFreq, numResults)
+        .entrySet()) {
       Query itemsetQuer = twtQparser.parse(e.getKey().toString().replaceAll("[\\,\\[\\]]", ""));
       itemsetQuer.setBoost(e.getValue());
       result.add(itemsetQuer, Occur.SHOULD);
@@ -406,10 +464,12 @@ public class QueryExpander {
     return result;
   }
   
-  public List<Query> convertResultToQueries(OpenIntFloatHashMap rs, int numResults)
+  public List<Query> convertResultToQueries(OpenIntFloatHashMap rs,
+      OpenObjectIntHashMap<String> queryFreq, int numResults)
       throws IOException, org.apache.lucene.queryParser.ParseException {
     List<Query> result = Lists.<Query> newLinkedList();
-    for (Entry<Set<String>, Float> e : convertResultToItemsets(rs, numResults).entrySet()) {
+    for (Entry<Set<String>, Float> e : convertResultToItemsets(rs, queryFreq, numResults)
+        .entrySet()) {
       Query itemsetQuer = twtQparser.parse(e.getKey().toString().replaceAll("[\\,\\[\\]]", ""));
       itemsetQuer.setBoost(e.getValue());
       result.add(itemsetQuer);

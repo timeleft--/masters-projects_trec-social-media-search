@@ -14,15 +14,10 @@ public class ItemSetSimilariry extends DefaultSimilarity {
     return 1.0f;
   }
   
-//  @Override
-//  public float tf(float freq) {
-//    return 1.0f;
-//  }
-//  
-//  @Override
-//  public float tf(int freq) {
-//    return 1.0f;
-//  }
+  @Override
+  public float tf(float freq) {
+    return freq>0?1.0f:0.0f;
+  }
   
 // Ooops.. totally messed up the results by this  
 //  @Override
