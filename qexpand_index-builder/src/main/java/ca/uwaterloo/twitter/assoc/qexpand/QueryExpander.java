@@ -30,6 +30,7 @@ import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.Term;
+import org.apache.lucene.index.TermEnum;
 import org.apache.lucene.index.TermFreqVector;
 import org.apache.lucene.queryParser.QueryParser;
 import org.apache.lucene.queryParser.QueryParser.Operator;
@@ -91,6 +92,8 @@ public class QueryExpander {
   private static final float ITEMSET_LEN_WEIGHT_DEFAULT = 0.33f;
   
   private static final float ITEMSET_CORPUS_MODEL_WEIGHT_DEFAULT = 0.77f;
+  
+  private static final float TERM_WEIGHT_SMOOTHER_DEFAULT = 1000;
   
   public static enum TweetField {
     ID("id"),
@@ -238,7 +241,7 @@ public class QueryExpander {
           OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>();
           MutableLong itemsetsLength = new MutableLong();
           
-          qEx.converResultToWeightedTerms(fisRs, query.toString(), termFreq, itemsetsLength, -1);
+          qEx.convertResultToWeightedTerms(fisRs, query.toString(), termFreq, itemsetsLength, -1);
           
           LinkedList<String> terms = Lists.<String> newLinkedList();
           termFreq.keysSortedByValue(terms);
@@ -311,8 +314,13 @@ public class QueryExpander {
   
   private float itemsetLenghtAvg = ITEMSET_LEN_AVG_DEFAULT;
   
-  // As in Jelink Mercer smoothing
-  private float itemsetCorpusModelWeight = ITEMSET_CORPUS_MODEL_WEIGHT_DEFAULT;;
+  // As in Lambda of Jelink Mercer smoothing
+  private float itemsetCorpusModelWeight = ITEMSET_CORPUS_MODEL_WEIGHT_DEFAULT;
+  
+  // As in Mue of Dirchilet smoothing
+  private float termWeightSmoother = TERM_WEIGHT_SMOOTHER_DEFAULT;
+
+  private long twtCorpusLength = -1;
   
   public QueryExpander(File fisIndexLocation, File twtIndexLocation) throws IOException {
     Directory fisdir = new MMapDirectory(fisIndexLocation);
@@ -413,13 +421,13 @@ public class QueryExpander {
     return resultSet;
   }
   
-  public void converResultToWeightedTerms(OpenIntFloatHashMap rs,
-      String query, OpenObjectFloatHashMap<String> termFreqOut,
+  public void convertResultToWeightedTerms(OpenIntFloatHashMap rs,
+      String query, OpenObjectFloatHashMap<String> termWeightOut,
       MutableLong itemsetsLengthOut, int numResults) throws IOException {
     
     IntArrayList keyList = new IntArrayList(rs.size());
     rs.keysSortedByValue(keyList);
-    for (int i = rs.size() - 1; i >= 0 && (numResults <= 0 || termFreqOut.size() < numResults); --i) {
+    for (int i = rs.size() - 1; i >= 0 && (numResults <= 0 || termWeightOut.size() < numResults); --i) {
       int hit = keyList.getQuick(i);
       
       TermFreqVector terms = fisIxReader.getTermFreqVector(hit,
@@ -429,13 +437,28 @@ public class QueryExpander {
       }
       
       for (String term : terms.getTerms()) {
-        termFreqOut.put(term, termFreqOut.get(term) + 1);
+        termWeightOut.put(term, termWeightOut.get(term) + 1);
       }
       
       if (itemsetsLengthOut != null) {
         itemsetsLengthOut.add(terms.size());
       }
-      
+    }
+    
+    if(twtCorpusLength <= 0){
+      twtCorpusLength = 0;
+      TermEnum termEnum = twtIxReader.terms();
+      while(termEnum.next()){
+        ++twtCorpusLength;
+      }
+    }
+    float denim = itemsetsLengthOut.floatValue() + termWeightSmoother;
+    for (String term : termWeightOut.keys()) {
+      float termW = termWeightOut.get(term);
+      termW += termWeightSmoother
+          * (twtIxReader.docFreq(new Term(TweetField.TEXT.name, term)) / twtCorpusLength);
+      termW /= denim;
+      termWeightOut.put(term, termW);
     }
   }
   
