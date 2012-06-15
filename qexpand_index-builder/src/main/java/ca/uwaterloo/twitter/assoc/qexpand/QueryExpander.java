@@ -19,6 +19,7 @@ import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.OptionBuilder;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
+import org.apache.commons.math.util.MathUtils;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
@@ -73,8 +74,12 @@ public class QueryExpander {
   private static final int MIN_ITEMSET_SIZE = 1;
   
   private static final String RETWEET_QUERY = "RT";
+  
+  private static final float ITEMSET_LEN_AVG_DEFAULT = 5;
+  
+  private static final float ITEMSET_LEN_WEIGHT_DEFAULT = 0.33f;
 
-  private static final float AVG_LENGTH_DEFAULT = 5;
+  private static final float ITEMSET_CORPUS_MODEL_WEIGHT_DEFAULT = 0.77f;
   
   public static enum TweetField {
     ID("id"),
@@ -288,8 +293,11 @@ public class QueryExpander {
   // private final int twtNumHits = NUM_HITS_DEFAULT;
   
   private final Similarity twtSimilarity;
+  
+  private float itemsetLenghtAvg = ITEMSET_LEN_AVG_DEFAULT;
 
-  private float avgLenght = AVG_LENGTH_DEFAULT;
+  // As in Jelink Mercer smoothing
+  private float itemsetCorpusModelWeight = ITEMSET_CORPUS_MODEL_WEIGHT_DEFAULT;;
   
   public QueryExpander(File fisIndexLocation, File twtIndexLocation) throws IOException {
     Directory fisdir = new MMapDirectory(fisIndexLocation);
@@ -405,11 +413,11 @@ public class QueryExpander {
     
     LinkedHashMap<Set<String>, Float> result = Maps.<Set<String>, Float> newLinkedHashMap();
     
-    float lenWght = 1;
-//    for (String qToken : queryFreq.keys()) {
-//      lenWght += queryFreq.get(qToken);
-//    }
-//    lenWght = 1 / lenWght;
+    float lenWght = ITEMSET_LEN_WEIGHT_DEFAULT;
+    // for (String qToken : queryFreq.keys()) {
+    // lenWght += queryFreq.get(qToken);
+    // }
+    // lenWght = 1 / lenWght;
     
     IntArrayList keyList = new IntArrayList(rs.size());
     rs.keysSortedByValue(keyList);
@@ -423,16 +431,29 @@ public class QueryExpander {
       }
       HashSet<String> termSet = Sets.newHashSet(terms.getTerms());
       
-      // Using corpus weight really hurts precision.. "cairo egypt" gets a weight of 300+ for evac
-      // Document doc = fisIxReader.document(hit);
-      // weight +=
-      // Float.parseFloat(doc.getFieldable(IndexBuilder.AssocField.SUPPORT.name).stringValue()) /
-      // termSet.size();
-      // float avgRank = (Float.parseFloat(doc.getFieldable(IndexBuilder.AssocField.RANK.name)
-      // .stringValue())
-      // + rank) / 2.0f;
-      float avgRank = rank;
+      Float weight = result.get(termSet);
+      if (weight == null) {
+        // corpus level importance (added once)
+        Document doc = fisIxReader.document(hit);
+        
+        float patternFreq = Float.parseFloat(doc.getFieldable(IndexBuilder.AssocField.SUPPORT.name)
+            .stringValue());
+        float patterIDF = (float) MathUtils.log(10, twtIxReader.numDocs() / patternFreq);
+        
+        float patternRank = Float.parseFloat(doc.getFieldable(IndexBuilder.AssocField.RANK.name)
+            .stringValue());
+        
+        // (k + 1)
+        // ------------------------------------- * idf * lambda
+        // k * ((1-b) + b * (avgL / L)) + rank
+        weight = itemsetCorpusModelWeight * ((patterIDF * (FIS_BASE_RANK_PARAM_DEFAULT + 1))
+            /
+            (FIS_BASE_RANK_PARAM_DEFAULT
+                * ((1 - lenWght) + (termSet.size() / itemsetLenghtAvg) * lenWght)
+                + patternRank));
+      }
       
+      // Query level importance
       float overlap = 0;
       for (String qToken : queryFreq.keys()) {
         if (termSet.contains(qToken)) {
@@ -440,13 +461,15 @@ public class QueryExpander {
         }
       }
       
-      Float weight = result.get(termSet);
-      if (weight == null) {
-        weight = 0.0f;
-      }
-      weight += (overlap * /* rs.get(hit) * */(FIS_BASE_RANK_PARAM_DEFAULT + 1)) /
-          (FIS_BASE_RANK_PARAM_DEFAULT * ((1 - lenWght) + (termSet.size() / avgLenght) * lenWght)
-          + avgRank);
+      // Sum of:
+      // (k + 1)
+      // ------------------------------------- * queryOverlap * (1-lambda)
+      // k * ((1-b) + b * (avgL / L)) + rank
+      weight += ((overlap * /* rs.get(hit) * */(FIS_BASE_RANK_PARAM_DEFAULT + 1))
+          /
+          (FIS_BASE_RANK_PARAM_DEFAULT
+              * ((1 - lenWght) + (termSet.size() / itemsetLenghtAvg) * lenWght)
+              + rank)) * (1-itemsetCorpusModelWeight);
       
       result.put(termSet, weight);
     }
