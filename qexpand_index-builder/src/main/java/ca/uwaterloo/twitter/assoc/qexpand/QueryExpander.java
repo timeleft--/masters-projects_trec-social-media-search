@@ -237,7 +237,7 @@ public class QueryExpander {
           OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>();
           MutableLong itemsetsLength = new MutableLong();
           
-          qEx.convertResultToWeightedTerms(fisRs, query.toString(), termFreq, itemsetsLength, -1);
+          qEx.convertResultToWeightedTerms(fisRs, query.toString(), termFreq, itemsetsLength, 100);
           
           LinkedList<String> terms = Lists.<String> newLinkedList();
           termFreq.keysSortedByValue(terms);
@@ -419,76 +419,87 @@ public class QueryExpander {
   
   public void convertResultToWeightedTerms(OpenIntFloatHashMap rs,
       String query, OpenObjectFloatHashMap<String> termWeightOut,
-      MutableLong itemsetsLengthOut, int numResults) throws IOException {
-    
+      MutableLong itemsetsLengthOut, int numItemSetToConsider) throws IOException {
+    if (numItemSetToConsider <= 0) {
+      throw new IllegalArgumentException("numItemSetToConsider must be positive");
+    }
     OpenObjectIntHashMap<String> queryFreq = queryTermFreq(query);
+    OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>();
     LinkedHashMap<Set<String>, Float> itemsets = convertResultToItemsetsInternal(rs,
         queryFreq,
-        termWeightOut,
+        termFreq,
         itemsetsLengthOut,
-        numResults);
+        -1);// numItemSetToConsider);
     
-    if (twtCorpusLength <= 0) {
-      twtCorpusLength = 0;
-      TermEnum termEnum = twtIxReader.terms();
-      while (termEnum.next()) {
-        // close enough.. we neglect tf altogether
-        twtCorpusLength += termEnum.docFreq();
-      }
-    }
-    
-    long lenDoc = itemsetsLengthOut.longValue();
-    for (String term : termWeightOut.keys()) {
-      float termIsFreq = termWeightOut.get(term);
-      float termCorpusFreq = twtIxReader.docFreq(new Term(TweetField.TEXT.name, term));
-      if (termCorpusFreq == 0) {
-        // a repeated hashtag.. skip
-        continue;
-      }
-      // twtIxReader.terms(new Term(TweetField.TEXT.name, term)).docFreq();
-      
-      // Language model with Jelinek Mercer Smoothing considering all the returned itemsets a doc
-      // // Book page 294
-      // float termW = ((1-termWeightSmoother)/termWeightSmoother)
-      // * (termIsFreq/lenDoc) * (twtCorpusLength/termCorpusFreq);
-      // termW = (float) ((1 + queryFreq.get(term)) * Math.log10(1+termW));
-      // Book page 291
-      float termW = (1 - termWeightSmoother) * (termIsFreq / lenDoc)
-          + termWeightSmoother * (termCorpusFreq / twtCorpusLength);
-      termW *= (1 + queryFreq.get(term));
-      
-      // //Language model with Dirchelet smoothing considering all the returned itemsets one
-      // document
-      // // Md(t) = Freq(t,d) + meu * Mc(t)
-      // // --------------------------
-      // // len(d) + meu
-      // float termW = (float) (1 + queryFreq.get(term)) * ((termIsFreq + (termWeightSmoother
-      // * (termCorpusFreq / twtCorpusLength)))
-      // / denim);
-      // float denim = (itemsetsLengthOut.floatValue() + termWeightSmoother);
-      // OR
-      // // Md(t) = q(t) * log (1 + f(t,d)/meu * len(C) / len(t)) - n * log(1 + l(d)/meu))
-      // // See book page 295
-      // float termW = (float) ((1 + queryFreq.get(term)) *
-      // MathUtils.log(10,
-      // 1 + ((termIsFreq / termWeightSmoother) * (twtCorpusLength / termCorpusFreq))))
-      // - subtrahend;
-      // float subtrahend = 0;
-      // IntArrayList qf = queryFreq.values();
-      // for (int i = 0; i < qf.size(); ++i) {
-      // subtrahend += qf.get(i);
-      // }
-      // subtrahend *= MathUtils.log(10, 1 + (itemsetsLengthOut.floatValue() / termWeightSmoother));
-      
-      termWeightOut.put(term, termW);
-    }
-    
-    // for (Entry<Set<String>, Float> is : itemsets.entrySet()) {
-    // for (String term : is.getKey()) {
-    // float termW = termWeightOut.get(term) * is.getValue();
+    // if (twtCorpusLength <= 0) {
+    // twtCorpusLength = 0;
+    // TermEnum termEnum = twtIxReader.terms();
+    // while (termEnum.next()) {
+    // // close enough.. we neglect tf altogether
+    // twtCorpusLength += termEnum.docFreq();
+    // }
+    // }
+    //
+    // long lenDoc = itemsetsLengthOut.longValue();
+    // for (String term : termWeightOut.keys()) {
+    // float termIsFreq = termWeightOut.get(term);
+    // float termCorpusFreq = twtIxReader.docFreq(new Term(TweetField.TEXT.name, term));
+    // if (termCorpusFreq == 0) {
+    // // a repeated hashtag.. skip
+    // continue;
+    // }
+    // // twtIxReader.terms(new Term(TweetField.TEXT.name, term)).docFreq();
+    //
+    // // Language model with Jelinek Mercer Smoothing considering all the returned itemsets a doc
+    // // // Book page 294
+    // // float termW = ((1-termWeightSmoother)/termWeightSmoother)
+    // // * (termIsFreq/lenDoc) * (twtCorpusLength/termCorpusFreq);
+    // // termW = (float) ((1 + queryFreq.get(term)) * Math.log10(1+termW));
+    // // Book page 291
+    // float termW = (1 - termWeightSmoother) * (termIsFreq / lenDoc)
+    // + termWeightSmoother * (termCorpusFreq / twtCorpusLength);
+    // termW *= (1 + queryFreq.get(term));
+    //
+    // // //Language model with Dirchelet smoothing considering all the returned itemsets one
+    // // document
+    // // // Md(t) = Freq(t,d) + meu * Mc(t)
+    // // // --------------------------
+    // // // len(d) + meu
+    // // float termW = (float) (1 + queryFreq.get(term)) * ((termIsFreq + (termWeightSmoother
+    // // * (termCorpusFreq / twtCorpusLength)))
+    // // / denim);
+    // // float denim = (itemsetsLengthOut.floatValue() + termWeightSmoother);
+    // // OR
+    // // // Md(t) = q(t) * log (1 + f(t,d)/meu * len(C) / len(t)) - n * log(1 + l(d)/meu))
+    // // // See book page 295
+    // // float termW = (float) ((1 + queryFreq.get(term)) *
+    // // MathUtils.log(10,
+    // // 1 + ((termIsFreq / termWeightSmoother) * (twtCorpusLength / termCorpusFreq))))
+    // // - subtrahend;
+    // // float subtrahend = 0;
+    // // IntArrayList qf = queryFreq.values();
+    // // for (int i = 0; i < qf.size(); ++i) {
+    // // subtrahend += qf.get(i);
+    // // }
+    // // subtrahend *= MathUtils.log(10, 1 + (itemsetsLengthOut.floatValue() /
+    // termWeightSmoother));
+    //
     // termWeightOut.put(term, termW);
     // }
-    // }
+    
+    for (Entry<Set<String>, Float> is : itemsets.entrySet()) {
+      for (String term : is.getKey()) {
+        // float termCorpFreq = twtIxReader.docFreq(new Term(TweetField.TEXT.name, term));
+        // if (termCorpFreq == 0) {
+        // // repeated hashtag
+        // continue;
+        // }
+        // float tfidf = (float) ((Math.log10(termFreq.get(term)) + 1) * Math.log10(twtIxReader
+        // .numDocs() / termCorpFreq));
+        
+        termWeightOut.put(term, termWeightOut.get(term) + termFreq.get(term));
+      }
+    }
   }
   
   public LinkedHashMap<Set<String>, Float> convertResultToItemsets(OpenIntFloatHashMap rs,
@@ -518,6 +529,8 @@ public class QueryExpander {
     // }
     // lenWght = 1 / lenWght;
     
+    OpenObjectIntHashMap<Set<String>> itemsetToDocId = new OpenObjectIntHashMap<Set<String>>();
+    
     IntArrayList keyList = new IntArrayList(rs.size());
     rs.keysSortedByValue(keyList);
     int rank = 0;
@@ -534,6 +547,7 @@ public class QueryExpander {
       if (itemsets.containsKey(termSet)) {
         weight = itemsets.get(termSet);
       } else {
+        itemsetToDocId.put(termSet, hit);
         // corpus level importance (added once)
         Document doc = fisIxReader.document(hit);
         
@@ -584,11 +598,17 @@ public class QueryExpander {
     while (isIter.hasNext() && (numResults <= 0 || result.size() < numResults)) {
       Set<String> is = isIter.next();
       float itemWeight = itemsets.get(is);
+      if(itemWeight < 3){
+        break;
+      }
       result.put(is, itemWeight);
       
       if (termFreqOut != null) {
         for (String term : is) {
-          termFreqOut.put(term, termFreqOut.get(term) + 1);// itemWeight);
+          termFreqOut.put(term, termFreqOut.get(term)
+              + (rs.get(itemsetToDocId.get(is))  
+                  * ((1 - lenWght) + (is.size() / itemsetLenghtAvg) * lenWght)));
+          // + 1);// itemWeight);
         }
       }
       
