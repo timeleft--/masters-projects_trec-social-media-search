@@ -62,9 +62,14 @@ public class QueryExpander {
   private static final float FIS_BASE_RANK_PARAM_DEFAULT = 60.0f;
   
   private static final String MIN_SCORE_OPTION = "min_score";
-  private static final float MIN_SCORE_DEFAULT = Float.MIN_VALUE; // 3.0f;
+  private static final float MIN_SCORE_DEFAULT = Float.MIN_VALUE; // very sensitive!
   
-  private static final int NUM_HITS_INTERNAL_DEFAULT = 1000;
+  // Must be large, because otherwise the topic drifts quickly...
+  // it seems that the top itemsets are repetetive, so we need more breadth
+  private static final int NUM_HITS_INTERNAL_DEFAULT = 777;
+  // This is enough recall and the concept doesn't drift much.. one more level pulls trash.. 
+  // less is more precise, but I'm afraid won't have enough recall; will use score to block trash 
+  private static final int MAX_LEVELS_EXPANSION = 3;
   private static final int NUM_HITS_SHOWN_DEFAULT = 1000;
   
   private static final Analyzer ANALYZER = new ItemsetAnalyzer();// new
@@ -78,7 +83,7 @@ public class QueryExpander {
   private static final float ITEMSET_LEN_AVG_DEFAULT = 5;
   
   private static final float ITEMSET_LEN_WEIGHT_DEFAULT = 0.33f;
-
+  
   private static final float ITEMSET_CORPUS_MODEL_WEIGHT_DEFAULT = 0.77f;
   
   public static enum TweetField {
@@ -295,7 +300,7 @@ public class QueryExpander {
   private final Similarity twtSimilarity;
   
   private float itemsetLenghtAvg = ITEMSET_LEN_AVG_DEFAULT;
-
+  
   // As in Jelink Mercer smoothing
   private float itemsetCorpusModelWeight = ITEMSET_CORPUS_MODEL_WEIGHT_DEFAULT;;
   
@@ -377,9 +382,8 @@ public class QueryExpander {
     
     Set<ScoreIxObj<String>> doneTerms = Sets.<ScoreIxObj<String>> newHashSet();
     
-    int level = 0;
-    while (extraTerms.size() > 0) {
-      ++level;
+    int level = 1;
+    while (extraTerms.size() > 0 && level < MAX_LEVELS_EXPANSION) {
       float fusionK = (float) (fisBaseRankingParam + Math.pow(10, level));
       extraTerms = expandRecursive(queryTerms,
           extraTerms,
@@ -388,6 +392,7 @@ public class QueryExpander {
           fisNumHits,
           minScore,
           fusionK);
+      ++level;
     }
     
     // for (int i = levelHits; i < rs.scoreDocs.length && result.size() < numHits; ++i) {
@@ -469,7 +474,7 @@ public class QueryExpander {
           /
           (FIS_BASE_RANK_PARAM_DEFAULT
               * ((1 - lenWght) + (termSet.size() / itemsetLenghtAvg) * lenWght)
-              + rank)) * (1-itemsetCorpusModelWeight);
+              + rank)) * (1 - itemsetCorpusModelWeight);
       
       result.put(termSet, weight);
     }
