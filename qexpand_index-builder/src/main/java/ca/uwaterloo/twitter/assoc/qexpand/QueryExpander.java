@@ -36,7 +36,6 @@ import org.apache.lucene.queryParser.QueryParser;
 import org.apache.lucene.queryParser.QueryParser.Operator;
 import org.apache.lucene.search.BooleanClause.Occur;
 import org.apache.lucene.search.BooleanQuery;
-import org.apache.lucene.search.DefaultSimilarity;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
@@ -46,7 +45,6 @@ import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.MMapDirectory;
 import org.apache.lucene.util.Version;
 import org.apache.mahout.math.list.IntArrayList;
-import org.apache.mahout.math.list.ObjectArrayList;
 import org.apache.mahout.math.map.OpenIntFloatHashMap;
 import org.apache.mahout.math.map.OpenObjectFloatHashMap;
 import org.apache.mahout.math.map.OpenObjectIntHashMap;
@@ -55,7 +53,6 @@ import org.slf4j.LoggerFactory;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.google.common.collect.ObjectArrays;
 import com.google.common.collect.Sets;
 import com.google.common.collect.Sets.SetView;
 
@@ -228,14 +225,13 @@ public class QueryExpander {
         Query parsedQuery = qEx.twtQparser.parse(query.toString());
         
         if (mode == 0) {
-          LinkedHashMap<Set<String>, Float> itemsets = qEx.convertResultToItemsets(fisRs,
+          LinkedHashMap<Set<String>, Float>  itemsets = qEx.convertResultToItemsets(fisRs,
               query.toString(),
               -1);
           // NUM_HITS_DEFAULT);
-          
           int i = 0;
-          for (Entry<Set<String>, Float> hit : itemsets.entrySet()) {
-            out.println(++i + " (" + hit.getValue() + "): " + hit.getKey().toString());
+          for (Entry<Set<String>, Float> e: itemsets.entrySet()){
+            out.println(++i + " (" + e.getValue() + "): " + e.getKey().toString());
           }
         } else if (mode == 5) {
           OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>();
@@ -424,7 +420,7 @@ public class QueryExpander {
   public void convertResultToWeightedTerms(OpenIntFloatHashMap rs,
       String query, OpenObjectFloatHashMap<String> termWeightOut,
       MutableLong itemsetsLengthOut, int numResults) throws IOException {
-    
+    LinkedHashMap<Set<String>, Float> itemsets = convertResultToItemsets(rs, query, numResults);
     IntArrayList keyList = new IntArrayList(rs.size());
     rs.keysSortedByValue(keyList);
     for (int i = rs.size() - 1; i >= 0 && (numResults <= 0 || termWeightOut.size() < numResults); --i) {
@@ -499,8 +495,7 @@ public class QueryExpander {
       OpenObjectIntHashMap<String> queryFreq, int numResults)
       throws IOException {
     
-    LinkedHashMap<Set<String>, Float> result = Maps.<Set<String>, Float> newLinkedHashMap();
-    
+    OpenObjectFloatHashMap<Set<String>> itemsets = new OpenObjectFloatHashMap<Set<String>>(); 
     float lenWght = ITEMSET_LEN_WEIGHT_DEFAULT;
     // for (String qToken : queryFreq.keys()) {
     // lenWght += queryFreq.get(qToken);
@@ -510,7 +505,7 @@ public class QueryExpander {
     IntArrayList keyList = new IntArrayList(rs.size());
     rs.keysSortedByValue(keyList);
     int rank = 0;
-    for (int i = rs.size() - 1; i >= 0 && (numResults <= 0 || result.size() < numResults); --i) {
+    for (int i = rs.size() - 1; i >= 0; --i) {
       int hit = keyList.getQuick(i);
       TermFreqVector terms = fisIxReader.getTermFreqVector(hit,
           IndexBuilder.AssocField.ITEMSET.name);
@@ -519,8 +514,10 @@ public class QueryExpander {
       }
       HashSet<String> termSet = Sets.newHashSet(terms.getTerms());
       
-      Float weight = result.get(termSet);
-      if (weight == null) {
+      float weight;
+      if (itemsets.containsKey(termSet)) {
+        weight = itemsets.get(termSet);
+      } else {
         // corpus level importance (added once)
         Document doc = fisIxReader.document(hit);
         
@@ -561,7 +558,16 @@ public class QueryExpander {
               + rank)) * (1 - itemsetCorpusModelWeight);
       weight += delta;
       
-      result.put(termSet, weight);
+      itemsets.put(termSet, weight);
+    }
+    
+    LinkedHashMap<Set<String>, Float> result = Maps.<Set<String>, Float> newLinkedHashMap();
+    LinkedList<Set<String>> keys = Lists.<Set<String>> newLinkedList();
+    itemsets.keysSortedByValue(keys);
+    Iterator<Set<String>> isIter = keys.descendingIterator();
+    while (isIter.hasNext() && (numResults <= 0 || result.size() < numResults)) {
+      Set<String> is = isIter.next();
+      result.put(is, itemsets.get(is));
     }
     return result;
   }
