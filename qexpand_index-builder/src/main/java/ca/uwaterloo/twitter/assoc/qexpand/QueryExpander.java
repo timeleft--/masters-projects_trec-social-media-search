@@ -230,27 +230,27 @@ public class QueryExpander {
               -1);
           // NUM_HITS_DEFAULT);
           
-            int i = 0;
-            for (Entry<Set<String>, Float> hit : itemsets.entrySet()) {
-              out.println(++i + " (" + hit.getValue() + "): " + hit.getKey().toString());
-            }
-          } else if (mode == 5) {
-            OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>();
-            MutableLong itemsetsLength = new MutableLong();
+          int i = 0;
+          for (Entry<Set<String>, Float> hit : itemsets.entrySet()) {
+            out.println(++i + " (" + hit.getValue() + "): " + hit.getKey().toString());
+          }
+        } else if (mode == 5) {
+          OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>();
+          MutableLong itemsetsLength = new MutableLong();
+          
+          qEx.converResultToWeightedTerms(fisRs, query.toString(), termFreq, itemsetsLength, -1);
+          
+          LinkedList<String> terms = Lists.<String> newLinkedList();
+          termFreq.keysSortedByValue(terms);
+          Iterator<String> termsIter = terms.descendingIterator();
+          int i = 0;
+          while (termsIter.hasNext()) {
+            String t = termsIter.next();
             
-            qEx.converResultToWeightedTerms(fisRs,query.toString(),termFreq,itemsetsLength,-1);
+            float termWeight = termFreq.get(t);
             
-            LinkedList<String> terms =  Lists.<String>newLinkedList(); 
-            termFreq.keysSortedByValue(terms);
-            Iterator<String> termsIter = terms.descendingIterator();
-            int i=0;
-            while(termsIter.hasNext()){
-              String t = termsIter.next();
-              
-              float termWeight = termFreq.get(t);
-              
-              out.println(++i + " (" + termWeight + "): " + t);
-            }
+            out.println(++i + " (" + termWeight + "): " + t);
+          }
           
         } else {
           BooleanQuery twtQ = new BooleanQuery();
@@ -259,7 +259,9 @@ public class QueryExpander {
           if (mode == 10) {
             twtQ.add(parsedQuery, Occur.MUST);
           } else if (mode == 20) {
-            twtQ.add(qEx.convertResultToBooleanQuery(fisRs, query.toString(), NUM_HITS_INTERNAL_DEFAULT),
+            twtQ.add(qEx.convertResultToBooleanQuery(fisRs,
+                query.toString(),
+                NUM_HITS_INTERNAL_DEFAULT),
                 Occur.SHOULD);
             twtQ.setMinimumNumberShouldMatch(1);
           }
@@ -426,14 +428,14 @@ public class QueryExpander {
         continue;
       }
       
-        for (String term : terms.getTerms()) {
-          termFreqOut.put(term, termFreqOut.get(term) + 1);
-        }
+      for (String term : terms.getTerms()) {
+        termFreqOut.put(term, termFreqOut.get(term) + 1);
+      }
       
-      if(itemsetsLengthOut != null){
+      if (itemsetsLengthOut != null) {
         itemsetsLengthOut.add(terms.size());
       }
-  
+      
     }
   }
   
@@ -441,7 +443,7 @@ public class QueryExpander {
       String query, int numResults) throws IOException {
     
     OpenObjectIntHashMap<String> queryFreq = new OpenObjectIntHashMap<String>();
- // String[] queryTokens = query.toString().split("\\W");
+    // String[] queryTokens = query.toString().split("\\W");
     TokenStream queryTokens = ANALYZER.tokenStream(TweetField.TEXT.name,
         new StringReader(query.toString()));
     queryTokens.reset();
@@ -457,16 +459,16 @@ public class QueryExpander {
       queryFreq.put(token, ++freq);
     }
     
-    return convertResultToItemsetsInternal(rs,queryFreq,numResults);
+    return convertResultToItemsetsInternal(rs, queryFreq, numResults);
   }
-
+  
   /**
    * Side effect: removes duplicates after converting docids to actual itemsets
    * 
    * @param rs
    * @param queryTerms
    * @param queryFreq
-   * @param itemsetsLengthOut 
+   * @param itemsetsLengthOut
    * @return
    * @throws IOException
    */
