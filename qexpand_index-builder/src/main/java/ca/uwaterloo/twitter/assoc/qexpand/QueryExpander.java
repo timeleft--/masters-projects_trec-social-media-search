@@ -238,10 +238,10 @@ public class QueryExpander {
             out.println(++i + " (" + is.score + "): " + is.obj.toString());
           }
         } else if (mode == 5) {
-          OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>();
-          MutableLong itemsetsLength = new MutableLong();
           
-          qEx.convertResultToWeightedTerms(fisRs, query.toString(), termFreq, itemsetsLength, -1);
+          OpenObjectFloatHashMap<String> termFreq = qEx.convertResultToWeightedTerms(fisRs,
+              query.toString(),
+              -1);
           
           LinkedList<String> terms = Lists.<String> newLinkedList();
           termFreq.keysSortedByValue(terms);
@@ -321,8 +321,8 @@ public class QueryExpander {
   private float termWeightSmoother = TERM_WEIGHT_SMOOTHER_DEFAULT;
   
   private long twtCorpusLength = -1;
-
-  private float itemSetLenWght= ITEMSET_LEN_WEIGHT_DEFAULT;
+  
+  private float itemSetLenWght = ITEMSET_LEN_WEIGHT_DEFAULT;
   
   public QueryExpander(File fisIndexLocation, File twtIndexLocation) throws IOException {
     Directory fisdir = new MMapDirectory(fisIndexLocation);
@@ -423,17 +423,19 @@ public class QueryExpander {
     return resultSet;
   }
   
-  public void convertResultToWeightedTerms(OpenIntFloatHashMap rs,
-      String query, OpenObjectFloatHashMap<String> termWeightOut,
-      MutableLong itemsetsLengthOut, int numResults) throws IOException {
+  public OpenObjectFloatHashMap<String> convertResultToWeightedTerms(OpenIntFloatHashMap rs,
+      String query, int numItemsetsToConsider) throws IOException {
+    
+    OpenObjectFloatHashMap<String> result = new OpenObjectFloatHashMap<String>();
+//    OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>();
+    OpenObjectFloatHashMap<String> termDocFreq = new OpenObjectFloatHashMap<String>();
     
     OpenObjectIntHashMap<String> termIds = new OpenObjectIntHashMap<String>();
     
     TransactionTree itemsets = convertResultToItemsetsInternal(rs,
         queryTermFreq(query),
         termIds,
-        itemsetsLengthOut,
-        numResults);
+        numItemsetsToConsider);
     
     List<String> terms = Lists.newArrayListWithCapacity(termIds.size());
     termIds.keysSortedByValue(terms);
@@ -442,46 +444,66 @@ public class QueryExpander {
     
     Queue<Integer> parentQueue = Queues.newLinkedBlockingQueue();
     parentQueue.add(TransactionTree.ROOTNODEID);
-    int level=1;
-    long nTotal = 0; //itemsetsLengthOut.longValue();
+    int level = 1;
+    
+//    int nTerms = 0;
+    int nFis = 0;
     while (!parentQueue.isEmpty()) {
       Integer p = parentQueue.poll();
       int children = itemsets.childCount(p);
       for (int c = 0; c < children; ++c) {
         int n = itemsets.childAtIndex(p, c);
-        String t =terms.get(itemsets.attribute(n));
-
-        // TF no IDF (commented)
-        float w = (float)(itemsets.count(n)/SCORE_PRECISION_MULTIPLIER);
-//            * (float)(Math.log(twtIxReader.numDocs()/(double)(docFreq+1)) + 1.0);
-        termWeightOut.put(t,
-            termWeightOut.get(t) + w);
+        String t = terms.get(itemsets.attribute(n));
         
-        nTotal += w;
+        // frequency in itemsets
+        float w = (float) (itemsets.count(n) / SCORE_PRECISION_MULTIPLIER);
+        
+        int nPathes = itemsets.childCount(n);
+        if (nPathes == 0) {
+          // leaf node
+          nFis += 1; //w
+          nPathes = 1;
+        }
+        w *= nPathes;
+        
+//        termFreq.put(t, termFreq.get(t) + 1); //w);
+//        nTerms += 1; //w;
+        termDocFreq.put(t, termDocFreq.get(t) + nPathes);
         
         parentQueue.add(n);
       }
       ++level;
     }
     
-    List<String> weightedTerms = Lists.newArrayListWithCapacity(termWeightOut.size());
-    termWeightOut.keysSortedByValue(weightedTerms);
+    // List<String> weightedTerms = Lists.newArrayListWithCapacity(termFreq.size());
+    // termFreq.keysSortedByValue(weightedTerms);
     
-
-    for(String t: weightedTerms){
-      float pIs = termWeightOut.get(t)/nTotal;
-      float docFreq = twtIxReader.docFreq(new Term(TweetField.TEXT.name,t));
-      if(docFreq == 0){
-        continue;
-      }
-      float pC = docFreq / twtIxReader.numDocs();
-//       Change of entropy of single words
-      float w = (float)((-pIs * MathUtils.log(2, pIs)) / (-pC * MathUtils.log(2, pC)));
-//      //log odds
-//      float w = (float)Math.log10(pIs/pC);
-      termWeightOut.put(t, w);
+    for (String t : terms) {
+       Term tTerm = new Term(TweetField.TEXT.name, t);
+       float docFreqC = twtIxReader.docFreq(tTerm);
+       if (docFreqC == 0) {
+       continue;
+       }
+       float pC = docFreqC / twtIxReader.numDocs();
+       float pIs = termDocFreq.get(t) / nFis;
+       
+      // // Change of entropy of single words
+      // float w = (float) ((-pIs * MathUtils.log(2, pIs)) / (-pC * MathUtils.log(2, pC)));
+      // // //log odds
+      // // float w = (float)Math.log10(pIs/pC);
+      
+//      // tf-idf in the itemsets collection
+//      float w = (float) ((Math.log(termFreq.get(t)) + 1) * (Math.log(nFis
+//          / (double) (termDocFreq.get(t) + 1)) + 1.0));
+      
+      // log-odds(term) * idf-itemsets(term)
+      float w = (float) (Math.log(pIs/pC)
+          * (Math.log(nFis / (double) (termDocFreq.get(t) + 1)) + 1.0));
+      
+      result.put(t, w);
     }
     
+    return result;
     //
     //
     // PriorityQueue<ScoreIxObj<List<String>>> result = new
@@ -568,7 +590,6 @@ public class QueryExpander {
     TransactionTree itemsets = convertResultToItemsetsInternal(rs,
         queryTermFreq(query),
         termIds,
-        null,
         numResults);
     
     List<String> terms = Lists.newArrayListWithCapacity(termIds.size());
@@ -604,7 +625,7 @@ public class QueryExpander {
    */
   private TransactionTree convertResultToItemsetsInternal(OpenIntFloatHashMap rs,
       OpenObjectIntHashMap<String> queryFreq, OpenObjectIntHashMap<String> termIdOut,
-      MutableLong itemsetsLengthOut, int numResults)
+      int numResults)
       throws IOException {
     
     OpenObjectFloatHashMap<Set<String>> itemsets = new OpenObjectFloatHashMap<Set<String>>();
@@ -622,18 +643,14 @@ public class QueryExpander {
       }
       Set<String> termSet = Sets.newLinkedHashSet(Arrays.asList(terms.getTerms()));
       
-      Document doc = fisIxReader.document(hit);
-      float patternFreq = Float.parseFloat(doc.getFieldable(IndexBuilder.AssocField.SUPPORT.name)
-          .stringValue());
-      if (itemsetsLengthOut != null) {
-        itemsetsLengthOut.add(patternFreq);
-      }
-      
       float weight;
       if (itemsets.containsKey(termSet)) {
         weight = itemsets.get(termSet);
       } else {
         // corpus level importance (added once)
+        Document doc = fisIxReader.document(hit);
+        float patternFreq = Float.parseFloat(doc.getFieldable(IndexBuilder.AssocField.SUPPORT.name)
+            .stringValue());
         float patterIDF = (float) MathUtils.log(10, twtIxReader.numDocs() / patternFreq);
         
         float patternRank = Float.parseFloat(doc.getFieldable(IndexBuilder.AssocField.RANK.name)
