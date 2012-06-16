@@ -1,23 +1,17 @@
 package ca.uwaterloo.twitter.assoc.qexpand;
 
-import static com.google.common.base.Preconditions.checkNotNull;
-
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
-import java.io.Serializable;
 import java.io.StringReader;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.PriorityQueue;
 import java.util.Set;
-
-import javax.annotation.Nullable;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
@@ -56,7 +50,6 @@ import org.apache.mahout.math.map.OpenObjectIntHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
@@ -96,10 +89,11 @@ public class QueryExpander {
   private static final float ITEMSET_LEN_WEIGHT_DEFAULT = 0.33f;
   
   private static final float ITEMSET_CORPUS_MODEL_WEIGHT_DEFAULT = 0.77f;
+  private static final float TWITTER_CORPUS_MODEL_WEIGHT_DEFAULT = 0.77f;
   
-  private static final float TERM_WEIGHT_SMOOTHER_DEFAULT = 0.0f;
+  private static final float TERM_WEIGHT_SMOOTHER_DEFAULT = 10000.0f;
   
-  private static final float SCORE_PRECISION_MULTIPLIER = 100000;
+  private static final float SCORE_PRECISION_MULTIPLIER = 100000.0f;
   
   public static enum TweetField {
     ID("id"),
@@ -322,11 +316,10 @@ public class QueryExpander {
   
   // As in Lambda of Jelink Mercer smoothing
   private float itemsetCorpusModelWeight = ITEMSET_CORPUS_MODEL_WEIGHT_DEFAULT;
+  private float twitterCorpusModelWeight = TWITTER_CORPUS_MODEL_WEIGHT_DEFAULT;
   
   // As in Mue of Dirchilet smoothing
   private float termWeightSmoother = TERM_WEIGHT_SMOOTHER_DEFAULT;
-  
-  private long twtCorpusLength = -1;
   
   private float itemSetLenWght = ITEMSET_LEN_WEIGHT_DEFAULT;
   
@@ -502,7 +495,15 @@ public class QueryExpander {
       if (docFreqC == 0) {
         continue;
       }
-      float termCorpusQuality = (float) (Math.log(twtIxReader.numDocs() / (double) (docFreqC + 1)) + 1.0);
+      
+      // odds of the term (not log odds)
+      float termCorpusQuality = (termWeightSmoother + docFreqC) / twtIxReader.numDocs();
+      termCorpusQuality = termCorpusQuality / (1 - termCorpusQuality);
+//      termCorpusQuality = (float) Math.log10(termCorpusQuality);
+      
+      // IDF is has very large scale compared to probabilities
+      // float termCorpusQuality = (float) (Math.log(twtIxReader.numDocs() / (double) (docFreqC +
+      // 1)) + 1.0);
       
       // Query metric
       double termQueryQuality = 0;
@@ -512,15 +513,21 @@ public class QueryExpander {
           continue;
         }
         
-        termQueryQuality += expandSubset(qSub, 1, t, termFreq.get(t) / totalW, queryPowerSet, subsetFreq);
+        termQueryQuality += expandSubset(qSub,
+            1,
+            t,
+            termFreq.get(t) / totalW,
+            queryPowerSet,
+            subsetFreq);
       }
       
-      result.put(t, (float) (termWeightSmoother * termCorpusQuality + (1 - termWeightSmoother) * termQueryQuality));
+      result.put(t,
+          (float) (twitterCorpusModelWeight * termCorpusQuality + 
+              (1 - twitterCorpusModelWeight) * termQueryQuality));
     }
     
     return result;
     
- 
   }
   
   private double expandSubset(Set<String> qSub, int size, String term, double currP,
@@ -528,10 +535,10 @@ public class QueryExpander {
     
     double result = 0;
     
-    for (Set<String> qSubExp : queryPowerSet){ //Sets.difference(queryPowerSet,qSub)) {
+    for (Set<String> qSubExp : queryPowerSet) { // Sets.difference(queryPowerSet,qSub)) {
       boolean followThrow = true;
-      if(qSub.equals(qSubExp)){
-        continue; 
+      if (qSub.equals(qSubExp)) {
+        continue;
       } else if (qSubExp.isEmpty()) {
         qSubExp = qSub;
         followThrow = false;
@@ -560,7 +567,7 @@ public class QueryExpander {
           result += expandSubset(qSubExp, size + 1, term, pExp, queryPowerSet, subsetFreq);
         }
       } else {
-        if(pExp == 0){
+        if (pExp == 0) {
           // The first part is not there.. nothing will ever be there
           break;
         }
