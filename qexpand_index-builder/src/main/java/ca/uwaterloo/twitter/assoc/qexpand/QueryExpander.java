@@ -57,54 +57,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Predicate;
-import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.common.collect.Sets.SetView;
 
 public class QueryExpander {
-  
-  private static class InPredicate<T> implements Predicate<T>, Serializable {
-    private final Collection<?> target;
-    
-    private InPredicate(Collection<?> target) {
-      this.target = checkNotNull(target);
-    }
-    
-    @Override
-    public boolean apply(T t) {
-      try {
-        return target.contains(t);
-      } catch (NullPointerException e) {
-        return false;
-      } catch (ClassCastException e) {
-        return false;
-      }
-    }
-    
-    @Override
-    public boolean equals(@Nullable Object obj) {
-      if (obj instanceof InPredicate) {
-        InPredicate<?> that = (InPredicate<?>) obj;
-        return target.equals(that.target);
-      }
-      return false;
-    }
-    
-    @Override
-    public int hashCode() {
-      return target.hashCode();
-    }
-    
-    @Override
-    public String toString() {
-      return "In(" + target + ")";
-    }
-    
-    private static final long serialVersionUID = 0;
-  }
   
   private static Logger LOG = LoggerFactory.getLogger(QueryExpander.class);
   
@@ -488,24 +446,11 @@ public class QueryExpander {
     Set<String> querySet = Sets.newHashSet(queryFreq.keys());
     Set<Set<String>> queryPowerSet = Sets.powerSet(querySet);
     
-    // Can't find anyway to do it!
-    // //remove empty set
-    // Set<String> emptySet = null;
-    // Iterator<Set<String>> powerSetIter = queryPowerSet.iterator();
-    // while(powerSetIter.hasNext()){
-    // emptySet = powerSetIter.next();
-    // if(emptySet.isEmpty()){
-    // break;
-    // }
-    // }
-    // queryPowerSet = Sets.difference(queryPowerSet, Sets.newHashSet(emptySet));
-    
     int capacity = queryPowerSet.size() * (terms.size() - queryFreq.size());
     OpenObjectFloatHashMap<Set<String>> subsetFreq = new OpenObjectFloatHashMap<Set<String>>(
         Math.max(0, capacity));
     OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>(terms.size());
     double totalW = 0;
-    // double lnTotalW;
     
     Iterator<Pair<IntArrayList, Long>> itemsetIter = itemsets.iteratorClosed();
     while (itemsetIter.hasNext()) {
@@ -547,8 +492,6 @@ public class QueryExpander {
       }
     }
     
-    // lnTotalW = Math.log(totalW);
-    
     for (String t : terms) {
       if (queryFreq.containsKey(t)) {
         continue;
@@ -559,179 +502,25 @@ public class QueryExpander {
       if (docFreqC == 0) {
         continue;
       }
-      float idf = (float) (Math.log(twtIxReader.numDocs() / (double) (docFreqC + 1)) + 1.0);
+      float termCorpusQuality = (float) (Math.log(twtIxReader.numDocs() / (double) (docFreqC + 1)) + 1.0);
       
       // Query metric
-      double nmi = 0;
+      double termQueryQuality = 0;
       
       for (Set<String> qSub : queryPowerSet) {
         if (qSub.size() != 1) {
           continue;
         }
         
-        nmi += expandSubset(qSub, 1, t, termFreq.get(t) / totalW, queryPowerSet, subsetFreq);
+        termQueryQuality += expandSubset(qSub, 1, t, termFreq.get(t) / totalW, queryPowerSet, subsetFreq);
       }
       
-      result.put(t, (float) (termWeightSmoother * idf + (1 - termWeightSmoother) * nmi));
+      result.put(t, (float) (termWeightSmoother * termCorpusQuality + (1 - termWeightSmoother) * termQueryQuality));
     }
     
     return result;
     
-    // OpenObjectFloatHashMap<String> result = new OpenObjectFloatHashMap<String>();
-    // // OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>();
-    // OpenObjectFloatHashMap<String> termDocFreq = new OpenObjectFloatHashMap<String>();
-    //
-    // OpenObjectIntHashMap<String> termIds = new OpenObjectIntHashMap<String>();
-    //
-    // TransactionTree itemsets = convertResultToItemsetsInternal(rs,
-    // queryTermFreq(query),
-    // termIds,
-    // numItemsetsToConsider);
-    //
-    // List<String> terms = Lists.newArrayListWithCapacity(termIds.size());
-    // termIds.keysSortedByValue(terms);
-    //
-    // // Level traversal of the tree
-    //
-    // Queue<Integer> parentQueue = Queues.newLinkedBlockingQueue();
-    // parentQueue.add(TransactionTree.ROOTNODEID);
-    // int level = 1;
-    //
-    // // int nTerms = 0;
-    // int nFis = 0;
-    // while (!parentQueue.isEmpty()) {
-    // Integer p = parentQueue.poll();
-    // int children = itemsets.childCount(p);
-    // for (int c = 0; c < children; ++c) {
-    // int n = itemsets.childAtIndex(p, c);
-    // String t = terms.get(itemsets.attribute(n));
-    //
-    // // frequency in itemsets
-    // float w = (float) (itemsets.count(n) / SCORE_PRECISION_MULTIPLIER);
-    //
-    // int nPathes = itemsets.childCount(n);
-    // if (nPathes == 0) {
-    // // leaf node
-    // nFis += 1; //w
-    // nPathes = 1;
-    // }
-    // w *= nPathes;
-    //
-    // // termFreq.put(t, termFreq.get(t) + 1); //w);
-    // // nTerms += 1; //w;
-    // termDocFreq.put(t, termDocFreq.get(t) + nPathes);
-    //
-    // parentQueue.add(n);
-    // }
-    // ++level;
-    // }
-    //
-    // // List<String> weightedTerms = Lists.newArrayListWithCapacity(termFreq.size());
-    // // termFreq.keysSortedByValue(weightedTerms);
-    //
-    // for (String t : terms) {
-    // Term tTerm = new Term(TweetField.TEXT.name, t);
-    // float docFreqC = twtIxReader.docFreq(tTerm);
-    // if (docFreqC == 0) {
-    // continue;
-    // }
-    // float pC = docFreqC / twtIxReader.numDocs();
-    // float pIs = termDocFreq.get(t) / nFis;
-    //
-    // // // Change of entropy of single words
-    // // float w = (float) ((-pIs * MathUtils.log(2, pIs)) / (-pC * MathUtils.log(2, pC)));
-    // // // //log odds
-    // // // float w = (float)Math.log10(pIs/pC);
-    //
-    // // // tf-idf in the itemsets collection
-    // // float w = (float) ((Math.log(termFreq.get(t)) + 1) * (Math.log(nFis
-    // // / (double) (termDocFreq.get(t) + 1)) + 1.0));
-    //
-    // // log-odds(term) * idf-itemsets(term)
-    // float w = (float) (Math.log(pIs/pC)
-    // * (Math.log(nFis / (double) (termDocFreq.get(t) + 1)) + 1.0));
-    //
-    // result.put(t, w);
-    // }
-    //
-    // return result;
-    // //
-    // //
-    // // PriorityQueue<ScoreIxObj<List<String>>> result = new
-    // // PriorityQueue<ScoreIxObj<List<String>>>();
-    // // itemsets.count(nodeId)
-    // //
-    // // OpenObjectIntHashMap<String> queryFreq = queryTermFreq(query);
-    // // TransactionTree itemsets = convertResultToItemsetsInternal(rs,
-    // // queryFreq,
-    // // null, //termWeightOut,
-    // // itemsetsLengthOut,
-    // // numResults);
-    // //
-    // // if (twtCorpusLength <= 0) {
-    // // twtCorpusLength = 0;
-    // // TermEnum termEnum = twtIxReader.terms();
-    // // while (termEnum.next()) {
-    // // // close enough.. we neglect tf altogether
-    // // twtCorpusLength += termEnum.docFreq();
-    // // }
-    // // }
-    // //
-    // // long lenDoc = itemsetsLengthOut.longValue();
-    // // for (String term : termWeightOut.keys()) {
-    // // float termIsFreq = termWeightOut.get(term);
-    // // float termCorpusFreq = twtIxReader.docFreq(new Term(TweetField.TEXT.name, term));
-    // // if (termCorpusFreq == 0) {
-    // // // a repeated hashtag.. skip
-    // // continue;
-    // // }
-    // // // twtIxReader.terms(new Term(TweetField.TEXT.name, term)).docFreq();
-    // //
-    // // // Language model with Jelinek Mercer Smoothing considering all the returned itemsets a
-    // doc
-    // // // Book page 294
-    // // float termW = ((1 - termWeightSmoother) / termWeightSmoother)
-    // // * (termIsFreq / lenDoc) * (twtCorpusLength / termCorpusFreq);
-    // // termW = (float) ((1 + queryFreq.get(term)) * Math.log10(1 + termW));
-    // // // Book page 291
-    // //
-    // // // float termW = (1-termWeightSmoother) * (termIsFreq / lenDoc)
-    // // // + termWeightSmoother * (termCorpusFreq / twtCorpusLength);
-    // // // termW *= (1 + queryFreq.get(term));
-    // //
-    // // // //Language model with Dirchelet smoothing considering all the returned itemsets one
-    // // // document
-    // // // // Md(t) = Freq(t,d) + meu * Mc(t)
-    // // // // --------------------------
-    // // // // len(d) + meu
-    // // // float termW = (float) (1 + queryFreq.get(term)) * ((termIsFreq + (termWeightSmoother
-    // // // * (termCorpusFreq / twtCorpusLength)))
-    // // // / denim);
-    // // // float denim = (itemsetsLengthOut.floatValue() + termWeightSmoother);
-    // // // OR
-    // // // // Md(t) = q(t) * log (1 + f(t,d)/meu * len(C) / len(t)) - n * log(1 + l(d)/meu))
-    // // // // See book page 295
-    // // // float termW = (float) ((1 + queryFreq.get(term)) *
-    // // // MathUtils.log(10,
-    // // // 1 + ((termIsFreq / termWeightSmoother) * (twtCorpusLength / termCorpusFreq))))
-    // // // - subtrahend;
-    // // // float subtrahend = 0;
-    // // // IntArrayList qf = queryFreq.values();
-    // // // for (int i = 0; i < qf.size(); ++i) {
-    // // // subtrahend += qf.get(i);
-    // // // }
-    // // // subtrahend *= MathUtils.log(10, 1 + (itemsetsLengthOut.floatValue() /
-    // // termWeightSmoother));
-    // //
-    // // termWeightOut.put(term, termW);
-    // // }
-    // //
-    // // // for (Entry<Set<String>, Float> is : itemsets.entrySet()) {
-    // // // for (String term : is.getKey()) {
-    // // // float termW = termWeightOut.get(term) * is.getValue();
-    // // // termWeightOut.put(term, termW);
-    // // // }
-    // // // }
+ 
   }
   
   private double expandSubset(Set<String> qSub, int size, String term, double currP,
