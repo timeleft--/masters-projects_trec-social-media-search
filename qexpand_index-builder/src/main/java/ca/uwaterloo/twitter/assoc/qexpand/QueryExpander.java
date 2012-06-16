@@ -6,6 +6,8 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.io.StringReader;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -44,6 +46,8 @@ import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.MMapDirectory;
 import org.apache.lucene.util.Version;
+import org.apache.mahout.common.Pair;
+import org.apache.mahout.freqtermsets.TransactionTree;
 import org.apache.mahout.math.list.IntArrayList;
 import org.apache.mahout.math.map.OpenIntFloatHashMap;
 import org.apache.mahout.math.map.OpenObjectFloatHashMap;
@@ -51,6 +55,7 @@ import org.apache.mahout.math.map.OpenObjectIntHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
@@ -225,12 +230,12 @@ public class QueryExpander {
         Query parsedQuery = qEx.twtQparser.parse(query.toString());
         
         if (mode == 0) {
-          LinkedHashMap<Set<String>, Float> itemsets = qEx.convertResultToItemsets(fisRs,
+          LinkedHashMap<List<String>, Float> itemsets = qEx.convertResultToItemsets(fisRs,
               query.toString(),
               -1);
           // NUM_HITS_DEFAULT);
           int i = 0;
-          for (Entry<Set<String>, Float> e : itemsets.entrySet()) {
+          for (Entry<List<String>, Float> e : itemsets.entrySet()) {
             out.println(++i + " (" + e.getValue() + "): " + e.getKey().toString());
           }
         } else if (mode == 5) {
@@ -422,9 +427,9 @@ public class QueryExpander {
       MutableLong itemsetsLengthOut, int numResults) throws IOException {
     
     OpenObjectIntHashMap<String> queryFreq = queryTermFreq(query);
-    LinkedHashMap<Set<String>, Float> itemsets = convertResultToItemsetsInternal(rs,
+    TransactionTree itemsets = convertResultToItemsetsInternal(rs,
         queryFreq,
-        termWeightOut,
+        null, //termWeightOut,
         itemsetsLengthOut,
         numResults);
     
@@ -441,23 +446,22 @@ public class QueryExpander {
     for (String term : termWeightOut.keys()) {
       float termIsFreq = termWeightOut.get(term);
       float termCorpusFreq = twtIxReader.docFreq(new Term(TweetField.TEXT.name, term));
-      if(termCorpusFreq == 0){
+      if (termCorpusFreq == 0) {
         // a repeated hashtag.. skip
         continue;
       }
       // twtIxReader.terms(new Term(TweetField.TEXT.name, term)).docFreq();
       
       // Language model with Jelinek Mercer Smoothing considering all the returned itemsets a doc
-   // Book page 294
-      float termW = ((1-termWeightSmoother)/termWeightSmoother)
-            * (termIsFreq/lenDoc) * (twtCorpusLength/termCorpusFreq);
-      termW = (float) ((1 + queryFreq.get(term)) * Math.log10(1+termW));
+      // Book page 294
+      float termW = ((1 - termWeightSmoother) / termWeightSmoother)
+          * (termIsFreq / lenDoc) * (twtCorpusLength / termCorpusFreq);
+      termW = (float) ((1 + queryFreq.get(term)) * Math.log10(1 + termW));
       // Book page 291
       
-//      float termW = (1-termWeightSmoother) * (termIsFreq / lenDoc) 
-//          +  termWeightSmoother * (termCorpusFreq / twtCorpusLength);
-//      termW *= (1 + queryFreq.get(term));
-      
+      // float termW = (1-termWeightSmoother) * (termIsFreq / lenDoc)
+      // + termWeightSmoother * (termCorpusFreq / twtCorpusLength);
+      // termW *= (1 + queryFreq.get(term));
       
       // //Language model with Dirchelet smoothing considering all the returned itemsets one
       // document
@@ -467,7 +471,7 @@ public class QueryExpander {
       // float termW = (float) (1 + queryFreq.get(term)) * ((termIsFreq + (termWeightSmoother
       // * (termCorpusFreq / twtCorpusLength)))
       // / denim);
-      //float denim = (itemsetsLengthOut.floatValue() + termWeightSmoother);
+      // float denim = (itemsetsLengthOut.floatValue() + termWeightSmoother);
       // OR
       // // Md(t) = q(t) * log (1 + f(t,d)/meu * len(C) / len(t)) - n * log(1 + l(d)/meu))
       // // See book page 295
@@ -493,9 +497,31 @@ public class QueryExpander {
     // }
   }
   
-  public LinkedHashMap<Set<String>, Float> convertResultToItemsets(OpenIntFloatHashMap rs,
+  public LinkedHashMap<List<String>, Float> convertResultToItemsets(OpenIntFloatHashMap rs,
       String query, int numResults) throws IOException {
-    return convertResultToItemsetsInternal(rs, queryTermFreq(query), null, null, numResults);
+    
+    OpenObjectIntHashMap<String> termIds = new OpenObjectIntHashMap<String>();
+    
+    TransactionTree itemsets = convertResultToItemsetsInternal(rs, queryTermFreq(query), termIds, null, numResults);
+    
+    List<String> terms = Lists.newArrayListWithCapacity(termIds.size()); 
+    termIds.keysSortedByValue(terms);
+    
+    LinkedHashMap<List<String>, Float> result = Maps.newLinkedHashMap();
+    Iterator<Pair<IntArrayList, Long>> itemsetIter = itemsets.iteratorClosed();
+    while(itemsetIter.hasNext()){
+      Pair<IntArrayList, Long> patternPair = itemsetIter.next();
+      IntArrayList pattern = patternPair.getFirst();
+      int pSize = pattern.size();
+      List<String> fis = Lists.newArrayListWithCapacity(pSize);
+      for(int i=0; i<pSize; ++i){
+        fis.add(terms.get(pattern.getQuick(i)));
+      }
+      
+      result.put(fis, patternPair.getSecond().floatValue());
+    }
+    
+    return result;
   }
   
   /**
@@ -508,8 +534,8 @@ public class QueryExpander {
    * @return
    * @throws IOException
    */
-  private LinkedHashMap<Set<String>, Float> convertResultToItemsetsInternal(OpenIntFloatHashMap rs,
-      OpenObjectIntHashMap<String> queryFreq, OpenObjectFloatHashMap<String> termFreqOut,
+  private TransactionTree convertResultToItemsetsInternal(OpenIntFloatHashMap rs,
+      OpenObjectIntHashMap<String> queryFreq, OpenObjectIntHashMap<String> termIdOut,
       MutableLong itemsetsLengthOut, int numResults)
       throws IOException {
     
@@ -530,7 +556,7 @@ public class QueryExpander {
       if (terms.size() < MIN_ITEMSET_SIZE) {
         continue;
       }
-      HashSet<String> termSet = Sets.newHashSet(terms.getTerms());
+      Set<String> termSet = Sets.newLinkedHashSet(Arrays.asList(terms.getTerms()));
       
       float weight;
       if (itemsets.containsKey(termSet)) {
@@ -579,20 +605,33 @@ public class QueryExpander {
       itemsets.put(termSet, weight);
     }
     
-    LinkedHashMap<Set<String>, Float> result = Maps.<Set<String>, Float> newLinkedHashMap();
+    // LinkedHashMap<Set<String>, Float> result = Maps.<Set<String>, Float> newLinkedHashMap();
+    TransactionTree result = new TransactionTree();
+    int nextTerm = 0;
     LinkedList<Set<String>> keys = Lists.<Set<String>> newLinkedList();
     itemsets.keysSortedByValue(keys);
     Iterator<Set<String>> isIter = keys.descendingIterator();
-    while (isIter.hasNext() && (numResults <= 0 || result.size() < numResults)) {
+    int r = 0;
+    while (isIter.hasNext() && (numResults <= 0 || r/*result.size()*/ < numResults)) {
+      ++r;
       Set<String> is = isIter.next();
-      float itemWeight = itemsets.get(is);
-      result.put(is, itemWeight);
+      long itemWeight = Math.round(MathUtils.round(itemsets.get(is), 5)* 100000);
+      // result.put(is, itemWeight);
       
-      if (termFreqOut != null) {
-        for (String term : is) {
-          termFreqOut.put(term, termFreqOut.get(term) + 1);// itemWeight);
+      IntArrayList patternInts = new IntArrayList(is.size());
+      for (String term : is) {
+        int termInt;
+        if (termIdOut.containsKey(term)) {
+          termInt = termIdOut.get(term);
+        } else {
+          termInt = nextTerm++;
+          termIdOut.put(term, termInt);
         }
+        patternInts.add(termInt);
+        // termFreqOut.put(term, termFreqOut.get(term) + 1);// itemWeight);
       }
+      
+      result.addPattern(patternInts, itemWeight);
       
       if (itemsetsLengthOut != null) {
         itemsetsLengthOut.add(is.size());
@@ -604,7 +643,7 @@ public class QueryExpander {
   public Query convertResultToBooleanQuery(OpenIntFloatHashMap rs, String query, int numResults)
       throws IOException, org.apache.lucene.queryParser.ParseException {
     BooleanQuery result = new BooleanQuery();
-    for (Entry<Set<String>, Float> e : convertResultToItemsets(rs, query, numResults)
+    for (Entry<List<String>, Float> e : convertResultToItemsets(rs, query, numResults)
         .entrySet()) {
       Query itemsetQuer = twtQparser.parse(e.getKey().toString().replaceAll("[\\,\\[\\]]", ""));
       itemsetQuer.setBoost(e.getValue());
@@ -617,7 +656,7 @@ public class QueryExpander {
       String query, int numResults)
       throws IOException, org.apache.lucene.queryParser.ParseException {
     List<Query> result = Lists.<Query> newLinkedList();
-    for (Entry<Set<String>, Float> e : convertResultToItemsets(rs, query, numResults)
+    for (Entry<List<String>, Float> e : convertResultToItemsets(rs, query, numResults)
         .entrySet()) {
       Query itemsetQuer = twtQparser.parse(e.getKey().toString().replaceAll("[\\,\\[\\]]", ""));
       itemsetQuer.setBoost(e.getValue());

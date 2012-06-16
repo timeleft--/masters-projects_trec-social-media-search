@@ -220,13 +220,17 @@ public final class TransactionTree implements Writable, Iterable<Pair<IntArrayLi
   }
   
   @Override
-  public Iterator<Pair<IntArrayList,Long>> iterator() {
+  public Iterator<Pair<IntArrayList,Long>> iterator(){
+    return iterator(false);
+  }
+  
+  public Iterator<Pair<IntArrayList,Long>> iterator(boolean onlyClosed) {
     if (this.isTreeEmpty() && !representedAsList) {
       throw new IllegalStateException("This is a bug. Please report this to mahout-user list");
     } else if (representedAsList) {
       return transactionSet.iterator();
     } else {
-      return new TransactionTreeIterator(this);
+      return new TransactionTreeIterator(this,onlyClosed);
     }
   }
   
@@ -384,5 +388,9 @@ public final class TransactionTree implements Writable, Iterable<Pair<IntArrayLi
     int[] oldNodeChildren = nodeChildren[nodeId];
     nodeChildren[nodeId] = new int[size];
     System.arraycopy(oldNodeChildren, 0, this.nodeChildren[nodeId], 0, length);
+  }
+
+  public Iterator<Pair<IntArrayList, Long>> iteratorClosed() {
+    return iterator(true);
   }
 }
