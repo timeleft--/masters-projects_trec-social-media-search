@@ -1,17 +1,23 @@
 package ca.uwaterloo.twitter.assoc.qexpand;
 
+import static com.google.common.base.Preconditions.checkNotNull;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
+import java.io.Serializable;
 import java.io.StringReader;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.PriorityQueue;
 import java.util.Set;
+
+import javax.annotation.Nullable;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
@@ -50,12 +56,56 @@ import org.apache.mahout.math.map.OpenObjectIntHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.base.Predicate;
+import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.common.collect.Sets.SetView;
 
 public class QueryExpander {
+  
+  private static class InPredicate<T> implements Predicate<T>, Serializable {
+    private final Collection<?> target;
+    
+    private InPredicate(Collection<?> target) {
+      this.target = checkNotNull(target);
+    }
+    
+    @Override
+    public boolean apply(T t) {
+      try {
+        return target.contains(t);
+      } catch (NullPointerException e) {
+        return false;
+      } catch (ClassCastException e) {
+        return false;
+      }
+    }
+    
+    @Override
+    public boolean equals(@Nullable Object obj) {
+      if (obj instanceof InPredicate) {
+        InPredicate<?> that = (InPredicate<?>) obj;
+        return target.equals(that.target);
+      }
+      return false;
+    }
+    
+    @Override
+    public int hashCode() {
+      return target.hashCode();
+    }
+    
+    @Override
+    public String toString() {
+      return "In(" + target + ")";
+    }
+    
+    private static final long serialVersionUID = 0;
+  }
+  
   private static Logger LOG = LoggerFactory.getLogger(QueryExpander.class);
   
   private static final String FIS_INDEX_OPTION = "fis_index";
@@ -89,7 +139,7 @@ public class QueryExpander {
   
   private static final float ITEMSET_CORPUS_MODEL_WEIGHT_DEFAULT = 0.77f;
   
-  private static final float TERM_WEIGHT_SMOOTHER_DEFAULT = 0.77f;
+  private static final float TERM_WEIGHT_SMOOTHER_DEFAULT = 0.0f;
   
   private static final float SCORE_PRECISION_MULTIPLIER = 100000;
   
@@ -434,20 +484,36 @@ public class QueryExpander {
     
     List<String> terms = Lists.newArrayListWithCapacity(termIds.size());
     termIds.keysSortedByValue(terms);
-    int capacity = (queryFreq.size())
-        * (terms.size() - queryFreq.size());
-    OpenObjectFloatHashMap<Set<String>> pairFreq = new OpenObjectFloatHashMap<Set<String>>(Math.max(0, capacity));
+    
+    Set<String> querySet = Sets.newHashSet(queryFreq.keys());
+    Set<Set<String>> queryPowerSet = Sets.powerSet(querySet);
+    
+    // Can't find anyway to do it!
+    // //remove empty set
+    // Set<String> emptySet = null;
+    // Iterator<Set<String>> powerSetIter = queryPowerSet.iterator();
+    // while(powerSetIter.hasNext()){
+    // emptySet = powerSetIter.next();
+    // if(emptySet.isEmpty()){
+    // break;
+    // }
+    // }
+    // queryPowerSet = Sets.difference(queryPowerSet, Sets.newHashSet(emptySet));
+    
+    int capacity = queryPowerSet.size() * (terms.size() - queryFreq.size());
+    OpenObjectFloatHashMap<Set<String>> subsetFreq = new OpenObjectFloatHashMap<Set<String>>(
+        Math.max(0, capacity));
     OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>(terms.size());
     double totalW = 0;
-    double lnTotalW;
+    // double lnTotalW;
     
     Iterator<Pair<IntArrayList, Long>> itemsetIter = itemsets.iteratorClosed();
     while (itemsetIter.hasNext()) {
       Pair<IntArrayList, Long> patternPair = itemsetIter.next();
       
-      float w = 1; 
-//      patternPair.getSecond().floatValue()
-//          / SCORE_PRECISION_MULTIPLIER;
+      float w =
+          patternPair.getSecond().floatValue()
+              / SCORE_PRECISION_MULTIPLIER;
       totalW += w;
       
       IntArrayList pattern = patternPair.getFirst();
@@ -457,22 +523,34 @@ public class QueryExpander {
         fisTerms.add(terms.get(pattern.getQuick(i)));
       }
       
-      for (String qt : queryFreq.keys()) {
-        for (String ft : fisTerms) {
-          termFreq.put(ft, termFreq.get(ft) + w);
-          if (queryFreq.containsKey(ft)) {
+      boolean weightNotAdded = true;
+      for (String ft : fisTerms) {
+        if (queryFreq.containsKey(ft)) {
+          continue;
+        }
+        termFreq.put(ft, termFreq.get(ft) + w);
+        for (Set<String> qSub : queryPowerSet) {
+          if (qSub.isEmpty()) {
             continue;
           }
-          Set<String> key = ImmutableSet.of(qt, ft);
-          pairFreq.put(key, pairFreq.get(key) + w);
+          if (!Sets.intersection(fisTerms, qSub).equals(qSub)) {
+            // This query s
+            continue;
+          } else if (weightNotAdded) {
+            subsetFreq.put(qSub, subsetFreq.get(qSub) + w);
+          }
+          
+          Set<String> key = Sets.union(qSub, Sets.newHashSet(ft));
+          subsetFreq.put(key, subsetFreq.get(key) + w);
         }
+        weightNotAdded = false;
       }
     }
     
-    lnTotalW = Math.log(totalW);
+    // lnTotalW = Math.log(totalW);
     
     for (String t : terms) {
-      if(queryFreq.containsKey(t)){
+      if (queryFreq.containsKey(t)) {
         continue;
       }
       // Collection metric
@@ -484,27 +562,14 @@ public class QueryExpander {
       float idf = (float) (Math.log(twtIxReader.numDocs() / (double) (docFreqC + 1)) + 1.0);
       
       // Query metric
-      double ft1 = termFreq.get(t);
-      double numer = 0;
-      double denim = 0;
+      double nmi = 0;
       
-      for (String qt : queryFreq.keys()) {
-        double ft2 = termFreq.get(qt);
+      for (Set<String> qSub : queryPowerSet) {
+        if (qSub.size() != 1) {
+          continue;
+        }
         
-        Set<String> key = ImmutableSet.of(qt, t);
-        double jf = pairFreq.get(key);
-//        //No normalization:
-//        if (jf != 0) {
-//          double jp =  jf / totalW;
-//          numer += jp * (Math.log(jf / (ft1 * ft2)) + lnTotalW);
-//          denim += jp * Math.log(jp);
-//        }
-        numer += jf / ft2;
-      }
-      
-      double nmi = numer;
-      if (denim != 0) {
-        nmi /= -denim;
+        nmi += expandSubset(qSub, 1, t, termFreq.get(t) / totalW, queryPowerSet, subsetFreq);
       }
       
       result.put(t, (float) (termWeightSmoother * idf + (1 - termWeightSmoother) * nmi));
@@ -667,6 +732,53 @@ public class QueryExpander {
     // // // termWeightOut.put(term, termW);
     // // // }
     // // // }
+  }
+  
+  private double expandSubset(Set<String> qSub, int size, String term, double currP,
+      Set<Set<String>> queryPowerSet, OpenObjectFloatHashMap<Set<String>> subsetFreq) {
+    
+    double result = 0;
+    
+    for (Set<String> qSubExp : queryPowerSet){ //Sets.difference(queryPowerSet,qSub)) {
+      boolean followThrow = true;
+      if(qSub.equals(qSubExp)){
+        continue; 
+      } else if (qSubExp.isEmpty()) {
+        qSubExp = qSub;
+        followThrow = false;
+      } else if (!(qSubExp.size() == size && Sets.intersection(qSubExp, qSub).equals(qSub))) {
+        continue;
+      }
+      
+      double ft2 = subsetFreq.get(qSubExp);
+      
+      if (ft2 == 0) {
+        continue;
+      }
+      
+      Set<String> key = Sets.union(qSubExp, ImmutableSet.of(term));
+      double jf = subsetFreq.get(key);
+      
+      // //No normalization:
+      // if (jf != 0) {
+      // double jp = jf / totalW;
+      // numer += jp * (Math.log(jf / (ft1 * ft2)) + lnTotalW);
+      // denim += jp * Math.log(jp);
+      // }
+      double pExp = currP * jf / ft2;
+      if (followThrow) {
+        if (pExp > 0) {
+          result += expandSubset(qSubExp, size + 1, term, pExp, queryPowerSet, subsetFreq);
+        }
+      } else {
+        if(pExp == 0){
+          // The first part is not there.. nothing will ever be there
+          break;
+        }
+        result += pExp;
+      }
+    }
+    return result;
   }
   
   public PriorityQueue<ScoreIxObj<List<String>>> convertResultToItemsets(OpenIntFloatHashMap rs,
