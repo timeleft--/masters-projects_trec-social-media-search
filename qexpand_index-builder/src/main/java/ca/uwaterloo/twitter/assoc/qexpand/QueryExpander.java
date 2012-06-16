@@ -7,13 +7,10 @@ import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.io.StringReader;
 import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashSet;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Map.Entry;
+import java.util.PriorityQueue;
 import java.util.Set;
 
 import org.apache.commons.cli.CommandLine;
@@ -55,9 +52,7 @@ import org.apache.mahout.math.map.OpenObjectIntHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.common.collect.Sets.SetView;
 
@@ -96,6 +91,8 @@ public class QueryExpander {
   private static final float ITEMSET_CORPUS_MODEL_WEIGHT_DEFAULT = 0.77f;
   
   private static final float TERM_WEIGHT_SMOOTHER_DEFAULT = 0.33f;
+
+  private static final float SCORE_PRECISION_MULTIPLIER = 100000;
   
   public static enum TweetField {
     ID("id"),
@@ -230,13 +227,14 @@ public class QueryExpander {
         Query parsedQuery = qEx.twtQparser.parse(query.toString());
         
         if (mode == 0) {
-          LinkedHashMap<List<String>, Float> itemsets = qEx.convertResultToItemsets(fisRs,
+          PriorityQueue<ScoreIxObj<List<String>>> itemsets = qEx.convertResultToItemsets(fisRs,
               query.toString(),
               -1);
           // NUM_HITS_DEFAULT);
           int i = 0;
-          for (Entry<List<String>, Float> e : itemsets.entrySet()) {
-            out.println(++i + " (" + e.getValue() + "): " + e.getKey().toString());
+          while(!itemsets.isEmpty()){
+            ScoreIxObj<List<String>> is = itemsets.poll();
+            out.println(++i + " (" + is.score + "): " + is.obj.toString());
           }
         } else if (mode == 5) {
           OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>();
@@ -497,7 +495,7 @@ public class QueryExpander {
     // }
   }
   
-  public LinkedHashMap<List<String>, Float> convertResultToItemsets(OpenIntFloatHashMap rs,
+  public PriorityQueue<ScoreIxObj<List<String>>> convertResultToItemsets(OpenIntFloatHashMap rs,
       String query, int numResults) throws IOException {
     
     OpenObjectIntHashMap<String> termIds = new OpenObjectIntHashMap<String>();
@@ -507,7 +505,7 @@ public class QueryExpander {
     List<String> terms = Lists.newArrayListWithCapacity(termIds.size()); 
     termIds.keysSortedByValue(terms);
     
-    LinkedHashMap<List<String>, Float> result = Maps.newLinkedHashMap();
+    PriorityQueue<ScoreIxObj<List<String>>> result = new PriorityQueue<ScoreIxObj<List<String>>>();
     Iterator<Pair<IntArrayList, Long>> itemsetIter = itemsets.iteratorClosed();
     while(itemsetIter.hasNext()){
       Pair<IntArrayList, Long> patternPair = itemsetIter.next();
@@ -518,7 +516,7 @@ public class QueryExpander {
         fis.add(terms.get(pattern.getQuick(i)));
       }
       
-      result.put(fis, patternPair.getSecond().floatValue());
+      result.add(new ScoreIxObj<List<String>>(fis, patternPair.getSecond().floatValue() / SCORE_PRECISION_MULTIPLIER));
     }
     
     return result;
@@ -615,7 +613,7 @@ public class QueryExpander {
     while (isIter.hasNext() && (numResults <= 0 || r/*result.size()*/ < numResults)) {
       ++r;
       Set<String> is = isIter.next();
-      long itemWeight = Math.round(MathUtils.round(itemsets.get(is), 5)* 100000);
+      long itemWeight = Math.round(MathUtils.round(itemsets.get(is), 5)* SCORE_PRECISION_MULTIPLIER);
       // result.put(is, itemWeight);
       
       IntArrayList patternInts = new IntArrayList(is.size());
@@ -643,10 +641,12 @@ public class QueryExpander {
   public Query convertResultToBooleanQuery(OpenIntFloatHashMap rs, String query, int numResults)
       throws IOException, org.apache.lucene.queryParser.ParseException {
     BooleanQuery result = new BooleanQuery();
-    for (Entry<List<String>, Float> e : convertResultToItemsets(rs, query, numResults)
-        .entrySet()) {
-      Query itemsetQuer = twtQparser.parse(e.getKey().toString().replaceAll("[\\,\\[\\]]", ""));
-      itemsetQuer.setBoost(e.getValue());
+    PriorityQueue<ScoreIxObj<List<String>>> itemsets = convertResultToItemsets(rs, query, numResults);
+    while(!itemsets.isEmpty()){
+      ScoreIxObj<List<String>> is = itemsets.poll();
+    
+      Query itemsetQuer = twtQparser.parse(is.obj.toString().replaceAll("[\\,\\[\\]]", ""));
+      itemsetQuer.setBoost(is.score);
       result.add(itemsetQuer, Occur.SHOULD);
     }
     return result;
@@ -656,10 +656,12 @@ public class QueryExpander {
       String query, int numResults)
       throws IOException, org.apache.lucene.queryParser.ParseException {
     List<Query> result = Lists.<Query> newLinkedList();
-    for (Entry<List<String>, Float> e : convertResultToItemsets(rs, query, numResults)
-        .entrySet()) {
-      Query itemsetQuer = twtQparser.parse(e.getKey().toString().replaceAll("[\\,\\[\\]]", ""));
-      itemsetQuer.setBoost(e.getValue());
+    PriorityQueue<ScoreIxObj<List<String>>> itemsets = convertResultToItemsets(rs, query, numResults);
+    while(!itemsets.isEmpty()){
+      ScoreIxObj<List<String>> is = itemsets.poll();
+    
+      Query itemsetQuer = twtQparser.parse(is.obj.toString().replaceAll("[\\,\\[\\]]", ""));
+      itemsetQuer.setBoost(is.score);
       result.add(itemsetQuer);
     }
     return result;

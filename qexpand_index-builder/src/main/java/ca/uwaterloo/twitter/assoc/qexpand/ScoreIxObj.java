@@ -2,7 +2,7 @@ package ca.uwaterloo.twitter.assoc.qexpand;
 
 import org.apache.lucene.search.TopDocs;
 
-public class ScoreIxObj<V extends Comparable<V>> implements Comparable<ScoreIxObj<V>>,
+public class ScoreIxObj<V> implements Comparable<ScoreIxObj<V>>,
     java.io.Serializable {
   
   /**
