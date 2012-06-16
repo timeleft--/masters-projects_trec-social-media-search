@@ -52,7 +52,7 @@ public final class TransactionTree implements Writable, Iterable<Pair<IntArrayLi
   private static final int DEFAULT_CHILDREN_INITIAL_SIZE = 2;
   private static final int DEFAULT_INITIAL_SIZE = 8;
   private static final float GROWTH_RATE = 1.5f;
-  private static final int ROOTNODEID = 0;
+  public static final int ROOTNODEID = 0;
   
   private int[] attribute;
   private int[] childCount;
