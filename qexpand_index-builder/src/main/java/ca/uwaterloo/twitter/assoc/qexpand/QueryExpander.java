@@ -31,6 +31,7 @@ import org.apache.lucene.index.Term;
 import org.apache.lucene.index.TermFreqVector;
 import org.apache.lucene.queryParser.QueryParser;
 import org.apache.lucene.queryParser.QueryParser.Operator;
+import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanClause.Occur;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.IndexSearcher;
@@ -799,6 +800,41 @@ public class QueryExpander {
     
     Set<ScoreIxObj<String>> extraTerms2 = Sets.<ScoreIxObj<String>> newHashSet();
     
+    // This seems to suffer from the bad scoring of low overlap query
+    // // +(q1 OR q2 OR q..) AND ONE_OF(xtra1 OR xtra2 OR ...)
+    // // One query, and the first portion will limit the corpus
+    // BooleanQuery query = new BooleanQuery(); // This adds trash: true);
+    // query.setMinimumNumberShouldMatch(1);
+    // fisQparser.setDefaultOperator(Operator.OR);
+    // StringBuilder qtermsQueryStr = new StringBuilder();
+    // for (String qterm : queryTerms) {
+    // qtermsQueryStr.append(qterm).append(" ");
+    // }
+    // Query qtermsQuery = fisQparser.parse(qtermsQueryStr.toString());
+    // query.add(new BooleanClause(qtermsQuery, Occur.MUST));
+    //
+    // for (ScoreIxObj<String> xterm : extraTerms) {
+    // assert !doneTerms.contains(xterm);
+    //
+    // Query xtermQuery = fisQparser.parse(xterm.obj);
+    // xtermQuery.setBoost(xterm.score);
+    // // Scoring the term not the query "+ xterm.toString()" causes an early topic drift
+    //
+    // query.add(xtermQuery, Occur.SHOULD);
+    // }
+    // // // Does this have any effect at all?
+    // // query.setBoost(boost);
+    // fisQparser.setDefaultOperator(Operator.AND);
+    // TopDocs rs = fisSearcher.search(query, fisNumHits);
+    //
+    // int levelHits = addQualifiedResults(rs,
+    // resultSet,
+    // queryTerms,
+    // extraTerms2,
+    // levelMinScore,
+    // levelRankingParam);
+    // LOG.debug("Added {} results from the query {}", levelHits, query.toString());
+    
     // // Perform only one query per qTerm, written as simple as possible
     // for (String qterm : queryTerms) {
     // BooleanQuery query = new BooleanQuery(true);
@@ -847,6 +883,9 @@ public class QueryExpander {
     }
     // // Does this have any effect at all?
     // query.setBoost(boost);
+    
+    // This is also not needed, the query is already so simple
+    // query = (BooleanQuery) query.rewrite(fisIxReader);
     
     TopDocs rs = fisSearcher.search(query, fisNumHits);
     
