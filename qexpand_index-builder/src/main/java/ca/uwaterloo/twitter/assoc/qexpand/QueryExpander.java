@@ -89,7 +89,7 @@ public class QueryExpander {
   private static final float ITEMSET_LEN_WEIGHT_DEFAULT = 0.33f;
   
   private static final float ITEMSET_CORPUS_MODEL_WEIGHT_DEFAULT = 0.77f;
-  private static final float TWITTER_CORPUS_MODEL_WEIGHT_DEFAULT = 0.77f;
+  private static final float TWITTER_CORPUS_MODEL_WEIGHT_DEFAULT = 0.0f;
   
   private static final float TERM_WEIGHT_SMOOTHER_DEFAULT = 10000.0f;
   
@@ -499,7 +499,7 @@ public class QueryExpander {
       // odds of the term (not log odds)
       float termCorpusQuality = (termWeightSmoother + docFreqC) / twtIxReader.numDocs();
       termCorpusQuality = termCorpusQuality / (1 - termCorpusQuality);
-//      termCorpusQuality = (float) Math.log10(termCorpusQuality);
+      // termCorpusQuality = (float) Math.log10(termCorpusQuality);
       
       // IDF is has very large scale compared to probabilities
       // float termCorpusQuality = (float) (Math.log(twtIxReader.numDocs() / (double) (docFreqC +
@@ -522,8 +522,8 @@ public class QueryExpander {
       }
       
       result.put(t,
-          (float) (twitterCorpusModelWeight * termCorpusQuality + 
-              (1 - twitterCorpusModelWeight) * termQueryQuality));
+          (float) (twitterCorpusModelWeight * termCorpusQuality +
+          (1 - twitterCorpusModelWeight) * termQueryQuality));
     }
     
     return result;
@@ -533,7 +533,7 @@ public class QueryExpander {
   private double expandSubset(Set<String> qSub, int size, String term, double currP,
       Set<Set<String>> queryPowerSet, OpenObjectFloatHashMap<Set<String>> subsetFreq) {
     
-    double result = 0;
+    double result = currP;
     
     for (Set<String> qSubExp : queryPowerSet) { // Sets.difference(queryPowerSet,qSub)) {
       boolean followThrow = true;
@@ -561,17 +561,14 @@ public class QueryExpander {
       // numer += jp * (Math.log(jf / (ft1 * ft2)) + lnTotalW);
       // denim += jp * Math.log(jp);
       // }
-      double pExp = currP * jf / ft2;
-      if (followThrow) {
-        if (pExp > 0) {
-          result += expandSubset(qSubExp, size + 1, term, pExp, queryPowerSet, subsetFreq);
+      double pExp = jf / ft2;
+      if (pExp > 0) {
+        if (followThrow) {
+          pExp = expandSubset(qSubExp, size + 1, term, pExp, queryPowerSet, subsetFreq);
         }
+        result *= pExp;
       } else {
-        if (pExp == 0) {
-          // The first part is not there.. nothing will ever be there
-          break;
-        }
-        result += pExp;
+        break;
       }
     }
     return result;
