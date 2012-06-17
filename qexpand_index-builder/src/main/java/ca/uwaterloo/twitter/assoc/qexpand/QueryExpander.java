@@ -437,12 +437,12 @@ public class QueryExpander {
     List<String> terms = Lists.newArrayListWithCapacity(termIds.size());
     termIds.keysSortedByValue(terms);
     
-    Set<String> querySet = Sets.newHashSet(queryFreq.keys());
-    Set<Set<String>> queryPowerSet = Sets.powerSet(querySet);
-    
-    int capacity = queryPowerSet.size() * (terms.size() - queryFreq.size());
-    OpenObjectFloatHashMap<Set<String>> subsetFreq = new OpenObjectFloatHashMap<Set<String>>(
-        Math.max(0, capacity));
+//    Set<String> querySet = Sets.newHashSet(queryFreq.keys());
+//    Set<Set<String>> queryPowerSet = Sets.powerSet(querySet);
+//    
+//    int capacity = queryPowerSet.size() * (terms.size() - queryFreq.size());
+//    OpenObjectFloatHashMap<Set<String>> subsetFreq = new OpenObjectFloatHashMap<Set<String>>(
+//        Math.max(0, capacity));
     OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>(terms.size());
     double totalW = 0;
     
@@ -464,26 +464,35 @@ public class QueryExpander {
       
       boolean weightNotAdded = true;
       for (String ft : fisTerms) {
+        termFreq.put(ft, termFreq.get(ft) + w);
         if (queryFreq.containsKey(ft)) {
           continue;
         }
-        termFreq.put(ft, termFreq.get(ft) + w);
-        for (Set<String> qSub : queryPowerSet) {
-          if (qSub.isEmpty()) {
-            continue;
-          }
-          if (!Sets.intersection(fisTerms, qSub).equals(qSub)) {
-            // This query s
-            continue;
-          } else if (weightNotAdded) {
-            subsetFreq.put(qSub, subsetFreq.get(qSub) + w);
-          }
-          
-          Set<String> key = Sets.union(qSub, Sets.newHashSet(ft));
-          subsetFreq.put(key, subsetFreq.get(key) + w);
-        }
+       
+//        for (Set<String> qSub : queryPowerSet) {
+//          if (qSub.isEmpty()) {
+//            continue;
+//          }
+//          if (!Sets.intersection(fisTerms, qSub).equals(qSub)) {
+//            // This query s
+//            continue;
+//          } else if (weightNotAdded) {
+//            subsetFreq.put(qSub, subsetFreq.get(qSub) + w);
+//          }
+//          
+//          Set<String> key = Sets.union(qSub, Sets.newHashSet(ft));
+//          subsetFreq.put(key, subsetFreq.get(key) + w);
+//        }
         weightNotAdded = false;
       }
+    }
+    
+    OpenObjectFloatHashMap<String> qTProb = new OpenObjectFloatHashMap<String>();
+    for (String qt : queryFreq.keys()) {
+      // Collection metric
+      Term tTerm = new Term(TweetField.TEXT.name, qt);
+      float qtProb = (float)twtIxReader.docFreq(tTerm)/twtIxReader.numDocs();
+      qTProb.put(qt, qtProb);
     }
     
     for (String t : terms) {
@@ -509,17 +518,20 @@ public class QueryExpander {
       // Query metric
       double termQueryQuality = 0;
       
-      for (Set<String> qSub : queryPowerSet) {
-        if (qSub.size() != 1) {
-          continue;
-        }
-        
-        termQueryQuality += expandSubset(qSub,
-            1,
-            t,
-            termFreq.get(t) / totalW,
-            queryPowerSet,
-            subsetFreq);
+//      for (Set<String> qSub : queryPowerSet) {
+//        if (qSub.size() != 1) {
+//          continue;
+//        }
+//        
+//        termQueryQuality += expandSubset(qSub,
+//            1,
+//            t,
+//            termFreq.get(t) / totalW,
+//            queryPowerSet,
+//            subsetFreq);
+//      }
+      for(String qTerm: queryFreq.keys()){
+        termQueryQuality *= ((termFreq.get(t)/totalW) * qTProb.get(qTerm))/(docFreqC/twtIxReader.numDocs());
       }
       
       result.put(t,
