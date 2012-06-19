@@ -51,6 +51,8 @@ import org.apache.mahout.math.map.OpenObjectIntHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import ca.uwaterloo.twitter.assoc.qexpand.QueryExpander.TermWeigting;
+
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -96,6 +98,20 @@ public class QueryExpander {
   private static final float TERM_WEIGHT_SMOOTHER_DEFAULT = 10000.0f;
   
   private static final float SCORE_PRECISION_MULTIPLIER = 100000.0f;
+  
+  private static final TermWeigting TERM_WEIGHTIN_DEFAULT = TermWeigting.PROB_QUERY;
+  public static final boolean PROPAGATE_IS_WEIGHTS_DEFAULT = true;
+  
+  public static enum TermWeigting {
+    PROB_QUERY("pq"),
+    KL_DIVERG("kl");
+    
+    public final String name;
+    
+    TermWeigting(String s) {
+      name = s;
+    }
+  };
   
   public static enum TweetField {
     ID("id"),
@@ -179,6 +195,12 @@ public class QueryExpander {
       System.exit(-1);
     }
     
+    TermWeigting termWeighting = TERM_WEIGHTIN_DEFAULT;
+    // TODO: from commandline
+    
+    boolean propagateISWeights = PROPAGATE_IS_WEIGHTS_DEFAULT;
+    // TODO: from commandline
+    
     PrintStream out = new PrintStream(System.out, true, "UTF-8");
     QueryExpander qEx = null;
     try {
@@ -241,9 +263,18 @@ public class QueryExpander {
           }
         } else if (mode == 5) {
           
-          PriorityQueue<ScoreIxObj<String>> weightedTerms = qEx.convertResultToWeightedTerms(fisRs,
-              query.toString(),
-              -1);
+          PriorityQueue<ScoreIxObj<String>> weightedTerms = null;
+          if (TermWeigting.PROB_QUERY.equals(termWeighting)) {
+            weightedTerms = qEx
+                .convertResultToWeightedTermsConditionalProb(fisRs,
+                    query.toString(),
+                    -1, propagateISWeights);
+          } else if (TermWeigting.KL_DIVERG.equals(termWeighting)) {
+            weightedTerms = qEx
+                .convertResultToWeightedTermsKLDivergence(fisRs,
+                    query.toString(),
+                    -1, propagateISWeights);
+          }
           
           int i = 0;
           while (!weightedTerms.isEmpty()) {
@@ -418,8 +449,74 @@ public class QueryExpander {
     return resultSet;
   }
   
-  public PriorityQueue<ScoreIxObj<String>> convertResultToWeightedTerms(OpenIntFloatHashMap rs,
-      String query, int numItemsetsToConsider) throws IOException {
+  public PriorityQueue<ScoreIxObj<String>> convertResultToWeightedTermsKLDivergence(
+      OpenIntFloatHashMap rs,
+      String query, int numItemsetsToConsider, boolean propagateISWeight) throws IOException {
+    PriorityQueue<ScoreIxObj<String>> result = new PriorityQueue<ScoreIxObj<String>>();
+    
+    OpenObjectIntHashMap<String> termIds = new OpenObjectIntHashMap<String>();
+    OpenObjectIntHashMap<String> queryFreq = queryTermFreq(query);
+    TransactionTree itemsets = convertResultToItemsetsInternal(rs,
+        queryFreq,
+        termIds,
+        numItemsetsToConsider);
+    
+    if (itemsets.isTreeEmpty()) {
+      return result;
+    }
+    
+    List<String> terms = Lists.newArrayListWithCapacity(termIds.size());
+    termIds.keysSortedByValue(terms);
+    
+    OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>(terms.size());
+    float totalW = 0;
+    
+    Iterator<Pair<IntArrayList, Long>> itemsetIter = itemsets.iteratorClosed();
+    while (itemsetIter.hasNext()) {
+      Pair<IntArrayList, Long> patternPair = itemsetIter.next();
+      
+      float w = propagateISWeight ?
+          (patternPair.getSecond().floatValue()
+          / SCORE_PRECISION_MULTIPLIER) :
+          1;
+      totalW += w;
+      
+      IntArrayList pattern = patternPair.getFirst();
+      int pSize = pattern.size();
+      for (int i = 0; i < pSize; ++i) {
+        String ft = terms.get(pattern.getQuick(i));
+        if (queryFreq.containsKey(ft)) {
+          continue;
+        }
+        termFreq.put(ft, termFreq.get(ft) + w);
+      }
+    }
+    
+    for (String t : terms) {
+      if (queryFreq.containsKey(t)) {
+        continue;
+      }
+      // Collection metric
+      Term tTerm = new Term(TweetField.TEXT.name, t);
+      float docFreqC = twtIxReader.docFreq(tTerm);
+      if (docFreqC == 0) {
+        continue;
+      }
+      float pCollection = docFreqC / twtIxReader.numDocs();
+      
+      // KL Divergence considering all the itemsets as a document
+      
+      float pDoc = termFreq.get(t) / totalW;
+      float score = pDoc * (float) MathUtils.log(2, pDoc / pCollection);
+      result.add(new ScoreIxObj<String>(t, score));
+    }
+    
+    return result;
+  }
+  
+  public PriorityQueue<ScoreIxObj<String>> convertResultToWeightedTermsConditionalProb(
+      OpenIntFloatHashMap rs,
+      String query, int numItemsetsToConsider, boolean propagateISWeight) throws IOException {
     
     PriorityQueue<ScoreIxObj<String>> result = new PriorityQueue<ScoreIxObj<String>>();
     
@@ -450,9 +547,10 @@ public class QueryExpander {
     while (itemsetIter.hasNext()) {
       Pair<IntArrayList, Long> patternPair = itemsetIter.next();
       
-      float w =
-          patternPair.getSecond().floatValue()
-              / SCORE_PRECISION_MULTIPLIER;
+      float w = propagateISWeight ?
+          (patternPair.getSecond().floatValue()
+          / SCORE_PRECISION_MULTIPLIER) :
+          1;
       totalW += w;
       
       IntArrayList pattern = patternPair.getFirst();
@@ -543,9 +641,9 @@ public class QueryExpander {
             termQueryQuality.get(tAsSet));
       }
       
-      if(termQueryQualityAggr>=1){
+      if (termQueryQualityAggr >= 1) {
         // FIXME: This happens in case of repeated hashtag
-        termQueryQualityAggr = (float) (1-1E-6);
+        termQueryQualityAggr = (float) (1 - 1E-6);
       }
       
       termQueryQualityAggr /= (1 - termQueryQualityAggr);
