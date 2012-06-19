@@ -101,7 +101,7 @@ public class QueryExpander {
   
   private static final TermWeigting TERM_WEIGHTIN_DEFAULT = TermWeigting.PROB_QUERY;
   public static final boolean PROPAGATE_IS_WEIGHTS_DEFAULT = true;
-
+  
   private static final String COLLECTION_STRING_CLEANER = "[\\,\\[\\]]";
   
   public static enum TermWeigting {
@@ -232,13 +232,20 @@ public class QueryExpander {
         if (cmd.equals("i:")) {
           mode = 0; // itemsets
         } else if (cmd.equals("t:")) {
-          mode = 5; // terms
+          mode = 5; // terms with defaul weighting
+          termWeighting = TERM_WEIGHTIN_DEFAULT;
+        } else if (cmd.equals("q:")) {
+          mode = 6; // terms with query probability
+          termWeighting = TermWeigting.PROB_QUERY;
+        } else if (cmd.equals("d:")) {
+          mode = 7; // terms with query divergence
+          termWeighting = TermWeigting.KL_DIVERG;
         } else if (cmd.equals("r:")) {
           mode = 10; // results
         } else if (cmd.equals("e:")) {
           mode = 20; // expanded
         } else {
-          out.println("Must prefix either i: or r: or e:");
+          out.println("Must prefix either\n i: for itemsets \n r: for results \n e: for expanded results \n t|d|q: for terms");
           continue;
         }
         
@@ -263,7 +270,7 @@ public class QueryExpander {
             ScoreIxObj<List<String>> is = itemsets.poll();
             out.println(++i + " (" + is.score + "): " + is.obj.toString());
           }
-        } else if (mode == 5) {
+        } else if (mode == 6 || mode == 7) {
           
           PriorityQueue<ScoreIxObj<String>> weightedTerms = null;
           if (TermWeigting.PROB_QUERY.equals(termWeighting)) {
@@ -390,21 +397,23 @@ public class QueryExpander {
     MutableLong qLen = new MutableLong(0);
     OpenObjectIntHashMap<String> queryFreq = queryTermFreq(queryStr, qLen);
     Set<String> querySet = Sets.newCopyOnWriteArraySet(queryFreq.keys());
-    if(querySet.size() > 2){
-    for (Set<String> querySubSet : Sets.powerSet(querySet)) {
-      if (querySubSet.size()<2) {
-        continue;
+    if (querySet.size() > 2) {
+      for (Set<String> querySubSet : Sets.powerSet(querySet)) {
+        if (querySubSet.size() < 2) {
+          continue;
+        }
+        Query subQuery = fisQparser.parse(querySubSet.toString()
+            .replaceAll(COLLECTION_STRING_CLEANER, ""));
+        float querySubSetLen = 0;
+        for (String qTerm : querySubSet) {
+          querySubSetLen += queryFreq.get(qTerm);
+        }
+        subQuery.setBoost(querySubSetLen / qLen.floatValue());
+        query.add(subQuery, Occur.SHOULD);
       }
-      Query subQuery = fisQparser.parse(querySubSet.toString().replaceAll(COLLECTION_STRING_CLEANER, ""));
-      float querySubSetLen = 0;
-      for(String qTerm: querySubSet){
-        querySubSetLen += queryFreq.get(qTerm);
-      }
-      subQuery.setBoost(querySubSetLen / qLen.floatValue());
-      query.add(subQuery, Occur.SHOULD);
-    }
-    }else {
-      Query subQuery = fisQparser.parse(querySet.toString().replaceAll(COLLECTION_STRING_CLEANER, ""));
+    } else {
+      Query subQuery = fisQparser.parse(querySet.toString().replaceAll(COLLECTION_STRING_CLEANER,
+          ""));
       subQuery.setBoost(1);
       query.add(subQuery, Occur.SHOULD);
     }
@@ -858,7 +867,8 @@ public class QueryExpander {
     while (!itemsets.isEmpty()) {
       ScoreIxObj<List<String>> is = itemsets.poll();
       
-      Query itemsetQuer = twtQparser.parse(is.obj.toString().replaceAll(COLLECTION_STRING_CLEANER, ""));
+      Query itemsetQuer = twtQparser.parse(is.obj.toString().replaceAll(COLLECTION_STRING_CLEANER,
+          ""));
       itemsetQuer.setBoost(is.score);
       result.add(itemsetQuer, Occur.SHOULD);
     }
@@ -875,7 +885,8 @@ public class QueryExpander {
     while (!itemsets.isEmpty()) {
       ScoreIxObj<List<String>> is = itemsets.poll();
       
-      Query itemsetQuer = twtQparser.parse(is.obj.toString().replaceAll(COLLECTION_STRING_CLEANER, ""));
+      Query itemsetQuer = twtQparser.parse(is.obj.toString().replaceAll(COLLECTION_STRING_CLEANER,
+          ""));
       itemsetQuer.setBoost(is.score);
       result.add(itemsetQuer);
     }
