@@ -23,18 +23,18 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.Set;
-import java.util.regex.Pattern;
 
 import org.apache.commons.lang.mutable.MutableLong;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapred.OutputCollector;
 import org.apache.mahout.common.Pair;
 import org.apache.mahout.freqtermsets.AggregatorReducer;
-import org.apache.mahout.freqtermsets.TokenIterator;
 import org.apache.mahout.freqtermsets.convertors.string.TopKStringPatterns;
 import org.knallgrau.utils.textcat.TextCategorizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import ca.uwaterloo.twitter.TokenIterator;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;

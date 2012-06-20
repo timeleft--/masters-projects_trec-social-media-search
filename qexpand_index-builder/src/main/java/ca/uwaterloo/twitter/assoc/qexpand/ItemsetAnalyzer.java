@@ -6,9 +6,10 @@ import java.io.Reader;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
-import org.apache.mahout.freqtermsets.TokenIterator.LatinTokenIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import ca.uwaterloo.twitter.TokenIterator.LatinTokenIterator;
 
 public class ItemsetAnalyzer extends Analyzer {
   private static final Logger LOG = LoggerFactory.getLogger(ItemsetAnalyzer.class);

@@ -23,7 +23,9 @@ import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.mahout.common.Parameters;
-import org.apache.mahout.freqtermsets.TokenIterator.LatinTokenIterator;
+
+import ca.uwaterloo.twitter.TokenIterator;
+import ca.uwaterloo.twitter.TokenIterator.LatinTokenIterator;
 
 /**
  * 

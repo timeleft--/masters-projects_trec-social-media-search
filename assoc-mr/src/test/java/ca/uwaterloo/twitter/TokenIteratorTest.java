@@ -1,12 +1,13 @@
-package org.apache.mahout.freqtermsets;
+package ca.uwaterloo.twitter;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 
-import org.apache.mahout.freqtermsets.TokenIterator.LatinTokenIterator;
 import org.junit.Test;
 
-public class ASCIITokenIteratorTest {
+import ca.uwaterloo.twitter.TokenIterator.LatinTokenIterator;
+
+public class TokenIteratorTest {
   
   @Test
   public void testBasic() {

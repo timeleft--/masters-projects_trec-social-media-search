@@ -24,16 +24,12 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map.Entry;
 
-import com.google.common.collect.Lists;
 import org.apache.commons.lang.mutable.MutableLong;
 import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.mahout.common.Pair;
 import org.apache.mahout.common.Parameters;
-import org.apache.mahout.freqtermsets.CountDescendingPairComparator;
-import org.apache.mahout.freqtermsets.PFPGrowth;
-import org.apache.mahout.freqtermsets.TransactionTree;
 import org.apache.mahout.freqtermsets.convertors.ContextStatusUpdater;
 import org.apache.mahout.freqtermsets.convertors.ContextWriteOutputCollector;
 import org.apache.mahout.freqtermsets.convertors.integer.IntegerStringOutputConverter;
@@ -41,6 +37,10 @@ import org.apache.mahout.freqtermsets.convertors.string.TopKStringPatterns;
 import org.apache.mahout.freqtermsets.fpgrowth.FPGrowth;
 import org.apache.mahout.math.list.IntArrayList;
 import org.apache.mahout.math.list.LongArrayList;
+
+import ca.uwaterloo.twitter.TokenIterator;
+
+import com.google.common.collect.Lists;
 
 /**
  *  takes each group of transactions and runs Vanilla FPGrowth on it and

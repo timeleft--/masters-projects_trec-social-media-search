@@ -24,10 +24,12 @@ import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.mahout.common.Pair;
 import org.apache.mahout.common.Parameters;
-import org.apache.mahout.freqtermsets.TokenIterator.LatinTokenIterator;
 import org.apache.mahout.math.list.IntArrayList;
 import org.apache.mahout.math.map.OpenObjectIntHashMap;
 import org.apache.mahout.math.set.OpenIntHashSet;
+
+import ca.uwaterloo.twitter.TokenIterator;
+import ca.uwaterloo.twitter.TokenIterator.LatinTokenIterator;
 
 /**
  * maps each transaction to all unique items groups in the transaction. mapper

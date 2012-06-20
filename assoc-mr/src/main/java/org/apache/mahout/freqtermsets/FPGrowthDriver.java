@@ -28,6 +28,8 @@ import org.apache.mahout.common.Parameters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import ca.uwaterloo.twitter.TokenIterator;
+
 public final class FPGrowthDriver extends AbstractJob {
 
   private static final Logger log = LoggerFactory.getLogger(FPGrowthDriver.class);
