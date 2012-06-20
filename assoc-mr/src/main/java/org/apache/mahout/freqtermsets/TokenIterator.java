@@ -4,12 +4,10 @@ import java.util.Arrays;
 import java.util.concurrent.LinkedBlockingDeque;
 
 import org.apache.hadoop.io.Text;
-import org.knallgrau.utils.textcat.TextCategorizer;
+import org.apache.mahout.math.set.OpenCharHashSet;
 
 import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.Queues;
-
-import org.apache.mahout.math.set.OpenCharHashSet;
 
 public class TokenIterator extends AbstractIterator<String> {
   
@@ -72,7 +70,8 @@ public class TokenIterator extends AbstractIterator<String> {
     // }
     
     this.chs = input.toString().toCharArray();
-    String punctuationStr = "!$%&()*+,./:;<=>?[\\]^{|}~\"'`"; //removed _-
+    //  removed _ because it can be used in usernames..  
+    String punctuationStr = "!$%&()*+,./:;<=>?[\\]^{|}~\"'`-"; 
     punctuation = new OpenCharHashSet(punctuationStr.length(), 0, 0.999);
     for (char ch : punctuationStr.toCharArray()) {
       punctuation.add(ch);
@@ -82,13 +81,13 @@ public class TokenIterator extends AbstractIterator<String> {
   public TokenIterator(String string) {
     this(new Text(string));
   }
-
-  public TokenIterator setRepeatHashTag(boolean b){
+  
+  public TokenIterator setRepeatHashTag(boolean b) {
     repeatHashTag = b;
     return this;
   }
   
-  public boolean getRepeatHashTag(){
+  public boolean getRepeatHashTag() {
     return repeatHashTag;
   }
   
@@ -101,17 +100,18 @@ public class TokenIterator extends AbstractIterator<String> {
     if (cIx > chs.length - 1) {
       return endOfData();
     }
-    
+    int ch = -1;
     StringBuilder result = new StringBuilder();
     while (cIx < chs.length) {
-      int ch = chs[cIx++];
+      ch = chs[cIx++];
       if (isTokenChar(ch)) {
         int tch = normalize(ch);
         
         // normalize repetitions to 3 chars (cooooooooooooooooooool --> coool)
         if ((repeatedChs[0] == repeatedChs[1])
             && (repeatedChs[1] == repeatedChs[2])
-            && (repeatedChs[2] == tch)) {
+            && (repeatedChs[2] == tch)
+            && !Character.isDigit(tch)) {
           continue;
         } else {
           repeatedChs[0] = repeatedChs[1];
@@ -141,13 +141,32 @@ public class TokenIterator extends AbstractIterator<String> {
     }
     
     String ret = result.toString();
-    if (ret.startsWith("http") || ret.startsWith("www")) {
+    if ((ret.startsWith("http") && ch==':') || (ret.startsWith("www") && ch =='.')) {
       ret = URL_PLACEHOLDER;
       while (cIx < chs.length) {
-        int ch = chs[cIx];
         if (!Character.isWhitespace(ch)) {
-          ++cIx;
+          ch = chs[cIx++];
         } else {
+          break;
+        }
+      }
+    } else if (ret.matches("\\d+\\z")) {
+      // A number, do not delimit on commas and dots,
+      // but delimit on dashes and slashes (dates)
+      // cIx is already ahead of the character that caused
+      // delimiting of the token
+      --cIx;
+      while (cIx < chs.length) {
+        ch = chs[cIx++];
+        if (isTokenChar(ch) || isDecimalSeparator(ch)) {
+          result.append((char) ch);
+        } else {
+          if(isThousandsSeparator(ch)){
+            continue;
+          }
+          // no need to check for being delimiter, because
+          // we should proceed only if we are in a number token
+          ret = result.toString();
           break;
         }
       }
@@ -156,13 +175,21 @@ public class TokenIterator extends AbstractIterator<String> {
     return ret;
   }
   
+  protected boolean isThousandsSeparator(int ch) {
+    return ch == ',';
+  }
+  
+  protected boolean isDecimalSeparator(int ch) {
+    return ch == '.';
+  }
+  
   protected boolean isDelimiter(int c) {
     return Character.isWhitespace(c) || punctuation.contains((char) c);
   }
   
   protected boolean isTokenChar(int c) {
     return Character.isLetter(c) || Character.isDigit(c) || c == (int) '#'
-        || c == (int) '@';
+        || c == (int) '@' || c == (int)'_';
   }
   
   protected int normalize(int c) {

@@ -32,9 +32,11 @@ public class ASCIITokenIteratorTest {
   
   @Test
   public void testSymbols() {
-    TokenIterator target = new TokenIterator("`~!1@#$%^&*()-_+={}|\\/?><'\":;");
-    // 1 makes the length > 3 and token doesn't start with @ or #
+    TokenIterator target = new TokenIterator("`~!1@#$%^&*()-_+={}|\\/?><'\":; you_rock");
+    // 1 to insure the token doesn't start with @ or #
     assertEquals("1@#", target.next());
+    assertEquals("_", target.next());
+    assertEquals("you_rock", target.next());
     assertFalse(target.hasNext());
   }
   
@@ -87,11 +89,32 @@ public class ASCIITokenIteratorTest {
   
   @Test
   public void testUrl() {
-    LatinTokenIterator target = new LatinTokenIterator("http://youtube.com/dsdf33 www.wikipedia.com https://www.bank.com HTTP://WATCH.THIS");
+    LatinTokenIterator target = new LatinTokenIterator("http://youtube.com/dsdf33 OK www.wikipedia.com GOOD https://www.bank.com GOTO HTTP://WATCH.THIS www2012_conference");
     assertEquals("URL", target.next());
+    assertEquals("ok", target.next());
     assertEquals("URL", target.next());
+    assertEquals("good", target.next());
     assertEquals("URL", target.next());
+    assertEquals("goto", target.next());
     assertEquals("URL", target.next());
+    assertEquals("www2012_conference", target.next());
+    assertFalse(target.hasNext());
+  }
+  
+  @Test
+  public void testNumbers() {
+    LatinTokenIterator target = new LatinTokenIterator("On 05-07/2012 28th birthday buy 3333 for 12,234.99 each ");
+    assertEquals("on", target.next());
+    assertEquals("05", target.next());
+    assertEquals("07", target.next());
+    assertEquals("2012", target.next());
+    assertEquals("28th", target.next());
+    assertEquals("birthday", target.next());
+    assertEquals("buy", target.next());
+    assertEquals("3333", target.next());
+    assertEquals("for", target.next());
+    assertEquals("12234.99", target.next());
+    assertEquals("each", target.next());
     assertFalse(target.hasNext());
   }
   
