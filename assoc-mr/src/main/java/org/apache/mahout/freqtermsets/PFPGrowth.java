@@ -26,6 +26,7 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.PriorityQueue;
+import java.util.concurrent.Callable;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
@@ -64,7 +65,7 @@ import com.twitter.corpus.data.HtmlTweetInputFormat;
  * http://infolab.stanford.edu/~echang/recsys08-69.pdf
  * 
  */
-public final class PFPGrowth {
+public final class PFPGrowth implements Callable<Void> {
   
   public static final String ENCODING = "encoding";
   public static final String F_LIST = "fList";
@@ -104,8 +105,8 @@ public final class PFPGrowth {
   // public static final String SPLIT_PATTERN = "splitPattern";
   // public static final Pattern SPLITTER = Pattern.compile("[ ,\t]*[,|\t][ ,\t]*");
   // END YA
-  private PFPGrowth() {
-  }
+  // private PFPGrowth() {
+  // }
   
   /**
    * Generates the fList from the serialized string representation
@@ -488,5 +489,17 @@ public final class PFPGrowth {
     if (!succeeded) {
       throw new IllegalStateException("Job failed!");
     }
+  }
+  
+  private final Parameters intervalParams;
+  
+  public PFPGrowth(Parameters pIntervalParams) {
+    intervalParams = pIntervalParams;
+  }
+  
+  @Override
+  public Void call() throws Exception {
+    runPFPGrowth(intervalParams);
+    return null;
   }
 }

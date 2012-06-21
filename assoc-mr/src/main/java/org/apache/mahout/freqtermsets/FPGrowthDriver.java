@@ -18,6 +18,9 @@
 package org.apache.mahout.freqtermsets;
 
 import java.io.IOException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import org.apache.commons.io.FilenameUtils;
 import org.apache.hadoop.conf.Configuration;
@@ -34,6 +37,8 @@ import ca.uwaterloo.twitter.TokenIterator;
 public final class FPGrowthDriver extends AbstractJob {
   
   private static final Logger log = LoggerFactory.getLogger(FPGrowthDriver.class);
+  private static final String DEFAULT_NUM_THREADS = "5";
+  private static final String PARAM_NUM_THREADS = "nJobs";
   
   private FPGrowthDriver() {
   }
@@ -106,6 +111,10 @@ public final class FPGrowthDriver extends AbstractJob {
     addOption(PFPGrowth.PARAM_INTERVAL_START, "st", "The start time of interval to be mined");
     addOption(PFPGrowth.PARAM_INTERVAL_END, "et", "The end time of interval to be mined");
     addOption(PFPGrowth.PARAM_WINDOW_SIZE, "ws", "The duration of windows that will be mined");
+    
+    addOption(PARAM_NUM_THREADS,
+        "j",
+        "The number of PFP jobs, because in case of intervals resources are under utilized");
     
     addOption(PFPGrowth.INDEX_OUT,
         "ix",
@@ -205,10 +214,14 @@ public final class FPGrowthDriver extends AbstractJob {
     Path outputDir = getOutputPath();
     
     params.set("input", inputDir.toString());
-//    params.set("output", outputDir.toString());
-
+    // params.set("output", outputDir.toString());
+    
     Configuration conf = new Configuration();
     HadoopUtil.delete(conf, outputDir);
+    
+    int nThreads = Integer.parseInt(getOption(PARAM_NUM_THREADS, DEFAULT_NUM_THREADS));
+    ExecutorService exec = Executors.newFixedThreadPool(nThreads);
+    Future<Void> lastFuture = null;
     
     long startTime = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_START,
         Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP)));
@@ -218,12 +231,22 @@ public final class FPGrowthDriver extends AbstractJob {
         Long.toString(endTime - startTime)));
     while (startTime < endTime) {
       params.set(PFPGrowth.PARAM_INTERVAL_START, Long.toString(startTime));
-      String outPathStr = FilenameUtils.concat(outputDir.toString(),Long.toString(startTime));
-      outPathStr = FilenameUtils.concat(outPathStr,Long.toString(endTime));
+      String outPathStr = FilenameUtils.concat(outputDir.toString(), Long.toString(startTime));
+      outPathStr = FilenameUtils.concat(outPathStr, Long.toString(endTime));
       params.set("output", outPathStr);
-      PFPGrowth.runPFPGrowth(params);
+      // PFPGrowth.runPFPGrowth(params);
+      lastFuture = exec.submit(new PFPGrowth(params));
+      
       startTime += windowSize;
     }
+    
+    lastFuture.get();
+    exec.shutdown();
+    
+    while (!exec.isTerminated()) {
+      Thread.sleep(1000);
+    }
+    
     return 0;
   }
   
