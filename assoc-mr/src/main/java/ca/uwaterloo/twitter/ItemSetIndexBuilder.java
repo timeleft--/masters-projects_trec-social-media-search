@@ -1,10 +1,10 @@
-package ca.uwaterloo.twitter.assoc.qexpand;
+package ca.uwaterloo.twitter;
 
 import java.io.File;
 import java.io.IOException;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.List;
-import java.util.Set;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
@@ -23,24 +23,23 @@ import org.apache.lucene.document.Field;
 import org.apache.lucene.document.Field.Index;
 import org.apache.lucene.document.Field.Store;
 import org.apache.lucene.document.Field.TermVector;
+import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
-import org.apache.lucene.search.DefaultSimilarity;
 import org.apache.lucene.search.Similarity;
 import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.store.LockObtainFailedException;
 import org.apache.lucene.util.Version;
 import org.apache.mahout.common.Pair;
+import org.apache.mahout.fpm.pfpgrowth.PFPGrowth;
 import org.apache.mahout.freqtermsets.convertors.string.TopKStringPatterns;
-import org.apache.mahout.math.map.OpenIntObjectHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import ca.uwaterloo.hadoop.util.CorpusReader;
 
-import com.google.common.collect.Sets;
-
-public class IndexBuilder {
-  private static Logger LOG = LoggerFactory.getLogger(IndexBuilder.class);
+public class ItemSetIndexBuilder {
+  private static Logger LOG = LoggerFactory.getLogger(ItemSetIndexBuilder.class);
   
   public static enum AssocField {
     ID("id"),
@@ -58,14 +57,15 @@ public class IndexBuilder {
   private static final String INPUT_OPTION = "input";
   private static final String INDEX_OPTION = "index";
   
-  private static final Analyzer ANALYZER = new ItemsetAnalyzer(); // Version.LUCENE_36);
+  private static final Analyzer ANALYZER = new TwitterAnalyzer(); // Version.LUCENE_36);
   
   /**
    * @param args
    * @throws IOException
+   * @throws NoSuchAlgorithmException 
    */
   @SuppressWarnings("static-access")
-  public static void main(String[] args) throws IOException {
+  public static void main(String[] args) throws IOException, NoSuchAlgorithmException {
     
     Options options = new Options();
     options.addOption(OptionBuilder.withArgName("path").hasArg()
@@ -84,33 +84,38 @@ public class IndexBuilder {
     
     if (!(cmdline.hasOption(INPUT_OPTION) && cmdline.hasOption(INDEX_OPTION))) {
       HelpFormatter formatter = new HelpFormatter();
-      formatter.printHelp(IndexBuilder.class.getName(), options);
+      formatter.printHelp(ItemSetIndexBuilder.class.getName(), options);
       System.exit(-1);
     }
     
     File indexLocation = new File(cmdline.getOptionValue(INDEX_OPTION));
     
     String seqPath = cmdline.getOptionValue(INPUT_OPTION);
-    seqPath += File.separator + "frequentpatterns";
+    seqPath += File.separator + PFPGrowth.FREQUENT_PATTERNS; //"frequentpatterns";
     LOG.info("Indexing " + seqPath);
     
+    
+    buildIndex(new Path(seqPath), indexLocation);
+  }
+  
+  public static void buildIndex(Path inPath, File indexDir) throws CorruptIndexException, LockObtainFailedException, IOException, NoSuchAlgorithmException{
+    
     FileSystem fs = FileSystem.get(new Configuration());
-    Path inPath = new Path(seqPath);
     if (!fs.exists(inPath)) {
-      System.err.println("Error: " + inPath + " does not exist!");
-      System.exit(-1);
+      LOG.error("Error: " + inPath + " does not exist!");
+      throw new IOException("Error: " + inPath + " does not exist!");
     }
     
     CorpusReader<Writable, TopKStringPatterns> stream = new CorpusReader<Writable, TopKStringPatterns>(
         inPath, fs, "part.*");
     
     Analyzer analyzer = ANALYZER;
-    Similarity similarity = new DefaultSimilarity();
+    Similarity similarity = new ItemSetSimilarity();
     IndexWriterConfig config = new IndexWriterConfig(Version.LUCENE_36, analyzer);
     config.setSimilarity(similarity);
     config.setOpenMode(IndexWriterConfig.OpenMode.CREATE); // Overwrite existing.
     
-    IndexWriter writer = new IndexWriter(FSDirectory.open(indexLocation), config);
+    IndexWriter writer = new IndexWriter(FSDirectory.open(indexDir), config);
     try {
       
       Pair<Writable, TopKStringPatterns> p;
@@ -192,8 +197,12 @@ public class IndexBuilder {
       // LOG.info("Optimizing index...");
       // writer.optimize();
       
-    } catch (Exception ex) {
+    } catch (IOException ex) {
       LOG.error(ex.getMessage(), ex);
+      throw ex;
+    } catch (NoSuchAlgorithmException ex) {
+      LOG.error(ex.getMessage(), ex);
+      throw ex;
     } finally {
       writer.close();
       stream.close();

@@ -1,9 +1,11 @@
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
-  <modelVersion>4.0.0</modelVersion>
-  <groupId>trec2012</groupId>
-  <artifactId>assoc-mr</artifactId>
-  <version>0.0.1-SNAPSHOT</version>
-  	<properties>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<groupId>trec2012</groupId>
+	<artifactId>assoc-mr</artifactId>
+	<version>0.0.2-SNAPSHOT</version>
+	<packaging>jar</packaging>
+	<properties>
 		<mahout.skip.example>true</mahout.skip.example>
 		<mahout.version>0.7-SNAPSHOT</mahout.version>
 	</properties>
@@ -49,7 +51,7 @@
 							<goal>single</goal>
 						</goals>
 						<configuration>
-<!-- 							<skipAssembly>${mahout.skip.example}</skipAssembly> -->
+							<!-- <skipAssembly>${mahout.skip.example}</skipAssembly> -->
 							<descriptors>
 								<descriptor>src/main/assembly/job.xml</descriptor>
 							</descriptors>
@@ -82,25 +84,25 @@
 
 	<dependencies>
 
-<!-- 		<dependency> -->
-<!-- 			<groupId>org.apache.mahout</groupId> -->
-<!-- 			<artifactId>mahout</artifactId> -->
-<!-- 			<version>${mahout.version}</version> -->
-<!-- 			<type>pom</type> -->
-<!-- 		</dependency> -->
+		<!-- <dependency> -->
+		<!-- <groupId>org.apache.mahout</groupId> -->
+		<!-- <artifactId>mahout</artifactId> -->
+		<!-- <version>${mahout.version}</version> -->
+		<!-- <type>pom</type> -->
+		<!-- </dependency> -->
 		<!-- our modules -->
-<!-- 		<dependency> -->
-<!-- 			<groupId>org.apache.mahout</groupId> -->
-<!-- 			<artifactId>mahout-core</artifactId> -->
-<!-- 			<version>${mahout.version}</version> -->
-<!-- 		</dependency> -->
-<!-- 		<dependency> -->
-<!-- 			<groupId>org.apache.mahout</groupId> -->
-<!-- 			<artifactId>mahout-core</artifactId> -->
-<!-- 			<version>${mahout.version}</version> -->
-<!-- 			<type>test-jar</type> -->
-<!-- 			<scope>test</scope> -->
-<!-- 		</dependency> -->
+		<!-- <dependency> -->
+		<!-- <groupId>org.apache.mahout</groupId> -->
+		<!-- <artifactId>mahout-core</artifactId> -->
+		<!-- <version>${mahout.version}</version> -->
+		<!-- </dependency> -->
+		<!-- <dependency> -->
+		<!-- <groupId>org.apache.mahout</groupId> -->
+		<!-- <artifactId>mahout-core</artifactId> -->
+		<!-- <version>${mahout.version}</version> -->
+		<!-- <type>test-jar</type> -->
+		<!-- <scope>test</scope> -->
+		<!-- </dependency> -->
 		<dependency>
 			<groupId>org.apache.mahout</groupId>
 			<artifactId>mahout-math</artifactId>
@@ -167,7 +169,7 @@
 			<artifactId>log4j-over-slf4j</artifactId>
 			<version>1.6.4</version>
 		</dependency>
-		
+
 		<dependency>
 			<groupId>com.google.guava</groupId>
 			<artifactId>guava</artifactId>
@@ -183,11 +185,16 @@
 			<artifactId>textcat</artifactId>
 			<version>1.0.1</version>
 		</dependency>
-<!-- 		<dependency> -->
-<!-- 			<groupId>com.twitter</groupId> -->
-<!-- 			<artifactId>twitter-text</artifactId> -->
-<!-- 			<version>1.4.10</version> -->
-<!-- 		</dependency> -->
+		<dependency>
+      <groupId>trec2012</groupId>
+      <artifactId>hadoop-util</artifactId>
+      <version>0.0.2-SNAPSHOT</version>
+    </dependency>
+		<!-- <dependency> -->
+		<!-- <groupId>com.twitter</groupId> -->
+		<!-- <artifactId>twitter-text</artifactId> -->
+		<!-- <version>1.4.10</version> -->
+		<!-- </dependency> -->
 	</dependencies>
 
 	<profiles>

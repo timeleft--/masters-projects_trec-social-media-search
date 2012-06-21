@@ -8,9 +8,12 @@ import org.apache.hadoop.mapreduce.RecordReader;
 import org.apache.hadoop.mapreduce.TaskAttemptContext;
 import org.apache.hadoop.mapreduce.lib.input.SequenceFileInputFormat;
 
-public class HtmlTweetInputFormat extends SequenceFileInputFormat<Text, Text>  {
+import edu.umd.cloud9.io.pair.PairOfStringLong;
+
+public class HtmlTweetInputFormat extends SequenceFileInputFormat<PairOfStringLong, Text>  {
+  
   @Override
-  public RecordReader<Text, Text> createRecordReader(InputSplit split, TaskAttemptContext context)
+  public RecordReader<PairOfStringLong, Text> createRecordReader(InputSplit split, TaskAttemptContext context)
       throws IOException {
     return new HtmlTweetRecordReader();
   }

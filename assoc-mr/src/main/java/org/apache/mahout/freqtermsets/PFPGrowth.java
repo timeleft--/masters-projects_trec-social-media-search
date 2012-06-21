@@ -17,13 +17,18 @@
 
 package org.apache.mahout.freqtermsets;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.URI;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
 import java.util.PriorityQueue;
 
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.FilenameUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.filecache.DistributedCache;
 import org.apache.hadoop.fs.FileStatus;
@@ -47,6 +52,8 @@ import org.apache.mahout.common.iterator.sequencefile.SequenceFileIterable;
 import org.apache.mahout.freqtermsets.convertors.string.TopKStringPatterns;
 import org.apache.mahout.freqtermsets.fpgrowth.FPGrowth;
 import org.apache.mahout.math.list.IntArrayList;
+
+import ca.uwaterloo.twitter.ItemSetIndexBuilder;
 
 import com.google.common.collect.Lists;
 import com.twitter.corpus.data.HtmlTweetInputFormat;
@@ -85,7 +92,13 @@ public final class PFPGrowth {
   // public static final String PSEUDO = "pseudo";
   public static final String COUNT_IN = "countIn";
   public static final String GROUP_FIS_IN = "gfisIn";
+  public static final String PARAM_INTERVAL_START = "startTime";
+  public static final String PARAM_INTERVAL_END = "endTime";
+  public static final String INDEX_OUT = "index";
   
+  public static final String PARAM_WINDOW_SIZE = "windowSize";
+  
+  public static final long TREC2011_MIN_TIMESTAMP = 1297209010000L;
   
   // Not text input anymore
   // public static final String SPLIT_PATTERN = "splitPattern";
@@ -124,19 +137,26 @@ public final class PFPGrowth {
       fListLocalPath = new Path(filesURIs[0].getPath());
     }
     
-    //YA: Lang independent stop words removal
+    // YA: Lang independent stop words removal
     // FIXME: as below
     Parameters params = new Parameters(conf.get("pfp.parameters", ""));
     int minFr = params.getInt(MIN_FREQ, MIN_FREQ_DEFAULT);
     int prunePct = params.getInt(PRUNE_PCTILE, PRUNE_PCTILE_DEFAULT);
-
-    long maxFr = new SequenceFileIterable<Text, LongWritable>(
-        fListLocalPath, true, conf).iterator().next().getSecond().get() * prunePct / 100;
+    
+    Iterator<Pair<Text, LongWritable>> tempIter = new SequenceFileIterable<Text, LongWritable>(
+        fListLocalPath, true, conf).iterator();
+    long maxFr = Long.MAX_VALUE;
+    if (tempIter.hasNext()) {
+      maxFr = tempIter.next().getSecond().get() * prunePct / 100;
+    }
+    tempIter = null;
+    
     for (Pair<Text, LongWritable> record : new SequenceFileIterable<Text, LongWritable>(
         fListLocalPath, true, conf)) {
       String token = record.getFirst().toString();
-      char ch0 = token.charAt(0); 
-      if ((ch0 != '#' && ch0 != '@') && (record.getSecond().get() < minFr || record.getSecond().get() > maxFr)) {
+      char ch0 = token.charAt(0);
+      if ((ch0 != '#' && ch0 != '@')
+          && (record.getSecond().get() < minFr || record.getSecond().get() > maxFr)) {
         continue;
       }
       list.add(new Pair<String, Long>(token, record.getSecond().get()));
@@ -201,15 +221,22 @@ public final class PFPGrowth {
     // i.e. cannot be used for a multilingual task
     int minFr = params.getInt(MIN_FREQ, MIN_FREQ_DEFAULT);
     int prunePct = params.getInt(PRUNE_PCTILE, PRUNE_PCTILE_DEFAULT);
-Path path = new Path(parallelCountingPath, FILE_PATTERN);
-// if(!FileSystem.get(path.toUri(),conf).exists(path)){
-// throw new IOException("Cannot find flist file: " + path);
-// }
-	long maxFreq = new SequenceFileDirIterable<Text, LongWritable>(
+    Path path = new Path(parallelCountingPath, FILE_PATTERN);
+    // if(!FileSystem.get(path.toUri(),conf).exists(path)){
+    // throw new IOException("Cannot find flist file: " + path);
+    // }
+    
+    Iterator<Pair<Text, LongWritable>> tempIter = new SequenceFileDirIterable<Text, LongWritable>(
         path,
-        PathType.GLOB, null, null, true, conf).iterator().next().getSecond().get() * prunePct / 100;
+        PathType.GLOB, null, null, true, conf).iterator();
+    long maxFreq = Long.MAX_VALUE;
+    if (tempIter.hasNext()) {
+      maxFreq = tempIter.next().getSecond().get() * prunePct / 100;
+    }
+    tempIter = null;
+    
     for (Pair<Text, LongWritable> record : new SequenceFileDirIterable<Text, LongWritable>(
-        path,PathType.GLOB, null, null, true, conf)) {
+        path, PathType.GLOB, null, null, true, conf)) {
       String token = record.getFirst().toString();
       char ch0 = token.charAt(0);
       long value = record.getSecond().get();
@@ -270,10 +297,11 @@ Path path = new Path(parallelCountingPath, FILE_PATTERN);
    *          params should contain input and output locations as a string value, the additional
    *          parameters
    *          include minSupport(3), maxHeapSize(50), numGroups(1000)
+   * @throws NoSuchAlgorithmException
    */
   public static void runPFPGrowth(Parameters params) throws IOException,
       InterruptedException,
-      ClassNotFoundException {
+      ClassNotFoundException, NoSuchAlgorithmException {
     Configuration conf = new Configuration();
     conf.set("io.serializations", "org.apache.hadoop.io.serializer.JavaSerialization,"
         + "org.apache.hadoop.io.serializer.WritableSerialization");
@@ -299,6 +327,27 @@ Path path = new Path(parallelCountingPath, FILE_PATTERN);
       startParallelFPGrowth(params, conf);
     }
     startAggregating(params, conf);
+    
+    String startTime = params.get(PFPGrowth.PARAM_INTERVAL_START,
+        Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP));
+    String endTime = params.get(PFPGrowth.PARAM_INTERVAL_END,
+        Long.toString(Long.MAX_VALUE));
+    
+    String indexDirStr = params.get(INDEX_OUT);
+    if (indexDirStr == null || indexDirStr.isEmpty()) {
+      indexDirStr = FilenameUtils.concat(params.get(OUTPUT), "index");
+    } else {
+      indexDirStr = FilenameUtils.concat(indexDirStr, startTime);
+      indexDirStr = FilenameUtils.concat(indexDirStr, endTime);
+    }
+    File indexDir = new File(indexDirStr);
+    
+    // clean up
+    FileUtils.deleteQuietly(indexDir);
+    
+    Path seqPath = new Path(params.get(OUTPUT), FREQUENT_PATTERNS);
+    
+    ItemSetIndexBuilder.buildIndex(seqPath, indexDir);
   }
   
   /**
@@ -333,6 +382,7 @@ Path path = new Path(parallelCountingPath, FILE_PATTERN);
     
     FileInputFormat.addInputPath(job, input);
     Path outPath = new Path(params.get(OUTPUT), FREQUENT_PATTERNS);
+    
     FileOutputFormat.setOutputPath(job, outPath);
     
     job.setInputFormatClass(SequenceFileInputFormat.class);

@@ -1,4 +1,4 @@
-package ca.uwaterloo.hadoop.util;
+package org.apache.mahout.freqtermsets.util;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -19,6 +19,8 @@ import org.apache.mahout.common.Parameters;
 import org.apache.mahout.freqtermsets.convertors.string.TopKStringPatterns;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import ca.uwaterloo.hadoop.util.CorpusReader;
 
 
 public class DumpSeqFilesFolder {

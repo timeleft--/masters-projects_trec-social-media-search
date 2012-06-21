@@ -1,4 +1,4 @@
-package ca.uwaterloo.twitter.assoc.qexpand;
+package ca.uwaterloo.twitter.queryexpand;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.PriorityQueue;
 import java.util.Set;
 
+import org.apache.cassandra.db.Table.IndexBuilder;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
 import org.apache.commons.cli.GnuParser;
@@ -52,6 +53,10 @@ import org.apache.mahout.math.map.OpenObjectIntHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import ca.uwaterloo.twitter.ItemSetIndexBuilder;
+import ca.uwaterloo.twitter.ItemSetSimilarity;
+import ca.uwaterloo.twitter.TwitterAnalyzer;
+
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
@@ -59,9 +64,9 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.common.collect.Sets.SetView;
 
-public class QueryExpander {
+public class FISQueryExpander {
   
-  private static Logger LOG = LoggerFactory.getLogger(QueryExpander.class);
+  private static Logger LOG = LoggerFactory.getLogger(FISQueryExpander.class);
   
   private static final String FIS_INDEX_OPTION = "fis_index";
   private static final String TWT_INDEX_OPTION = "twt_index";
@@ -80,7 +85,7 @@ public class QueryExpander {
   private static final int MAX_LEVELS_EXPANSION = 3;
   private static final int NUM_HITS_SHOWN_DEFAULT = 1000;
   
-  private static final Analyzer ANALYZER = new ItemsetAnalyzer();// new
+  private static final Analyzer ANALYZER = new TwitterAnalyzer();// new
                                                                  // EnglishAnalyzer(Version.LUCENE_36);
   private static final boolean CHAR_BY_CHAR = false;
   
@@ -159,7 +164,7 @@ public class QueryExpander {
     
     if (!(cmdline.hasOption(FIS_INDEX_OPTION) && cmdline.hasOption(TWT_INDEX_OPTION))) {
       HelpFormatter formatter = new HelpFormatter();
-      formatter.printHelp(QueryExpander.class.getName(), options);
+      formatter.printHelp(FISQueryExpander.class.getName(), options);
       System.exit(-1);
     }
     
@@ -204,9 +209,9 @@ public class QueryExpander {
     // TODO: from commandline
     
     PrintStream out = new PrintStream(System.out, true, "UTF-8");
-    QueryExpander qEx = null;
+    FISQueryExpander qEx = null;
     try {
-      qEx = new QueryExpander(fisIndexLocation, twtIndexLocation);
+      qEx = new FISQueryExpander(fisIndexLocation, twtIndexLocation);
       
       StringBuilder query = new StringBuilder();
       do {
@@ -359,15 +364,15 @@ public class QueryExpander {
   
   private float itemSetLenWght = ITEMSET_LEN_WEIGHT_DEFAULT;
   
-  public QueryExpander(File fisIndexLocation, File twtIndexLocation) throws IOException {
+  public FISQueryExpander(File fisIndexLocation, File twtIndexLocation) throws IOException {
     Directory fisdir = new MMapDirectory(fisIndexLocation);
     fisIxReader = IndexReader.open(fisdir);
     fisSearcher = new IndexSearcher(fisIxReader);
-    fisSimilarity = new ItemSetSimilariry();
+    fisSimilarity = new ItemSetSimilarity();
     fisSearcher.setSimilarity(fisSimilarity);
     
     fisQparser = new QueryParser(Version.LUCENE_36,
-        IndexBuilder.AssocField.ITEMSET.name,
+        ItemSetIndexBuilder.AssocField.ITEMSET.name,
         ANALYZER);
     fisQparser.setDefaultOperator(Operator.AND);
     
@@ -777,7 +782,7 @@ public class QueryExpander {
     for (int i = rs.size() - 1; i >= 0; --i) {
       int hit = keyList.getQuick(i);
       TermFreqVector terms = fisIxReader.getTermFreqVector(hit,
-          IndexBuilder.AssocField.ITEMSET.name);
+           ItemSetIndexBuilder.AssocField.ITEMSET.name);
       if (terms.size() < MIN_ITEMSET_SIZE) {
         continue;
       }
@@ -789,11 +794,11 @@ public class QueryExpander {
       } else {
         // corpus level importance (added once)
         Document doc = fisIxReader.document(hit);
-        float patternFreq = Float.parseFloat(doc.getFieldable(IndexBuilder.AssocField.SUPPORT.name)
+        float patternFreq = Float.parseFloat(doc.getFieldable( ItemSetIndexBuilder.AssocField.SUPPORT.name)
             .stringValue());
         float patterIDF = (float) MathUtils.log(10, twtIxReader.numDocs() / patternFreq);
         
-        float patternRank = Float.parseFloat(doc.getFieldable(IndexBuilder.AssocField.RANK.name)
+        float patternRank = Float.parseFloat(doc.getFieldable( ItemSetIndexBuilder.AssocField.RANK.name)
             .stringValue());
         
         // (k + 1)
@@ -927,7 +932,7 @@ public class QueryExpander {
       result.put(scoreDoc.doc, fusion);
       
       TermFreqVector termVector = fisIxReader.getTermFreqVector(scoreDoc.doc,
-          IndexBuilder.AssocField.ITEMSET.name);
+           ItemSetIndexBuilder.AssocField.ITEMSET.name);
       for (String term : termVector.getTerms()) {
         if (queryTerms.contains(term)) {
           continue;
@@ -993,7 +998,7 @@ public class QueryExpander {
     //
     // Query qtermQuery = fisQparser.parse(qterm);
     // // qtermQuery.setBoost(similarity.idf(ixReader.docFreq(new
-    // // Term(IndexBuilder.AssocField.ITEMSET.name, qterm)), ixReader.numDocs()));
+    // // Term( ItemSetIndexBuilder.AssocField.ITEMSET.name, qterm)), ixReader.numDocs()));
     //
     // query.add(qtermQuery, Occur.MUST);
     //

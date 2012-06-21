@@ -1,4 +1,4 @@
-package ca.uwaterloo.twitter.assoc.qexpand;
+package ca.uwaterloo.twitter.queryexpand;
 
 import org.apache.lucene.search.TopDocs;
 

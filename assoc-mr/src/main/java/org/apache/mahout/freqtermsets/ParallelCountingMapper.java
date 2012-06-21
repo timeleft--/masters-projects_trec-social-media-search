@@ -26,6 +26,7 @@ import org.apache.mahout.common.Parameters;
 
 import ca.uwaterloo.twitter.TokenIterator;
 import ca.uwaterloo.twitter.TokenIterator.LatinTokenIterator;
+import edu.umd.cloud9.io.pair.PairOfStringLong;
 
 /**
  * 
@@ -34,19 +35,32 @@ import ca.uwaterloo.twitter.TokenIterator.LatinTokenIterator;
  * 
  */
 public class ParallelCountingMapper extends
-    Mapper<Text, Text, Text, LongWritable> {
+    Mapper<PairOfStringLong, Text, Text, LongWritable> {
   
   private static final LongWritable ONE = new LongWritable(1);
   private boolean repeatHashTag;
+  private long intervalStart;
+  private long intervalEnd;
+  private long windowSize;
+  private long endTimestamp;
   
   // private Pattern splitter;
   
   @Override
-  protected void map(Text key, Text input, Context context)
+  protected void map(PairOfStringLong key, Text input, Context context)
       throws IOException, InterruptedException {
     
+    String screenname = key.getLeftElement();
+    long timestamp = key.getRightElement();
+    if (timestamp < intervalStart) {
+      return;
+    } else if (timestamp > endTimestamp) {
+      // I won't assume that the sequential order is reliable
+      // is it possible for a mapper to say its the end anyway?
+      return;
+    }
     // String[] items = splitter.split(input.toString());
-    LatinTokenIterator items = new LatinTokenIterator(input);
+    LatinTokenIterator items = new LatinTokenIterator("@" + screenname + ": " + input);
     items.setRepeatHashTag(repeatHashTag);
     while (items.hasNext()) {
       String item = items.next();
@@ -67,5 +81,12 @@ public class ParallelCountingMapper extends
     repeatHashTag = Boolean.parseBoolean(params.get(TokenIterator.PARAM_REPEAT_HASHTAG, "false"));
     // splitter = Pattern.compile(params.get(PFPGrowth.SPLIT_PATTERN,
     // PFPGrowth.SPLITTER.toString()));
+    intervalStart = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_START,
+        Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP)));
+    intervalEnd = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_END,
+        Long.toString(Long.MAX_VALUE)));
+    windowSize = Long.parseLong(params.get(PFPGrowth.PARAM_WINDOW_SIZE,
+        Long.toString(intervalEnd - intervalStart)));
+    endTimestamp = Math.min(intervalEnd, intervalStart + windowSize);
   }
 }

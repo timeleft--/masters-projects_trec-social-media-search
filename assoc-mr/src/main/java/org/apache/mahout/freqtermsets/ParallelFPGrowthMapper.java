@@ -30,24 +30,40 @@ import org.apache.mahout.math.set.OpenIntHashSet;
 
 import ca.uwaterloo.twitter.TokenIterator;
 import ca.uwaterloo.twitter.TokenIterator.LatinTokenIterator;
+import edu.umd.cloud9.io.pair.PairOfStringLong;
 
 /**
  * maps each transaction to all unique items groups in the transaction. mapper
  * outputs the group id as key and the transaction as value
  * 
  */
-public class ParallelFPGrowthMapper extends Mapper<Text, Text, IntWritable, TransactionTree> {
+public class ParallelFPGrowthMapper extends
+    Mapper<PairOfStringLong, Text, IntWritable, TransactionTree> {
   
   private final OpenObjectIntHashMap<String> fMap = new OpenObjectIntHashMap<String>();
   // private Pattern splitter;
   private int maxPerGroup;
+  private long intervalStart;
+  private long intervalEnd;
   
   private IntWritable wGroupID = new IntWritable();
   private boolean repeatHashTag;
+  private long windowSize;
+  private long endTimestamp;
   
   @Override
-  protected void map(Text key, Text input, Context context)
+  protected void map(PairOfStringLong key, Text input, Context context)
       throws IOException, InterruptedException {
+    
+    // String screenname = key.getLeftElement();
+    long timestamp = key.getRightElement();
+    if (timestamp < intervalStart) {
+      return;
+    } else if (timestamp > endTimestamp) {
+      // I won't assume that the sequential order is reliable
+      // is it possible for a mapper to say its the end anyway?
+      return;
+    }
     
     // String[] items = splitter.split(input.toString());
     
@@ -99,12 +115,20 @@ public class ParallelFPGrowthMapper extends Mapper<Text, Text, IntWritable, Tran
     
     Parameters params =
         new Parameters(context.getConfiguration().get(PFPGrowth.PFP_PARAMETERS, ""));
-
+    
     repeatHashTag = Boolean.parseBoolean(params.get(TokenIterator.PARAM_REPEAT_HASHTAG, "false"));
-        
+    
     // splitter = Pattern.compile(params.get(PFPGrowth.SPLIT_PATTERN,
     // PFPGrowth.SPLITTER.toString()));
     
     maxPerGroup = Integer.valueOf(params.getInt(PFPGrowth.MAX_PER_GROUP, 0));
+    
+    intervalStart = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_START,
+        Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP)));
+    intervalEnd = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_END,
+        Long.toString(Long.MAX_VALUE)));
+    windowSize = Long.parseLong(params.get(PFPGrowth.PARAM_WINDOW_SIZE,
+        Long.toString(intervalEnd - intervalStart)));
+    endTimestamp = Math.min(intervalEnd, intervalStart + windowSize);
   }
 }

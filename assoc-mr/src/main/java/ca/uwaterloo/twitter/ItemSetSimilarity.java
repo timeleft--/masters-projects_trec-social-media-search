@@ -1,8 +1,8 @@
-package ca.uwaterloo.twitter.assoc.qexpand;
+package ca.uwaterloo.twitter;
 
 import org.apache.lucene.search.DefaultSimilarity;
 
-public class ItemSetSimilariry extends DefaultSimilarity {
+public class ItemSetSimilarity extends DefaultSimilarity {
   
   /**
    * 
