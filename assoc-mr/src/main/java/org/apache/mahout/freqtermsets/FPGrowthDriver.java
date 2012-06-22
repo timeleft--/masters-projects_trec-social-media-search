@@ -24,6 +24,7 @@ import java.util.concurrent.Future;
 
 import org.apache.commons.io.FilenameUtils;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.util.ToolRunner;
 import org.apache.mahout.common.AbstractJob;
@@ -190,9 +191,10 @@ public final class FPGrowthDriver extends AbstractJob {
       params.set(PFPGrowth.PRUNE_PCTILE, getOption(PFPGrowth.PRUNE_PCTILE));
     }
     
-    if (hasOption(PFPGrowth.PARAM_INTERVAL_END)) {
-      params.set(PFPGrowth.PARAM_INTERVAL_END, getOption(PFPGrowth.PARAM_INTERVAL_END));
-    }
+    // if (hasOption(PFPGrowth.PARAM_INTERVAL_END)) {
+    params.set(PFPGrowth.PARAM_INTERVAL_END,
+        getOption(PFPGrowth.PARAM_INTERVAL_END, Long.toString(Long.MAX_VALUE)));
+    // }
     
     if (hasOption(PFPGrowth.PARAM_WINDOW_SIZE)) {
       params.set(PFPGrowth.PARAM_WINDOW_SIZE, getOption(PFPGrowth.PARAM_WINDOW_SIZE));
@@ -223,10 +225,15 @@ public final class FPGrowthDriver extends AbstractJob {
     ExecutorService exec = Executors.newFixedThreadPool(nThreads);
     Future<Void> lastFuture = null;
     
-    long startTime = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_START,
-        Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP)));
-    long endTime = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_END,
-        Long.toString(Long.MAX_VALUE)));
+    String startTimeStr = params.get(PFPGrowth.PARAM_INTERVAL_START);
+    if (startTimeStr == null) {
+      FileSystem fs = FileSystem.get(conf);
+      startTimeStr = fs.listStatus(inputDir)[0].getPath().getName();
+    }
+    long startTime = Long.parseLong(startTimeStr);
+    // Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP)));// GMT23JAN2011)));
+    long endTime = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_END));
+//        Long.toString(Long.MAX_VALUE)));
     long windowSize = Long.parseLong(params.get(PFPGrowth.PARAM_WINDOW_SIZE,
         Long.toString(endTime - startTime)));
     while (startTime < endTime) {

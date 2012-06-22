@@ -59,7 +59,9 @@ public class HtmlTweetRecordReader extends RecordReader<PairOfStringLong, Text> 
         String screenName = origKey.getRightElement();
         long id = origKey.getLeftElement();
         Long timestamp = extractTimestamp(html, id);
-        
+        if(timestamp == null){
+          return nextKeyValue();
+        }
         myKey = new PairOfStringLong(screenName, timestamp);
         
         myValue = new Text(/* "@" + screenName + ": " + */tweet);
@@ -116,13 +118,13 @@ public class HtmlTweetRecordReader extends RecordReader<PairOfStringLong, Text> 
     return raw;
   }
   
-  private final Pattern TIMESTAMP_PATTERN =
+  private static final Pattern TIMESTAMP_PATTERN =
       Pattern.compile("<span class=\"published timestamp\" data=\"\\{time:'([^']+)'\\}\">");
   
   // Sun Jan 23 00:00:00 +0000 2011
-  private final DateFormat dFmt = new SimpleDateFormat("EEE MMM dd HH:mm:ss ZZZZZ yyyy");
+  private static final DateFormat dFmt = new SimpleDateFormat("EEE MMM dd HH:mm:ss ZZZZZ yyyy");
   
-  public Long extractTimestamp(String html, long id) {
+  public static Long extractTimestamp(String html, long id) {
     Preconditions.checkNotNull(html);
     Matcher matcher = TIMESTAMP_PATTERN.matcher(html);
     Long result = null;
@@ -148,8 +150,12 @@ public class HtmlTweetRecordReader extends RecordReader<PairOfStringLong, Text> 
       result = null;
     }
     try {
-      result = dFmt.parse(matcher.group(1)).getTime();
+      String timeStamp = matcher.group(1);
+      result = dFmt.parse(timeStamp).getTime();
     } catch (ParseException e) {
+      LOG.error(e.getMessage(), e);
+      result = null;
+    } catch (IllegalStateException e) {
       LOG.error(e.getMessage(), e);
       result = null;
     }

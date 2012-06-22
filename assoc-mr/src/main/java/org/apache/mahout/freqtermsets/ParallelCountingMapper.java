@@ -81,12 +81,12 @@ public class ParallelCountingMapper extends
     repeatHashTag = Boolean.parseBoolean(params.get(TokenIterator.PARAM_REPEAT_HASHTAG, "false"));
     // splitter = Pattern.compile(params.get(PFPGrowth.SPLIT_PATTERN,
     // PFPGrowth.SPLITTER.toString()));
-    intervalStart = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_START,
-        Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP)));
-    intervalEnd = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_END,
-        Long.toString(Long.MAX_VALUE)));
+    intervalStart = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_START));
+//        Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP))); //GMT23JAN2011)));
+    intervalEnd = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_END));
+//        Long.toString(Long.MAX_VALUE)));
     windowSize = Long.parseLong(params.get(PFPGrowth.PARAM_WINDOW_SIZE,
         Long.toString(intervalEnd - intervalStart)));
-    endTimestamp = Math.min(intervalEnd, intervalStart + windowSize);
+    endTimestamp = Math.min(intervalEnd, intervalStart + windowSize - 1);
   }
 }

@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.PriorityQueue;
 import java.util.concurrent.Callable;
 
+import org.apache.cassandra.cli.CliParser.newColumnFamily_return;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.hadoop.conf.Configuration;
@@ -58,6 +59,7 @@ import ca.uwaterloo.twitter.ItemSetIndexBuilder;
 
 import com.google.common.collect.Lists;
 import com.twitter.corpus.data.HtmlTweetInputFormat;
+import com.twitter.corpus.data.util.PartitionByTimestamp;
 
 /**
  * 
@@ -99,7 +101,8 @@ public final class PFPGrowth implements Callable<Void> {
   
   public static final String PARAM_WINDOW_SIZE = "windowSize";
   
-  public static final long TREC2011_MIN_TIMESTAMP = 1297209010000L;
+//  public static final long TREC2011_MIN_TIMESTAMP = 1296130141000L; // 1297209010000L;
+    // public static final long GMT23JAN2011 = 1295740800000L;
   
   // Not text input anymore
   // public static final String SPLIT_PATTERN = "splitPattern";
@@ -329,10 +332,10 @@ public final class PFPGrowth implements Callable<Void> {
     }
     startAggregating(params, conf);
     
-    String startTime = params.get(PFPGrowth.PARAM_INTERVAL_START,
-        Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP));
-    String endTime = params.get(PFPGrowth.PARAM_INTERVAL_END,
-        Long.toString(Long.MAX_VALUE));
+    String startTime = params.get(PFPGrowth.PARAM_INTERVAL_START);
+    //        Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP)); //GMT23JAN2011));
+    String endTime = params.get(PFPGrowth.PARAM_INTERVAL_END);
+//        Long.toString(Long.MAX_VALUE));
     
     String indexDirStr = params.get(INDEX_OUT);
     if (indexDirStr == null || indexDirStr.isEmpty()) {
@@ -417,14 +420,23 @@ public final class PFPGrowth implements Callable<Void> {
     // conf.setInt("mapred.max.map.failures.percent", 0);
     // }
     
-    String input = params.get(INPUT);
-    Job job = new Job(conf, "Parallel Counting Driver running over input: " + input);
+//    String input = params.get(INPUT);
+//    Job job = new Job(conf, "Parallel Counting Driver running over input: " + input);
+    String startTime = params.get(PFPGrowth.PARAM_INTERVAL_START);
+//        Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP)); //GMT23JAN2011));
+    String endTime = params.get(PFPGrowth.PARAM_INTERVAL_END);
+//        Long.toString(Long.MAX_VALUE));
+    Job job = new Job(conf, "PFP Growth Driver running over inerval " + startTime + "-" + endTime);
+    
     job.setJarByClass(PFPGrowth.class);
     
     job.setOutputKeyClass(Text.class);
     job.setOutputValueClass(LongWritable.class);
     
-    FileInputFormat.addInputPath(job, new Path(input));
+    FileSystem fs = FileSystem.get(conf);
+    PartitionByTimestamp.setInputPaths(job, params, fs);
+//    FileInputFormat.addInputPath(job, new Path(input));
+    
     Path outPath = new Path(params.get(OUTPUT), PARALLEL_COUNTING);
     FileOutputFormat.setOutputPath(job, outPath);
     
@@ -463,8 +475,14 @@ public final class PFPGrowth implements Callable<Void> {
     conf.setInt("mapred.max.map.failures.percent", 10);
     // END YA
     
-    Path input = new Path(params.get(INPUT));
-    Job job = new Job(conf, "PFP Growth Driver running over input" + input);
+    // Path input = new Path(params.get(INPUT));
+    // Job job = new Job(conf, "PFP Growth Driver running over inputs" + Arrays.toString(input));
+    String startTime = params.get(PFPGrowth.PARAM_INTERVAL_START);
+//        Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP)); //GMT23JAN2011));
+    String endTime = params.get(PFPGrowth.PARAM_INTERVAL_END);
+//        Long.toString(Long.MAX_VALUE));
+    Job job = new Job(conf, "PFP Growth Driver running over inerval " + startTime + "-" + endTime);
+    
     job.setJarByClass(PFPGrowth.class);
     
     job.setMapOutputKeyClass(IntWritable.class);
@@ -473,7 +491,10 @@ public final class PFPGrowth implements Callable<Void> {
     job.setOutputKeyClass(Text.class);
     job.setOutputValueClass(TopKStringPatterns.class);
     
-    FileInputFormat.addInputPath(job, input);
+    FileSystem fs = FileSystem.get(conf);
+    PartitionByTimestamp.setInputPaths(job, params, fs);
+    // FileInputFormat.addInputPath(job, input);
+    
     Path outPath = new Path(params.get(OUTPUT), FPGROWTH);
     FileOutputFormat.setOutputPath(job, outPath);
     
@@ -493,8 +514,8 @@ public final class PFPGrowth implements Callable<Void> {
   
   private final Parameters intervalParams;
   
-  public PFPGrowth(Parameters pIntervalParams) {
-    intervalParams = pIntervalParams;
+  public PFPGrowth(Parameters pIntervalParams) throws IOException {
+    intervalParams = new Parameters(pIntervalParams.toString());
   }
   
   @Override
