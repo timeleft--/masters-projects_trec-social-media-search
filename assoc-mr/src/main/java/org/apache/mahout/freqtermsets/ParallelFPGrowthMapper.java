@@ -50,12 +50,13 @@ public class ParallelFPGrowthMapper extends
   private boolean repeatHashTag;
   private long windowSize;
   private long endTimestamp;
+  private boolean prependUserName;
   
   @Override
   protected void map(PairOfStringLong key, Text input, Context context)
       throws IOException, InterruptedException {
     
-    // String screenname = key.getLeftElement();
+    String screenname = key.getLeftElement();
     long timestamp = key.getRightElement();
     if (timestamp < intervalStart) {
       return;
@@ -69,8 +70,15 @@ public class ParallelFPGrowthMapper extends
     
     OpenIntHashSet itemSet = new OpenIntHashSet();
     
+    String inputStr;
     // for (String item : items) {
-    LatinTokenIterator items = new LatinTokenIterator(input);
+    if(prependUserName){
+      inputStr = "@" + screenname + ": " + input;
+    } else {
+      inputStr = input.toString();
+    }
+    
+    LatinTokenIterator items = new LatinTokenIterator(inputStr);
     items.setRepeatHashTag(repeatHashTag);
     while (items.hasNext()) {
       String item = items.next();
@@ -130,5 +138,7 @@ public class ParallelFPGrowthMapper extends
     windowSize = Long.parseLong(params.get(PFPGrowth.PARAM_WINDOW_SIZE,
         Long.toString(intervalEnd - intervalStart)));
     endTimestamp = Math.min(intervalEnd, intervalStart + windowSize - 1);
+    
+    prependUserName = true;
   }
 }

@@ -28,7 +28,6 @@ import java.util.List;
 import java.util.PriorityQueue;
 import java.util.concurrent.Callable;
 
-import org.apache.cassandra.cli.CliParser.newColumnFamily_return;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.hadoop.conf.Configuration;
@@ -58,7 +57,7 @@ import org.apache.mahout.math.list.IntArrayList;
 import ca.uwaterloo.twitter.ItemSetIndexBuilder;
 
 import com.google.common.collect.Lists;
-import com.twitter.corpus.data.HtmlTweetInputFormat;
+import com.twitter.corpus.data.CSVTweetInputFormat;
 import com.twitter.corpus.data.util.PartitionByTimestamp;
 
 /**
@@ -442,7 +441,8 @@ public final class PFPGrowth implements Callable<Void> {
     
     HadoopUtil.delete(conf, outPath);
     
-    job.setInputFormatClass(HtmlTweetInputFormat.class);
+//    job.setInputFormatClass(HtmlTweetInputFormat.class);
+    job.setInputFormatClass(CSVTweetInputFormat.class);
     job.setMapperClass(ParallelCountingMapper.class);
     job.setCombinerClass(ParallelCountingReducer.class);
     job.setReducerClass(ParallelCountingReducer.class);
@@ -500,7 +500,8 @@ public final class PFPGrowth implements Callable<Void> {
     
     HadoopUtil.delete(conf, outPath);
     
-    job.setInputFormatClass(HtmlTweetInputFormat.class);
+//    job.setInputFormatClass(HtmlTweetInputFormat.class);
+    job.setInputFormatClass(CSVTweetInputFormat.class);
     job.setMapperClass(ParallelFPGrowthMapper.class);
     job.setCombinerClass(ParallelFPGrowthCombiner.class);
     job.setReducerClass(ParallelFPGrowthReducer.class);

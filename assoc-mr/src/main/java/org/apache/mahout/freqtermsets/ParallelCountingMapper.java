@@ -43,6 +43,7 @@ public class ParallelCountingMapper extends
   private long intervalEnd;
   private long windowSize;
   private long endTimestamp;
+  private boolean prependUserName;
   
   // private Pattern splitter;
   
@@ -60,7 +61,13 @@ public class ParallelCountingMapper extends
       return;
     }
     // String[] items = splitter.split(input.toString());
-    LatinTokenIterator items = new LatinTokenIterator("@" + screenname + ": " + input);
+    String inputStr;
+    if(prependUserName){
+      inputStr = "@" + screenname + ": " + input;
+    } else {
+      inputStr = input.toString();
+    }
+    LatinTokenIterator items = new LatinTokenIterator(inputStr);
     items.setRepeatHashTag(repeatHashTag);
     while (items.hasNext()) {
       String item = items.next();
@@ -88,5 +95,7 @@ public class ParallelCountingMapper extends
     windowSize = Long.parseLong(params.get(PFPGrowth.PARAM_WINDOW_SIZE,
         Long.toString(intervalEnd - intervalStart)));
     endTimestamp = Math.min(intervalEnd, intervalStart + windowSize - 1);
+    
+    prependUserName = true;
   }
 }
