@@ -44,7 +44,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.twitter.corpus.data.HtmlStatus;
-import com.twitter.corpus.data.HtmlTweetRecordReader;
 
 import edu.umd.cloud9.io.pair.PairOfLongString;
 
@@ -53,7 +52,7 @@ public class PartitionByTimestamp {
   
   public static final long FILE_INTERVAL_MILLIS = 5 * 60 * 1000;
   public static final long FOLDER_INTERVAL_MILLIS = 60 * 60 * 1000;
-  private static final int MAX_OPEN_FILES = 13;
+  private static final int MAX_OPEN_FILES = 333;
   
   private static Map<String, List<Pair<Long, File>>> chilrdenCache = Collections
       .synchronizedMap(new WeakHashMap<String, List<Pair<Long, File>>>());
@@ -61,7 +60,7 @@ public class PartitionByTimestamp {
   public static void main(String[] args) throws IOException {
     Configuration conf = new Configuration();
     FileSystem fs = FileSystem.get(conf);
-    Path htmlPath = new Path("file:///u2/yaboulnaga/Shared/datasets/twitter-trec2011/html-sample");
+    Path htmlPath = new Path("file:///u2/yaboulnaga/Shared/datasets/twitter-trec2011/html");
     CorpusReader<PairOfLongString, HtmlStatus> reader =
         new CorpusReader<PairOfLongString, HtmlStatus>(htmlPath, fs, ".*\\.html\\.seq");
     
@@ -80,7 +79,7 @@ public class PartitionByTimestamp {
       }
     }
     File outPath = new File(
-        /* "file:// */"/u2/yaboulnaga/Shared/datasets/twitter-trec2011/html-sample_hour-5min");
+        /* "file:// */"/u2/yaboulnaga/Shared/datasets/twitter-trec2011/html_hour-5min");
     // "hdfs://scspc400.cs.uwaterloo.ca:9000/twitter2011/byhour/");
     
     // HadoopUtil.delete(conf, outPath);
