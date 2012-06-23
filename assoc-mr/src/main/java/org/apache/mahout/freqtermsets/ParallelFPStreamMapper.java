@@ -37,7 +37,7 @@ import edu.umd.cloud9.io.pair.PairOfStringLong;
  * outputs the group id as key and the transaction as value
  * 
  */
-public class ParallelFPGrowthMapper extends
+public class ParallelFPStreamMapper extends
     Mapper<PairOfStringLong, Text, IntWritable, TransactionTree> {
   
   private final OpenObjectIntHashMap<String> fMap = new OpenObjectIntHashMap<String>();

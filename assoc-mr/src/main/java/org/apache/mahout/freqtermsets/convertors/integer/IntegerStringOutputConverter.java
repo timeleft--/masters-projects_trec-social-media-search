@@ -20,6 +20,7 @@ package org.apache.mahout.freqtermsets.convertors.integer;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.Set;
@@ -30,6 +31,7 @@ import org.apache.hadoop.mapred.OutputCollector;
 import org.apache.mahout.common.Pair;
 import org.apache.mahout.freqtermsets.AggregatorReducer;
 import org.apache.mahout.freqtermsets.convertors.string.TopKStringPatterns;
+import org.apache.mahout.math.map.OpenIntObjectHashMap;
 import org.knallgrau.utils.textcat.TextCategorizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,12 +67,13 @@ public final class IntegerStringOutputConverter implements
   
   private final OutputCollector<Text, TopKStringPatterns> collector;
   
-  private final List<String> featureReverseMap;
+//  private final List<String> featureReverseMap;
+  OpenIntObjectHashMap<String> featureReverseMap;
   
   public IntegerStringOutputConverter(OutputCollector<Text, TopKStringPatterns> collector,
-      List<String> featureReverseMap, int pMinWordsForLangDetect, boolean pRepeatHashTag) {
+      OpenIntObjectHashMap<String> reverseMap, int pMinWordsForLangDetect, boolean pRepeatHashTag) {
     this.collector = collector;
-    this.featureReverseMap = featureReverseMap;
+    this.featureReverseMap = reverseMap;
     minWordsForLangDetect = pMinWordsForLangDetect;
     this.repeatHashTag = pRepeatHashTag;
   }

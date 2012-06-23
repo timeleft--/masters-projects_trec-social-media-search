@@ -19,6 +19,7 @@ package org.apache.mahout.freqtermsets;
 
 import java.io.File;
 import java.io.IOException;
+import java.math.BigInteger;
 import java.net.URI;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -30,6 +31,7 @@ import java.util.concurrent.Callable;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
+import org.apache.commons.math.util.MathUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.filecache.DistributedCache;
 import org.apache.hadoop.fs.FileStatus;
@@ -73,7 +75,7 @@ public final class PFPGrowth implements Callable<Void> {
   public static final String G_LIST = "gList";
   public static final String NUM_GROUPS = "numGroups";
   public static final int NUM_GROUPS_DEFAULT = 1000;
-  public static final String MAX_PER_GROUP = "maxPerGroup";
+  // public static final String MAX_PER_GROUP = "maxPerGroup";
   public static final String OUTPUT = "output";
   public static final String MIN_SUPPORT = "minSupport";
   public static final String MAX_HEAPSIZE = "maxHeapSize";
@@ -100,8 +102,8 @@ public final class PFPGrowth implements Callable<Void> {
   
   public static final String PARAM_WINDOW_SIZE = "windowSize";
   
-//  public static final long TREC2011_MIN_TIMESTAMP = 1296130141000L; // 1297209010000L;
-    // public static final long GMT23JAN2011 = 1295740800000L;
+  // public static final long TREC2011_MIN_TIMESTAMP = 1296130141000L; // 1297209010000L;
+  // public static final long GMT23JAN2011 = 1295740800000L;
   
   // Not text input anymore
   // public static final String SPLIT_PATTERN = "splitPattern";
@@ -145,6 +147,8 @@ public final class PFPGrowth implements Callable<Void> {
     Parameters params = new Parameters(conf.get("pfp.parameters", ""));
     int minFr = params.getInt(MIN_FREQ, MIN_FREQ_DEFAULT);
     int prunePct = params.getInt(PRUNE_PCTILE, PRUNE_PCTILE_DEFAULT);
+    
+//TODO:    assert minFr >= minSupport;
     
     Iterator<Pair<Text, LongWritable>> tempIter = new SequenceFileIterable<Text, LongWritable>(
         fListLocalPath, true, conf).iterator();
@@ -238,6 +242,8 @@ public final class PFPGrowth implements Callable<Void> {
     }
     tempIter = null;
     
+    assert minFr >= minSupport;
+    
     for (Pair<Text, LongWritable> record : new SequenceFileDirIterable<Text, LongWritable>(
         path, PathType.GLOB, null, null, true, conf)) {
       String token = record.getFirst().toString();
@@ -255,22 +261,43 @@ public final class PFPGrowth implements Callable<Void> {
     return fList; // This prevents a null exception when using FP2 --> .subList(0, fList.size());
   }
   
-  public static int getGroup(int itemId, int maxPerGroup) {
-    return itemId / maxPerGroup;
+  // public static int getGroup(int itemId, int maxPerGroup) {
+  // return itemId / maxPerGroup;
+  // }
+  //
+  // public static IntArrayList getGroupMembers(int groupId,
+  // int maxPerGroup,
+  // int numFeatures) {
+  // IntArrayList ret = new IntArrayList();
+  // int start = groupId * maxPerGroup;
+  // int end = start + maxPerGroup;
+  // if (end > numFeatures)
+  // end = numFeatures;
+  // for (int i = start; i < end; i++) {
+  // ret.add(i);
+  // }
+  // return ret;
+  // }
+  public static int getGroup(int attrId, int numGroups) {
+    int maskLen = (int) MathUtils.log(2, numGroups) + 1;
+    int mask = (int) Math.pow(2, maskLen) - 1;
+    
+//    int attrHash = attribute.hashCode();
+    int attrLSBs = 0;
+    int byteMask = 255;
+    int numBytes = (maskLen / 8)+1;
+    for (int i = 0; i < numBytes; ++i) {
+      attrLSBs += attrId & byteMask;
+      byteMask <<= 8;
+    }
+    
+    int attrGroup = attrLSBs & mask;
+    return attrGroup;
   }
   
-  public static IntArrayList getGroupMembers(int groupId,
-      int maxPerGroup,
-      int numFeatures) {
-    IntArrayList ret = new IntArrayList();
-    int start = groupId * maxPerGroup;
-    int end = start + maxPerGroup;
-    if (end > numFeatures)
-      end = numFeatures;
-    for (int i = start; i < end; i++) {
-      ret.add(i);
-    }
-    return ret;
+  public static boolean isGroupMember(int groupId, int attrId, int numGroups) {
+    int attrGroup = getGroup(attrId, numGroups);
+    return groupId == attrGroup;
   }
   
   /**
@@ -318,13 +345,14 @@ public final class PFPGrowth implements Callable<Void> {
       List<Pair<String, Long>> fList = readFList(params);
       saveFList(fList, params, conf);
       
-      // set param to control group size in MR jobs
-      int numGroups = params.getInt(PFPGrowth.NUM_GROUPS,
-          PFPGrowth.NUM_GROUPS_DEFAULT);
-      int maxPerGroup = fList.size() / numGroups;
-      if (fList.size() % numGroups != 0)
-        maxPerGroup++;
-      params.set(MAX_PER_GROUP, Integer.toString(maxPerGroup));
+      // // set param to control group size in MR jobs
+      // int numGroups = params.getInt(PFPGrowth.NUM_GROUPS,
+      // PFPGrowth.NUM_GROUPS_DEFAULT);
+      // int maxPerGroup = fList.size() / numGroups;
+      // if (fList.size() % numGroups != 0)
+      // maxPerGroup++;
+      // params.set(MAX_PER_GROUP, Integer.toString(maxPerGroup));
+      
       fList = null;
       
       startParallelFPGrowth(params, conf);
@@ -332,9 +360,9 @@ public final class PFPGrowth implements Callable<Void> {
     startAggregating(params, conf);
     
     String startTime = params.get(PFPGrowth.PARAM_INTERVAL_START);
-    //        Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP)); //GMT23JAN2011));
+    // Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP)); //GMT23JAN2011));
     String endTime = params.get(PFPGrowth.PARAM_INTERVAL_END);
-//        Long.toString(Long.MAX_VALUE));
+    // Long.toString(Long.MAX_VALUE));
     
     String indexDirStr = params.get(INDEX_OUT);
     if (indexDirStr == null || indexDirStr.isEmpty()) {
@@ -419,12 +447,12 @@ public final class PFPGrowth implements Callable<Void> {
     // conf.setInt("mapred.max.map.failures.percent", 0);
     // }
     
-//    String input = params.get(INPUT);
-//    Job job = new Job(conf, "Parallel Counting Driver running over input: " + input);
+    // String input = params.get(INPUT);
+    // Job job = new Job(conf, "Parallel Counting Driver running over input: " + input);
     String startTime = params.get(PFPGrowth.PARAM_INTERVAL_START);
-//        Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP)); //GMT23JAN2011));
+    // Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP)); //GMT23JAN2011));
     String endTime = params.get(PFPGrowth.PARAM_INTERVAL_END);
-//        Long.toString(Long.MAX_VALUE));
+    // Long.toString(Long.MAX_VALUE));
     Job job = new Job(conf, "PFP Growth Driver running over inerval " + startTime + "-" + endTime);
     
     job.setJarByClass(PFPGrowth.class);
@@ -434,14 +462,14 @@ public final class PFPGrowth implements Callable<Void> {
     
     FileSystem fs = FileSystem.getLocal(conf);
     PartitionByTimestamp.setInputPaths(job, params, fs);
-//    FileInputFormat.addInputPath(job, new Path(input));
+    // FileInputFormat.addInputPath(job, new Path(input));
     
     Path outPath = new Path(params.get(OUTPUT), PARALLEL_COUNTING);
     FileOutputFormat.setOutputPath(job, outPath);
     
     HadoopUtil.delete(conf, outPath);
     
-//    job.setInputFormatClass(HtmlTweetInputFormat.class);
+    // job.setInputFormatClass(HtmlTweetInputFormat.class);
     job.setInputFormatClass(CSVTweetInputFormat.class);
     job.setMapperClass(ParallelCountingMapper.class);
     job.setCombinerClass(ParallelCountingReducer.class);
@@ -478,9 +506,9 @@ public final class PFPGrowth implements Callable<Void> {
     // Path input = new Path(params.get(INPUT));
     // Job job = new Job(conf, "PFP Growth Driver running over inputs" + Arrays.toString(input));
     String startTime = params.get(PFPGrowth.PARAM_INTERVAL_START);
-//        Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP)); //GMT23JAN2011));
+    // Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP)); //GMT23JAN2011));
     String endTime = params.get(PFPGrowth.PARAM_INTERVAL_END);
-//        Long.toString(Long.MAX_VALUE));
+    // Long.toString(Long.MAX_VALUE));
     Job job = new Job(conf, "PFP Growth Driver running over inerval " + startTime + "-" + endTime);
     
     job.setJarByClass(PFPGrowth.class);
@@ -500,7 +528,7 @@ public final class PFPGrowth implements Callable<Void> {
     
     HadoopUtil.delete(conf, outPath);
     
-//    job.setInputFormatClass(HtmlTweetInputFormat.class);
+    // job.setInputFormatClass(HtmlTweetInputFormat.class);
     job.setInputFormatClass(CSVTweetInputFormat.class);
     job.setMapperClass(ParallelFPGrowthMapper.class);
     job.setCombinerClass(ParallelFPGrowthCombiner.class);

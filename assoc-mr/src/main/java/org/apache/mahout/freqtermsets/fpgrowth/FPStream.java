@@ -45,7 +45,7 @@ import org.apache.mahout.freqtermsets.convertors.StatusUpdater;
 import org.apache.mahout.freqtermsets.convertors.TopKPatternsOutputConverter;
 import org.apache.mahout.freqtermsets.convertors.TransactionIterator;
 import org.apache.mahout.freqtermsets.convertors.string.TopKStringPatterns;
-import org.apache.mahout.freqtermsets.fpgrowth.FPGrowth;
+import org.apache.mahout.freqtermsets.fpgrowth.FPStream;
 import org.apache.mahout.freqtermsets.fpgrowth.FPTree;
 import org.apache.mahout.freqtermsets.fpgrowth.FPTreeDepthCache;
 import org.apache.mahout.freqtermsets.fpgrowth.FrequentPatternMaxHeap;
@@ -63,9 +63,9 @@ import org.slf4j.LoggerFactory;
  * @param <A>
  *          object type used as the cell items in a transaction list
  */
-public class FPGrowth<A extends Comparable<? super A>> {
+public class FPStream<A extends Comparable<? super A>> {
   
-  private static final Logger log = LoggerFactory.getLogger(FPGrowth.class);
+  private static final Logger log = LoggerFactory.getLogger(FPStream.class);
   
   public static List<Pair<String, TopKStringPatterns>> readFrequentPattern(Configuration conf,
       Path path) {

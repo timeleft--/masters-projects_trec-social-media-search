@@ -48,7 +48,7 @@ import com.google.common.collect.Lists;
  * outputs the the Top K frequent Patterns for each group.
  * 
  */
-public class ParallelFPGrowthReducer extends
+public class ParallelFPStreamReducer extends
     Reducer<IntWritable, TransactionTree, Text, TopKStringPatterns> {
   
   public static final String MIN_WORDS_FOR_LANG_ID = "lenLangId";

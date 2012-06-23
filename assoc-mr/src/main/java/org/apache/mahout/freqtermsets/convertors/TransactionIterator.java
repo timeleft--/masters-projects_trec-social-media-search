@@ -25,6 +25,8 @@ import com.google.common.base.Function;
 import com.google.common.collect.ForwardingIterator;
 import com.google.common.collect.Iterators;
 import org.apache.mahout.common.Pair;
+import org.apache.mahout.math.map.OpenIntIntHashMap;
+import org.apache.mahout.math.map.OpenObjectIntHashMap;
 
 /**
  * Iterates over a Transaction and outputs the transaction integer id mapping and the support of the
@@ -35,8 +37,8 @@ public class TransactionIterator<T> extends ForwardingIterator<Pair<int[],Long>>
   private final int[] transactionBuffer;
   private final Iterator<Pair<int[],Long>> delegate;
   
-  public TransactionIterator(Iterator<Pair<List<T>,Long>> transactions, final Map<T,Integer> attributeIdMapping) {
-    transactionBuffer = new int[attributeIdMapping.size()];
+  public TransactionIterator(Iterator<Pair<List<T>,Long>> transactions, final OpenObjectIntHashMap<T> ixIdMap) {
+    transactionBuffer = new int[ixIdMap.size()];
     delegate = Iterators.transform(
         transactions,
         new Function<Pair<List<T>,Long>, Pair<int[],Long>>() {
@@ -47,8 +49,8 @@ public class TransactionIterator<T> extends ForwardingIterator<Pair<int[],Long>>
 	      return null;
 	    }
             for (T attribute : from.getFirst()) {
-              if (attributeIdMapping.containsKey(attribute)) {
-                transactionBuffer[index++] = attributeIdMapping.get(attribute);
+              if (ixIdMap.containsKey(attribute)) {
+                transactionBuffer[index++] = ixIdMap.get(attribute);
               }
             }
             int[] transactionList = new int[index];

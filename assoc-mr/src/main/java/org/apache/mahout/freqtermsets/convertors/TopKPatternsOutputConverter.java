@@ -27,6 +27,9 @@ import org.apache.hadoop.mapred.OutputCollector;
 import org.apache.mahout.common.Pair;
 import org.apache.mahout.freqtermsets.fpgrowth.FrequentPatternMaxHeap;
 import org.apache.mahout.freqtermsets.fpgrowth.Pattern;
+import org.apache.mahout.math.map.OpenIntIntHashMap;
+import org.apache.mahout.math.map.OpenIntObjectHashMap;
+import org.apache.mahout.math.map.OpenObjectIntHashMap;
 import org.knallgrau.utils.textcat.TextCategorizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,12 +46,12 @@ import com.google.common.collect.Maps;
 public final class TopKPatternsOutputConverter<A extends Comparable<? super A>> implements
     OutputCollector<Integer, FrequentPatternMaxHeap> {
   private final OutputCollector<A, List<Pair<List<A>, Long>>> collector;
-  private final Map<Integer, A> reverseMapping;
+  private final OpenIntObjectHashMap<A> reverseMapping;
   
   public TopKPatternsOutputConverter(OutputCollector<A, List<Pair<List<A>, Long>>> collector,
-      Map<Integer, A> reverseMapping){
+      OpenIntObjectHashMap<A> idIxMap){
     this.collector = collector;
-    this.reverseMapping = reverseMapping;
+    this.reverseMapping = idIxMap;
   }
   
   @Override
