@@ -75,7 +75,7 @@ public final class PFPGrowth implements Callable<Void> {
   public static final String G_LIST = "gList";
   public static final String NUM_GROUPS = "numGroups";
   public static final int NUM_GROUPS_DEFAULT = 1000;
-  // public static final String MAX_PER_GROUP = "maxPerGroup";
+  public static final String MAX_PER_GROUP = "maxPerGroup";
   public static final String OUTPUT = "output";
   public static final String MIN_SUPPORT = "minSupport";
   public static final String MAX_HEAPSIZE = "maxHeapSize";
@@ -101,6 +101,9 @@ public final class PFPGrowth implements Callable<Void> {
   public static final String INDEX_OUT = "index";
   
   public static final String PARAM_WINDOW_SIZE = "windowSize";
+  
+  // TODO command line
+  private static final boolean FPSTREAM = true;
   
   // public static final long TREC2011_MIN_TIMESTAMP = 1296130141000L; // 1297209010000L;
   // public static final long GMT23JAN2011 = 1295740800000L;
@@ -148,7 +151,7 @@ public final class PFPGrowth implements Callable<Void> {
     int minFr = params.getInt(MIN_FREQ, MIN_FREQ_DEFAULT);
     int prunePct = params.getInt(PRUNE_PCTILE, PRUNE_PCTILE_DEFAULT);
     
-//TODO:    assert minFr >= minSupport;
+    // TODO: assert minFr >= minSupport;
     
     Iterator<Pair<Text, LongWritable>> tempIter = new SequenceFileIterable<Text, LongWritable>(
         fListLocalPath, true, conf).iterator();
@@ -261,33 +264,34 @@ public final class PFPGrowth implements Callable<Void> {
     return fList; // This prevents a null exception when using FP2 --> .subList(0, fList.size());
   }
   
-  // public static int getGroup(int itemId, int maxPerGroup) {
-  // return itemId / maxPerGroup;
-  // }
-  //
-  // public static IntArrayList getGroupMembers(int groupId,
-  // int maxPerGroup,
-  // int numFeatures) {
-  // IntArrayList ret = new IntArrayList();
-  // int start = groupId * maxPerGroup;
-  // int end = start + maxPerGroup;
-  // if (end > numFeatures)
-  // end = numFeatures;
-  // for (int i = start; i < end; i++) {
-  // ret.add(i);
-  // }
-  // return ret;
-  // }
-  public static int getGroup(int attrId, int numGroups) {
+  public static int getGroup(int itemId, int maxPerGroup) {
+    return itemId / maxPerGroup;
+  }
+  
+  public static IntArrayList getGroupMembers(int groupId,
+      int maxPerGroup,
+      int numFeatures) {
+    IntArrayList ret = new IntArrayList();
+    int start = groupId * maxPerGroup;
+    int end = start + maxPerGroup;
+    if (end > numFeatures)
+      end = numFeatures;
+    for (int i = start; i < end; i++) {
+      ret.add(i);
+    }
+    return ret;
+  }
+  
+  public static int getGroupHash(int attrHash, int numGroups) {
     int maskLen = (int) MathUtils.log(2, numGroups) + 1;
     int mask = (int) Math.pow(2, maskLen) - 1;
     
-//    int attrHash = attribute.hashCode();
+    // int attrHash = attribute.hashCode();
     int attrLSBs = 0;
     int byteMask = 255;
-    int numBytes = (maskLen / 8)+1;
+    int numBytes = (maskLen / 8) + 1;
     for (int i = 0; i < numBytes; ++i) {
-      attrLSBs += attrId & byteMask;
+      attrLSBs += attrHash & byteMask;
       byteMask <<= 8;
     }
     
@@ -296,7 +300,7 @@ public final class PFPGrowth implements Callable<Void> {
   }
   
   public static boolean isGroupMember(int groupId, int attrId, int numGroups) {
-    int attrGroup = getGroup(attrId, numGroups);
+    int attrGroup = getGroupHash(attrId, numGroups);
     return groupId == attrGroup;
   }
   
@@ -345,13 +349,13 @@ public final class PFPGrowth implements Callable<Void> {
       List<Pair<String, Long>> fList = readFList(params);
       saveFList(fList, params, conf);
       
-      // // set param to control group size in MR jobs
-      // int numGroups = params.getInt(PFPGrowth.NUM_GROUPS,
-      // PFPGrowth.NUM_GROUPS_DEFAULT);
-      // int maxPerGroup = fList.size() / numGroups;
-      // if (fList.size() % numGroups != 0)
-      // maxPerGroup++;
-      // params.set(MAX_PER_GROUP, Integer.toString(maxPerGroup));
+      // set param to control group size in MR jobs
+      int numGroups = params.getInt(PFPGrowth.NUM_GROUPS,
+          PFPGrowth.NUM_GROUPS_DEFAULT);
+      int maxPerGroup = fList.size() / numGroups;
+      if (fList.size() % numGroups != 0)
+        maxPerGroup++;
+      params.set(MAX_PER_GROUP, Integer.toString(maxPerGroup));
       
       fList = null;
       
@@ -530,9 +534,16 @@ public final class PFPGrowth implements Callable<Void> {
     
     // job.setInputFormatClass(HtmlTweetInputFormat.class);
     job.setInputFormatClass(CSVTweetInputFormat.class);
-    job.setMapperClass(ParallelFPGrowthMapper.class);
-    job.setCombinerClass(ParallelFPGrowthCombiner.class);
-    job.setReducerClass(ParallelFPGrowthReducer.class);
+    if (FPSTREAM) {
+      job.setMapperClass(ParallelFPStreamMapper.class);
+      job.setCombinerClass(ParallelFPGrowthCombiner.class);
+      job.setReducerClass(ParallelFPStreamReducer.class);
+    } else {
+      
+      job.setMapperClass(ParallelFPGrowthMapper.class);
+      job.setCombinerClass(ParallelFPGrowthCombiner.class);
+      job.setReducerClass(ParallelFPGrowthReducer.class);
+    }
     job.setOutputFormatClass(SequenceFileOutputFormat.class);
     
     boolean succeeded = job.waitForCompletion(true);

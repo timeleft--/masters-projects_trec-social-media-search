@@ -33,11 +33,9 @@ import org.apache.mahout.freqtermsets.convertors.ContextStatusUpdater;
 import org.apache.mahout.freqtermsets.convertors.ContextWriteOutputCollector;
 import org.apache.mahout.freqtermsets.convertors.integer.IntegerStringOutputConverter;
 import org.apache.mahout.freqtermsets.convertors.string.TopKStringPatterns;
-import org.apache.mahout.freqtermsets.fpgrowth.FPGrowth;
+import org.apache.mahout.freqtermsets.fpgrowth.FPStream;
 import org.apache.mahout.math.list.IntArrayList;
-import org.apache.mahout.math.map.OpenIntIntHashMap;
 import org.apache.mahout.math.map.OpenIntObjectHashMap;
-import org.apache.mahout.math.map.OpenObjectIntHashMap;
 
 import ca.uwaterloo.twitter.TokenIterator;
 
@@ -58,9 +56,9 @@ public class ParallelFPStreamReducer extends
   // private final LongArrayList freqList = new LongArrayList();
   // private final LinkedHashMap<Integer, String> reverseMap = Maps.newLinkedHashMap();
   private final OpenIntObjectHashMap<String> idStringMap = new OpenIntObjectHashMap<String>();
-  private final OpenObjectIntHashMap<Integer> ixIdMap = new OpenObjectIntHashMap<Integer>();
-  private final OpenIntObjectHashMap<Integer> idIxMap = new OpenIntObjectHashMap<Integer>();
-  private final OpenIntIntHashMap idFreqMap = new OpenIntIntHashMap();
+//  private final OpenObjectIntHashMap<Integer> ixIdMap = new OpenObjectIntHashMap<Integer>();
+//  private final OpenIntObjectHashMap<Integer> idIxMap = new OpenIntObjectHashMap<Integer>();
+//  private final OpenIntIntHashMap idFreqMap = new OpenIntIntHashMap();
   
   private int maxHeapSize = 50;
   
@@ -133,8 +131,8 @@ public class ParallelFPStreamReducer extends
     // } else {
     
     
-    FPGrowth<Integer> fpGrowth = new FPGrowth<Integer>();
-    fpGrowth
+    FPStream<Integer> fpStream = new FPStream<Integer>();
+    fpStream
         .generateTopKFrequentPatterns(
             new IteratorAdapter(cTree.iterator()),
             localFList,
@@ -151,13 +149,13 @@ public class ParallelFPStreamReducer extends
                 minWordsForLangDetection/* , superiorityRatio */, repeatHashTag),
             new ContextStatusUpdater<IntWritable, TransactionTree, Text, TopKStringPatterns>(
                 context),
-            ixIdMap,
-            idIxMap,
-            idFreqMap,
+//            ixIdMap,
+//            idIxMap,
+//            idFreqMap,
 //            idStringMap,
             key.get(),
             numGroups);
-    // }
+
   }
   
   @Override
@@ -170,17 +168,18 @@ public class ParallelFPStreamReducer extends
       // featureReverseMap.add(e.getFirst());
       // freqList.add(e.getSecond());
       int id = e.getFirst().hashCode();
-      while (idIxMap.containsKey(id) || idFreqMap.containsKey(id) || idStringMap.containsKey(id)) {
+      while (idStringMap.containsKey(id)) {
+//          idIxMap.containsKey(id) || idFreqMap.containsKey(id) || 
         // throw new AssertionError("Hashing collision.. think of another way");
         // FIXME: This will cause trouble if the two colliding attrs don't come in the same
         // order everytime they are encountered.. also, if a new colliding attr came :(.
         ++id;
       }
-      idFreqMap.put(id, e.getSecond().intValue());
+//      idFreqMap.put(id, e.getSecond().intValue());
       idStringMap.put(id, e.getFirst());
       
-      idIxMap.put(id, ix);
-      ixIdMap.put(ix, id);
+//      idIxMap.put(id, ix);
+//      ixIdMap.put(ix, id);
       
       ++ix;
     }

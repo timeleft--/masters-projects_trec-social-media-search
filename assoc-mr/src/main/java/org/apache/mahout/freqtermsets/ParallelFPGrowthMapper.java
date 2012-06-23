@@ -41,10 +41,8 @@ public class ParallelFPGrowthMapper extends
     Mapper<PairOfStringLong, Text, IntWritable, TransactionTree> {
   
   private final OpenObjectIntHashMap<String> fMap = new OpenObjectIntHashMap<String>();
-  
   // private Pattern splitter;
-//  private int maxPerGroup;
-  private int numGroups;
+  private int maxPerGroup;
   private long intervalStart;
   private long intervalEnd;
   
@@ -71,7 +69,6 @@ public class ParallelFPGrowthMapper extends
     // String[] items = splitter.split(input.toString());
     
     OpenIntHashSet itemSet = new OpenIntHashSet();
-//    OpenIntObjectHashMap<String> itemSet =  new OpenIntObjectHashMap<String>();
     
     String inputStr;
     // for (String item : items) {
@@ -100,9 +97,7 @@ public class ParallelFPGrowthMapper extends
     for (int j = itemArr.size() - 1; j >= 0; j--) {
       // generate group dependent shards
       int item = itemArr.get(j);
-//      int groupID = PFPGrowth.getGroup(item, maxPerGroup);
-
-      int groupID = PFPGrowth.getGroup(item, numGroups);
+      int groupID = PFPGrowth.getGroup(item, maxPerGroup);
       
       if (!groups.contains(groupID)) {
         IntArrayList tempItems = new IntArrayList(j + 1);
@@ -121,24 +116,9 @@ public class ParallelFPGrowthMapper extends
   protected void setup(Context context) throws IOException, InterruptedException {
     super.setup(context);
     
-//    int i = 0;
-//    for (Pair<String, Long> e : PFPGrowth.readFList(context.getConfiguration())) {
-//      fMap.put(e.getFirst(), i++);
-//    }
-    
-    OpenIntHashSet usedIds = new OpenIntHashSet();
+    int i = 0;
     for (Pair<String, Long> e : PFPGrowth.readFList(context.getConfiguration())) {
-      // featureReverseMap.add(e.getFirst());
-      // freqList.add(e.getSecond());
-      int id = e.getFirst().hashCode();
-      while (usedIds.contains(id)) {
-        // throw new AssertionError("Hashing collision.. think of another way");
-        // FIXME: This will cause trouble if the two colliding attrs don't come in the same
-        // order everytime they are encountered.. also, if a new colliding attr came :(.
-        ++id;
-      }
-      fMap.put(e.getFirst(), id);
-      usedIds.add(id);
+      fMap.put(e.getFirst(), i++);
     }
     
     Parameters params =
@@ -149,8 +129,7 @@ public class ParallelFPGrowthMapper extends
     // splitter = Pattern.compile(params.get(PFPGrowth.SPLIT_PATTERN,
     // PFPGrowth.SPLITTER.toString()));
     
-//    maxPerGroup = Integer.valueOf(params.getInt(PFPGrowth.MAX_PER_GROUP, 0));
-    numGroups = params.getInt(PFPGrowth.NUM_GROUPS, PFPGrowth.NUM_GROUPS_DEFAULT);
+    maxPerGroup = Integer.valueOf(params.getInt(PFPGrowth.MAX_PER_GROUP, 0));
     
     intervalStart = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_START));
 //        Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP))); //GMT23JAN2011)));

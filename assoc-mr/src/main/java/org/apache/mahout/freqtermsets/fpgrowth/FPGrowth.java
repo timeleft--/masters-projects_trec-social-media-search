@@ -40,7 +40,6 @@ import org.apache.mahout.common.Pair;
 import org.apache.mahout.common.Parameters;
 import org.apache.mahout.common.iterator.sequencefile.SequenceFileIterable;
 import org.apache.mahout.freqtermsets.CountDescendingPairComparator;
-import org.apache.mahout.freqtermsets.PFPGrowth;
 import org.apache.mahout.freqtermsets.convertors.StatusUpdater;
 import org.apache.mahout.freqtermsets.convertors.TopKPatternsOutputConverter;
 import org.apache.mahout.freqtermsets.convertors.TransactionIterator;
@@ -135,84 +134,64 @@ public class FPGrowth<A extends Comparable<? super A>> {
    * @param output
    *          The output collector to which the the generated patterns are
    *          written
-   * @param ixIdMap
-   * @param idIxMap
-   * @param idFreqMap
-   * @param idStringMap 
-   * @param groupId
-   * @param numGroups
    * @throws IOException
    */
   public final void generateTopKFrequentPatterns(Iterator<Pair<List<A>, Long>> transactionStream,
       Collection<Pair<A, Long>> frequencyList,
       long minSupport,
       int k,
-      // Collection<A> returnableFeatures,
+      Collection<A> returnableFeatures,
       OutputCollector<A, List<Pair<List<A>, Long>>> output,
-      StatusUpdater updater, OpenObjectIntHashMap<A> ixIdMap, OpenIntObjectHashMap<A> idIxMap,
-      OpenIntIntHashMap idFreqMap, 
-//      OpenIntObjectHashMap<String> idStringMap, 
-      int groupId, int numGroups) throws IOException {
+      StatusUpdater updater) throws IOException {
     
-    // Map<Integer, A> reverseMapping = Maps.newHashMap();
-    // // OpenIntObjectHashMap<A> reverseMapping = new
-    // OpenIntObjectHashMap<A>(frequencyList.size());
-    // Map<A, Integer> attributeIdMapping = Maps.newHashMap();
-    //
-    // int id = 0;
-    // for (Pair<A, Long> feature : frequencyList) {
-    // A attrib = feature.getFirst();
-    // Long frequency = feature.getSecond();
-    // if (frequency >= minSupport) {
-    // attributeIdMapping.put(attrib, id);
-    // reverseMapping.put(id++, attrib);
-    // }
-    // }
-    //
-    // long[] attributeFrequency = new long[attributeIdMapping.size()];
-    // for (Pair<A, Long> feature : frequencyList) {
-    // A attrib = feature.getFirst();
-    // Long frequency = feature.getSecond();
-    // if (frequency < minSupport) {
-    // break;
-    // }
-    // attributeFrequency[attributeIdMapping.get(attrib)] = frequency;
-    // }
+    OpenIntObjectHashMap<A> reverseMapping = new OpenIntObjectHashMap<A>();
+    OpenObjectIntHashMap<A> attributeIdMapping = new OpenObjectIntHashMap<A>();
+    
+    int id = 0;
+    for (Pair<A, Long> feature : frequencyList) {
+      A attrib = feature.getFirst();
+      Long frequency = feature.getSecond();
+      if (frequency >= minSupport) {
+        attributeIdMapping.put(attrib, id);
+        reverseMapping.put(id++, attrib);
+      }
+    }
+    
+    long[] attributeFrequency = new long[attributeIdMapping.size()];
+    for (Pair<A, Long> feature : frequencyList) {
+      A attrib = feature.getFirst();
+      Long frequency = feature.getSecond();
+      if (frequency < minSupport) {
+        break;
+      }
+      attributeFrequency[attributeIdMapping.get(attrib)] = frequency;
+    }
     
     log.info("Number of unique items {}", frequencyList.size());
     
-    // Collection<Integer> returnFeatures = new HashSet<Integer>();
-    // if (returnableFeatures != null && !returnableFeatures.isEmpty()) {
-    // for (A attrib : returnableFeatures) {
-    // if (attributeIdMapping.containsKey(attrib)) {
-    // returnFeatures.add(attributeIdMapping.get(attrib));
-    // log.info("Adding Pattern {}=>{}", attrib, attributeIdMapping
-    // .get(attrib));
-    // }
-    // }
-    // } else {
-    // // YA: why would we need that? It might hide a bug
-    // throw new UnsupportedOperationException("Must send a full returnable featureset");
-    // // for (int j = 0; j < attributeIdMapping.size(); j++) {
-    // // returnFeatures.add(j);
-    // // }
-    // // END YA: unsupported
-    // }
+    Collection<Integer> returnFeatures = new HashSet<Integer>();
+    if (returnableFeatures != null && !returnableFeatures.isEmpty()) {
+      for (A attrib : returnableFeatures) {
+        if (attributeIdMapping.containsKey(attrib)) {
+          returnFeatures.add(attributeIdMapping.get(attrib));
+          log.info("Adding Pattern {}=>{}", attrib, attributeIdMapping
+              .get(attrib));
+        }
+      }
+    } else {
+      // YA: why would we need that? It might hide a bug
+      throw new UnsupportedOperationException("Must send a full returnable featureset");
+      // for (int j = 0; j < attributeIdMapping.size(); j++) {
+      // returnFeatures.add(j);
+      // }
+      // END YA: unsupported
+    }
     
-    // log.info("Number of unique pruned items {}", attributeIdMapping.size());
-    // generateTopKFrequentPatterns(new TransactionIterator<A>(transactionStream,
-    // attributeIdMapping), attributeFrequency, minSupport, k, reverseMapping
-    // .size(), returnFeatures, new TopKPatternsOutputConverter<A>(output,
-    // reverseMapping), updater);
-    
-    log.info("Number of unique pruned items {}", ixIdMap.size());
-    
+    log.info("Number of unique pruned items {}", attributeIdMapping.size());
     generateTopKFrequentPatterns(new TransactionIterator<A>(transactionStream,
-        ixIdMap), idFreqMap, minSupport, k, idIxMap.size(), 
-        new TopKPatternsOutputConverter<A>(output,idIxMap), 
-        updater, 
-//        idStringMap, 
-        groupId, numGroups);
+        attributeIdMapping), attributeFrequency, minSupport, k, reverseMapping
+        .size(), returnFeatures, new TopKPatternsOutputConverter<A>(output,
+        reverseMapping), updater);
     
   }
   
@@ -230,28 +209,20 @@ public class FPGrowth<A extends Comparable<? super A>> {
    * @param outputCollector
    *          the Collector class which converts the given frequent pattern in
    *          integer to A
-   * @param numGroups
-   * @param groupId
    */
   private void fpGrowth(FPTree tree,
       long minSupportValue,
       int k,
-      // Collection<Integer> requiredFeatures,
+      Collection<Integer> requiredFeatures,
       TopKPatternsOutputConverter<A> outputCollector,
-      StatusUpdater updater,
-//      OpenIntObjectHashMap<String> idStringMap,
-      int groupId, int numGroups)
-      throws IOException {
+      StatusUpdater updater) throws IOException {
     // Map<String, Map<Integer, FrequentPatternMaxHeap>> result = Maps.newHashMap();
     // Map<Integer,FrequentPatternMaxHeap> patterns = Maps.newHashMap();
     
     FPTreeDepthCache treeCache = new FPTreeDepthCache();
     for (int i = tree.getHeaderTableCount() - 1; i >= 0; i--) {
       int attribute = tree.getAttributeAtIndex(i);
-      // if (requiredFeatures.contains(attribute)) {
-      // FIXME: the toString trick is a dirty work around to keep the generic type, eventhough
-      // all the code actually won't work with anything but Strings
-      if (PFPGrowth.isGroupMember(groupId, attribute, numGroups)) {
+      if (requiredFeatures.contains(attribute)) {
         log.info("Mining FTree Tree for all patterns with '{}'", attribute);
         MutableLong minSupport = new MutableLong(minSupportValue);
         FrequentPatternMaxHeap frequentPatterns = growth(tree, minSupport, k,
@@ -309,7 +280,7 @@ public class FPGrowth<A extends Comparable<? super A>> {
    * 
    * @param transactions
    *          Transaction database Iterator
-   * @param idFreqMap
+   * @param attributeFrequency
    *          array representing the Frequency of the corresponding attribute id
    * @param minSupport
    *          minimum support of the pattern to be mined
@@ -322,26 +293,20 @@ public class FPGrowth<A extends Comparable<? super A>> {
    * @param topKPatternsOutputCollector
    *          the outputCollector which transforms the given Pattern in integer
    *          format to the corresponding A Format
-   * @param numGroups
-   * @param groupId
-   * @param idStringMap
    */
   private void generateTopKFrequentPatterns(
       Iterator<Pair<int[], Long>> transactions,
-      OpenIntIntHashMap idFreqMap,
+      long[] attributeFrequency,
       long minSupport,
       int k,
       int featureSetSize,
-      // Collection<Integer> returnFeatures,
+      Collection<Integer> returnFeatures,
       TopKPatternsOutputConverter<A> topKPatternsOutputCollector,
-      StatusUpdater updater, 
-//      OpenIntObjectHashMap<String> idStringMap, 
-      int groupId, int numGroups)
-      throws IOException {
+      StatusUpdater updater) throws IOException {
     
     FPTree tree = new FPTree(featureSetSize);
     for (int i = 0; i < featureSetSize; i++) {
-      tree.addHeaderCount(i, idFreqMap.get(i));
+      tree.addHeaderCount(i, attributeFrequency[i]);
     }
     
     // Constructing initial FPTree from the list of transactions
@@ -356,7 +321,7 @@ public class FPGrowth<A extends Comparable<? super A>> {
           transaction.getFirst(),
           transaction.getSecond(),
           minSupport,
-          idFreqMap);
+          attributeFrequency);
       i++;
       if (i % 10000 == 0) {
         log.info("FPTree Building: Read {} Transactions", i);
@@ -366,15 +331,7 @@ public class FPGrowth<A extends Comparable<? super A>> {
     log.info("Number of Nodes in the FP Tree: {}", nodecount);
     
     // return
-    // fpGrowth(tree, minSupport, k, returnFeatures, topKPatternsOutputCollector, updater);
-    fpGrowth(tree,
-        minSupport,
-        k,
-        topKPatternsOutputCollector,
-        updater,
-//        idStringMap,
-        groupId,
-        numGroups);
+    fpGrowth(tree, minSupport, k, returnFeatures, topKPatternsOutputCollector, updater);
   }
   
   private static FrequentPatternMaxHeap growth(FPTree tree,
@@ -747,7 +704,7 @@ public class FPGrowth<A extends Comparable<? super A>> {
    * @param minSupport
    *          the MutableLong value which contains the current value(dynamic) of
    *          support
-   * @param idFreqMap
+   * @param attributeFrequency
    *          the list of attributes and their frequency
    * @return the number of new nodes added
    */
@@ -755,14 +712,14 @@ public class FPGrowth<A extends Comparable<? super A>> {
       int[] myList,
       long addCount,
       long minSupport,
-      OpenIntIntHashMap idFreqMap) {
+      long[] attributeFrequency) {
     
     int temp = FPTree.ROOTNODEID;
     int ret = 0;
     boolean addCountMode = true;
     
     for (int attribute : myList) {
-      if (idFreqMap.get(attribute) < minSupport) {
+      if (attributeFrequency[attribute] < minSupport) {
         return ret;
       }
       int child;

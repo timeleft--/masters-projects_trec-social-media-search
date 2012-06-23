@@ -21,23 +21,17 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.Map.Entry;
 
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
 import org.apache.commons.lang.mutable.MutableLong;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.Writable;
 import org.apache.hadoop.mapred.OutputCollector;
 import org.apache.mahout.common.Pair;
-import org.apache.mahout.common.Parameters;
 import org.apache.mahout.common.iterator.sequencefile.SequenceFileIterable;
 import org.apache.mahout.freqtermsets.CountDescendingPairComparator;
 import org.apache.mahout.freqtermsets.PFPGrowth;
@@ -45,17 +39,14 @@ import org.apache.mahout.freqtermsets.convertors.StatusUpdater;
 import org.apache.mahout.freqtermsets.convertors.TopKPatternsOutputConverter;
 import org.apache.mahout.freqtermsets.convertors.TransactionIterator;
 import org.apache.mahout.freqtermsets.convertors.string.TopKStringPatterns;
-import org.apache.mahout.freqtermsets.fpgrowth.FPStream;
-import org.apache.mahout.freqtermsets.fpgrowth.FPTree;
-import org.apache.mahout.freqtermsets.fpgrowth.FPTreeDepthCache;
-import org.apache.mahout.freqtermsets.fpgrowth.FrequentPatternMaxHeap;
-import org.apache.mahout.freqtermsets.fpgrowth.Pattern;
 import org.apache.mahout.math.map.OpenIntIntHashMap;
 import org.apache.mahout.math.map.OpenIntObjectHashMap;
 import org.apache.mahout.math.map.OpenObjectIntHashMap;
-import org.knallgrau.utils.textcat.TextCategorizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 
 /**
  * Implementation of PFGrowth Algorithm with FP-Bonsai pruning
@@ -138,7 +129,7 @@ public class FPStream<A extends Comparable<? super A>> {
    * @param ixIdMap
    * @param idIxMap
    * @param idFreqMap
-   * @param idStringMap 
+   * @param idStringMap
    * @param groupId
    * @param numGroups
    * @throws IOException
@@ -149,35 +140,35 @@ public class FPStream<A extends Comparable<? super A>> {
       int k,
       // Collection<A> returnableFeatures,
       OutputCollector<A, List<Pair<List<A>, Long>>> output,
-      StatusUpdater updater, OpenObjectIntHashMap<A> ixIdMap, OpenIntObjectHashMap<A> idIxMap,
-      OpenIntIntHashMap idFreqMap, 
-//      OpenIntObjectHashMap<String> idStringMap, 
+      StatusUpdater updater,
+      // OpenObjectIntHashMap<A> ixIdMap,
+      // OpenIntObjectHashMap<A> idIxMap,
+      // OpenIntIntHashMap idFreqMap,
+      // OpenIntObjectHashMap<String> idStringMap,
       int groupId, int numGroups) throws IOException {
     
-    // Map<Integer, A> reverseMapping = Maps.newHashMap();
-    // // OpenIntObjectHashMap<A> reverseMapping = new
-    // OpenIntObjectHashMap<A>(frequencyList.size());
-    // Map<A, Integer> attributeIdMapping = Maps.newHashMap();
-    //
-    // int id = 0;
-    // for (Pair<A, Long> feature : frequencyList) {
-    // A attrib = feature.getFirst();
-    // Long frequency = feature.getSecond();
-    // if (frequency >= minSupport) {
-    // attributeIdMapping.put(attrib, id);
-    // reverseMapping.put(id++, attrib);
-    // }
-    // }
-    //
-    // long[] attributeFrequency = new long[attributeIdMapping.size()];
-    // for (Pair<A, Long> feature : frequencyList) {
-    // A attrib = feature.getFirst();
-    // Long frequency = feature.getSecond();
-    // if (frequency < minSupport) {
-    // break;
-    // }
-    // attributeFrequency[attributeIdMapping.get(attrib)] = frequency;
-    // }
+    OpenIntObjectHashMap<A> reverseMapping = new OpenIntObjectHashMap<A>();
+    OpenObjectIntHashMap<A> attributeIdMapping = new OpenObjectIntHashMap<A>();
+    
+    int id = 0;
+    for (Pair<A, Long> feature : frequencyList) {
+      A attrib = feature.getFirst();
+      Long frequency = feature.getSecond();
+      if (frequency >= minSupport) {
+        attributeIdMapping.put(attrib, id);
+        reverseMapping.put(id++, attrib);
+      }
+    }
+    
+    long[] attributeFrequency = new long[attributeIdMapping.size()];
+    for (Pair<A, Long> feature : frequencyList) {
+      A attrib = feature.getFirst();
+      Long frequency = feature.getSecond();
+      if (frequency < minSupport) {
+        break;
+      }
+      attributeFrequency[attributeIdMapping.get(attrib)] = frequency;
+    }
     
     log.info("Number of unique items {}", frequencyList.size());
     
@@ -199,20 +190,20 @@ public class FPStream<A extends Comparable<? super A>> {
     // // END YA: unsupported
     // }
     
-    // log.info("Number of unique pruned items {}", attributeIdMapping.size());
-    // generateTopKFrequentPatterns(new TransactionIterator<A>(transactionStream,
-    // attributeIdMapping), attributeFrequency, minSupport, k, reverseMapping
-    // .size(), returnFeatures, new TopKPatternsOutputConverter<A>(output,
-    // reverseMapping), updater);
-    
-    log.info("Number of unique pruned items {}", ixIdMap.size());
-    
+    log.info("Number of unique pruned items {}", attributeIdMapping.size());
     generateTopKFrequentPatterns(new TransactionIterator<A>(transactionStream,
-        ixIdMap), idFreqMap, minSupport, k, idIxMap.size(), 
-        new TopKPatternsOutputConverter<A>(output,idIxMap), 
-        updater, 
-//        idStringMap, 
-        groupId, numGroups);
+        attributeIdMapping), attributeFrequency, minSupport, k, reverseMapping
+        .size(), new TopKPatternsOutputConverter<A>(output,
+        reverseMapping), updater, groupId, numGroups);
+    
+    // log.info("Number of unique pruned items {}", ixIdMap.size());
+    
+    // generateTopKFrequentPatterns(new TransactionIterator<A>(transactionStream,
+    // ixIdMap), idFreqMap, minSupport, k, idIxMap.size(),
+    // new TopKPatternsOutputConverter<A>(output,idIxMap),
+    // updater,
+    // // idStringMap,
+    // groupId, numGroups);
     
   }
   
@@ -239,7 +230,7 @@ public class FPStream<A extends Comparable<? super A>> {
       // Collection<Integer> requiredFeatures,
       TopKPatternsOutputConverter<A> outputCollector,
       StatusUpdater updater,
-//      OpenIntObjectHashMap<String> idStringMap,
+      // OpenIntObjectHashMap<String> idStringMap,
       int groupId, int numGroups)
       throws IOException {
     // Map<String, Map<Integer, FrequentPatternMaxHeap>> result = Maps.newHashMap();
@@ -328,20 +319,20 @@ public class FPStream<A extends Comparable<? super A>> {
    */
   private void generateTopKFrequentPatterns(
       Iterator<Pair<int[], Long>> transactions,
-      OpenIntIntHashMap idFreqMap,
+      long[] idFreqMap,
       long minSupport,
       int k,
       int featureSetSize,
       // Collection<Integer> returnFeatures,
       TopKPatternsOutputConverter<A> topKPatternsOutputCollector,
-      StatusUpdater updater, 
-//      OpenIntObjectHashMap<String> idStringMap, 
+      StatusUpdater updater,
+      // OpenIntObjectHashMap<String> idStringMap,
       int groupId, int numGroups)
       throws IOException {
     
     FPTree tree = new FPTree(featureSetSize);
     for (int i = 0; i < featureSetSize; i++) {
-      tree.addHeaderCount(i, idFreqMap.get(i));
+      tree.addHeaderCount(i, idFreqMap[i]);
     }
     
     // Constructing initial FPTree from the list of transactions
@@ -372,7 +363,7 @@ public class FPStream<A extends Comparable<? super A>> {
         k,
         topKPatternsOutputCollector,
         updater,
-//        idStringMap,
+        // idStringMap,
         groupId,
         numGroups);
   }
@@ -755,14 +746,14 @@ public class FPStream<A extends Comparable<? super A>> {
       int[] myList,
       long addCount,
       long minSupport,
-      OpenIntIntHashMap idFreqMap) {
+      long[] idFreqMap) {
     
     int temp = FPTree.ROOTNODEID;
     int ret = 0;
     boolean addCountMode = true;
     
     for (int attribute : myList) {
-      if (idFreqMap.get(attribute) < minSupport) {
+      if (idFreqMap[attribute] < minSupport) {
         return ret;
       }
       int child;
