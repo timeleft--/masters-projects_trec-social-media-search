@@ -83,7 +83,7 @@ public class PartitionByTimestamp {
     // "hdfs://scspc400.cs.uwaterloo.ca:9000/twitter2011/byhour/");
     
     // HadoopUtil.delete(conf, outPath);
-     FileUtils.deleteQuietly(outPath);
+    FileUtils.deleteQuietly(outPath);
     
     // DefaultStringifier<Pair<Pair<Long, String>, HtmlStatus>> stringifier =
     // new DefaultStringifier<Pair<Pair<Long, String>, HtmlStatus>>(
@@ -310,7 +310,8 @@ public class PartitionByTimestamp {
         Pair<Long, File> child = children.get(i);
         if (child.getFirst() < rhs) {
           if (child.getFirst() > startTime) {
-            FileInputFormat.addInputPath(job, new Path(child.getSecond().toURI().toString()));
+            FileInputFormat.addInputPath(job,
+                fs.makeQualified(new Path(child.getSecond().toURI().toString())));
           }
         } else {
           break;

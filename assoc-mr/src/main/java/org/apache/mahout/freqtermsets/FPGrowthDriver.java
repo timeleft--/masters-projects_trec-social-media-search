@@ -160,17 +160,17 @@ public final class FPGrowthDriver extends AbstractJob {
     // params.set(PFPGrowth.USE_FPG2, "true");
     // }
     
-    if (hasOption(PFPGrowth.COUNT_IN)) {
-      params.set(PFPGrowth.COUNT_IN, getOption(PFPGrowth.COUNT_IN));
-    }
+//    if (hasOption(PFPGrowth.COUNT_IN)) {
+//      params.set(PFPGrowth.COUNT_IN, getOption(PFPGrowth.COUNT_IN));
+//    }
     
     // if(hasOption(PFPGrowth.PSEUDO)){
     // params.set(PFPGrowth.PSEUDO, "true");
     // }
     
-    if (hasOption(PFPGrowth.GROUP_FIS_IN)) {
-      params.set(PFPGrowth.GROUP_FIS_IN, getOption(PFPGrowth.GROUP_FIS_IN));
-    }
+//    if (hasOption(PFPGrowth.GROUP_FIS_IN)) {
+//      params.set(PFPGrowth.GROUP_FIS_IN, getOption(PFPGrowth.GROUP_FIS_IN));
+//    }
     
     if (hasOption(AggregatorReducer.MUTUAL_INFO_FLAG)) {
       params.set(AggregatorReducer.MUTUAL_INFO_FLAG, "true");
@@ -227,7 +227,7 @@ public final class FPGrowthDriver extends AbstractJob {
     
     String startTimeStr = params.get(PFPGrowth.PARAM_INTERVAL_START);
     if (startTimeStr == null) {
-      FileSystem fs = FileSystem.get(conf);
+      FileSystem fs = FileSystem.getLocal(conf);
       startTimeStr = fs.listStatus(inputDir)[0].getPath().getName();
     }
     long startTime = Long.parseLong(startTimeStr);
@@ -238,9 +238,25 @@ public final class FPGrowthDriver extends AbstractJob {
         Long.toString(endTime - startTime)));
     while (startTime < endTime) {
       params.set(PFPGrowth.PARAM_INTERVAL_START, Long.toString(startTime));
+            
+      if (hasOption(PFPGrowth.GROUP_FIS_IN)) {
+        String gfisIn = getOption(PFPGrowth.GROUP_FIS_IN);
+        gfisIn = FilenameUtils.concat(gfisIn, Long.toString(startTime));
+        gfisIn = FilenameUtils.concat(gfisIn, Long.toString(Math.min(endTime,startTime+windowSize)));
+        params.set(PFPGrowth.GROUP_FIS_IN, gfisIn);
+      }
+      
+      if (hasOption(PFPGrowth.COUNT_IN)) {
+        String countIn = getOption(PFPGrowth.COUNT_IN);
+        countIn = FilenameUtils.concat(countIn, Long.toString(startTime));
+        countIn = FilenameUtils.concat(countIn, Long.toString(Math.min(endTime,startTime+windowSize)));
+        params.set(PFPGrowth.COUNT_IN, countIn);
+      }
+            
       String outPathStr = FilenameUtils.concat(outputDir.toString(), Long.toString(startTime));
-      outPathStr = FilenameUtils.concat(outPathStr, Long.toString(endTime));
+      outPathStr = FilenameUtils.concat(outPathStr, Long.toString(Math.min(endTime,startTime+windowSize)));
       params.set("output", outPathStr);
+      
       // PFPGrowth.runPFPGrowth(params);
       lastFuture = exec.submit(new PFPGrowth(params));
       

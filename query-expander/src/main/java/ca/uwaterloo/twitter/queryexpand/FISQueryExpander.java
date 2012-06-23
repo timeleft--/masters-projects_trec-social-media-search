@@ -14,7 +14,6 @@ import java.util.List;
 import java.util.PriorityQueue;
 import java.util.Set;
 
-import org.apache.cassandra.db.Table.IndexBuilder;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
 import org.apache.commons.cli.GnuParser;
@@ -108,6 +107,8 @@ public class FISQueryExpander {
   public static final boolean PROPAGATE_IS_WEIGHTS_DEFAULT = true;
   
   private static final String COLLECTION_STRING_CLEANER = "[\\,\\[\\]]";
+  
+  private static final boolean QUERY_SUBSET_BOOST_IDF = false;
   
   public static enum TermWeigting {
     PROB_QUERY("pq"),
@@ -275,7 +276,7 @@ public class FISQueryExpander {
             ScoreIxObj<List<String>> is = itemsets.poll();
             out.println(++i + " (" + is.score + "): " + is.obj.toString());
           }
-        } else if (mode == 6 || mode == 7) {
+        } else if (mode == 5 || mode == 6 || mode == 7) {
           
           PriorityQueue<ScoreIxObj<String>> weightedTerms = null;
           if (TermWeigting.PROB_QUERY.equals(termWeighting)) {
@@ -315,7 +316,7 @@ public class FISQueryExpander {
           for (ScoreDoc scoreDoc : qEx.twtSearcher.search(twtQ, NUM_HITS_SHOWN_DEFAULT).scoreDocs) {
             Document hit = qEx.twtSearcher.doc(scoreDoc.doc);
             Field created = hit.getField(TweetField.CREATED_AT.name);
-            out.println();
+//            out.println();
             out.println(String.format("%4d (%.4f): %s\t%s\t%s\t%s",
                 ++t,
                 scoreDoc.score,
@@ -398,10 +399,21 @@ public class FISQueryExpander {
     // throw new IllegalArgumentException("Minimum score must be positive");
     // }
     
-    BooleanQuery query = new BooleanQuery(); // This adds trash: true);
     MutableLong qLen = new MutableLong(0);
-    OpenObjectIntHashMap<String> queryFreq = queryTermFreq(queryStr, qLen);
-    Set<String> querySet = Sets.newCopyOnWriteArraySet(queryFreq.keys());
+    OpenObjectFloatHashMap<String> queryTermWeight = queryTermFreq(queryStr, qLen);
+    
+    float totalIDF = 0;
+    if (QUERY_SUBSET_BOOST_IDF) {
+      for (String qt : queryTermWeight.keys()) {
+        float idf = twtSimilarity.idf(twtIxReader.docFreq(new Term(TweetField.TEXT.name, qt)),
+            twtIxReader.numDocs());
+        idf *= queryTermWeight.get(qt);
+        totalIDF += idf;
+        queryTermWeight.put(qt, idf);
+      }
+    }
+    BooleanQuery query = new BooleanQuery(); // This adds trash: true);
+    Set<String> querySet = Sets.newCopyOnWriteArraySet(queryTermWeight.keys());
     if (querySet.size() > 2) {
       for (Set<String> querySubSet : Sets.powerSet(querySet)) {
         if (querySubSet.size() < 2) {
@@ -409,11 +421,18 @@ public class FISQueryExpander {
         }
         Query subQuery = fisQparser.parse(querySubSet.toString()
             .replaceAll(COLLECTION_STRING_CLEANER, ""));
-        float querySubSetLen = 0;
+        
+        float querySubSetW = 0;
         for (String qTerm : querySubSet) {
-          querySubSetLen += queryFreq.get(qTerm);
+          querySubSetW += queryTermWeight.get(qTerm);
         }
-        subQuery.setBoost(querySubSetLen / qLen.floatValue());
+        
+        if (QUERY_SUBSET_BOOST_IDF) {
+          subQuery.setBoost(querySubSetW / totalIDF);
+        } else {
+          subQuery.setBoost(querySubSetW / qLen.floatValue());
+        }
+        
         query.add(subQuery, Occur.SHOULD);
       }
     } else {
@@ -469,7 +488,7 @@ public class FISQueryExpander {
     int level = 1;
     while (extraTerms.size() > 0 && level < MAX_LEVELS_EXPANSION) {
       float fusionK = (float) (fisBaseRankingParam + Math.pow(10, level));
-      extraTerms = expandRecursive(queryFreq,
+      extraTerms = expandRecursive(queryTermWeight,
           extraTerms,
           doneTerms,
           resultSet,
@@ -493,7 +512,7 @@ public class FISQueryExpander {
     PriorityQueue<ScoreIxObj<String>> result = new PriorityQueue<ScoreIxObj<String>>();
     
     OpenObjectIntHashMap<String> termIds = new OpenObjectIntHashMap<String>();
-    OpenObjectIntHashMap<String> queryFreq = queryTermFreq(query, null);
+    OpenObjectFloatHashMap<String> queryFreq = queryTermFreq(query, null);
     TransactionTree itemsets = convertResultToItemsetsInternal(rs,
         queryFreq,
         termIds,
@@ -560,7 +579,7 @@ public class FISQueryExpander {
     
     OpenObjectIntHashMap<String> termIds = new OpenObjectIntHashMap<String>();
     
-    OpenObjectIntHashMap<String> queryFreq = queryTermFreq(query, null);
+    OpenObjectFloatHashMap<String> queryFreq = queryTermFreq(query, null);
     TransactionTree itemsets = convertResultToItemsetsInternal(rs,
         queryFreq,
         termIds,
@@ -676,7 +695,7 @@ public class FISQueryExpander {
       float termQueryQualityAggr = 0;
       for (String qTerm : querySet) {
         // for (List<String> qtPair : Sets.cartesianProduct(tAsSet, querySet)) {
-        int qTermReps = queryFreq.get(qTerm);
+        float qTermReps = queryFreq.get(qTerm);
         List<String> qtPair = ImmutableList.<String> of(t, qTerm);
         termQueryQualityAggr += qTermReps * aggregateTermQueryQuality(termQueryQuality,
             Sets.newCopyOnWriteArraySet(qtPair),
@@ -769,7 +788,7 @@ public class FISQueryExpander {
    * @throws IOException
    */
   private TransactionTree convertResultToItemsetsInternal(OpenIntFloatHashMap rs,
-      OpenObjectIntHashMap<String> queryFreq, OpenObjectIntHashMap<String> termIdOut,
+      OpenObjectFloatHashMap<String> queryFreq, OpenObjectIntHashMap<String> termIdOut,
       int numResults)
       throws IOException {
     
@@ -782,7 +801,7 @@ public class FISQueryExpander {
     for (int i = rs.size() - 1; i >= 0; --i) {
       int hit = keyList.getQuick(i);
       TermFreqVector terms = fisIxReader.getTermFreqVector(hit,
-           ItemSetIndexBuilder.AssocField.ITEMSET.name);
+          ItemSetIndexBuilder.AssocField.ITEMSET.name);
       if (terms.size() < MIN_ITEMSET_SIZE) {
         continue;
       }
@@ -794,11 +813,13 @@ public class FISQueryExpander {
       } else {
         // corpus level importance (added once)
         Document doc = fisIxReader.document(hit);
-        float patternFreq = Float.parseFloat(doc.getFieldable( ItemSetIndexBuilder.AssocField.SUPPORT.name)
+        float patternFreq = Float.parseFloat(doc
+            .getFieldable(ItemSetIndexBuilder.AssocField.SUPPORT.name)
             .stringValue());
         float patterIDF = (float) MathUtils.log(10, twtIxReader.numDocs() / patternFreq);
         
-        float patternRank = Float.parseFloat(doc.getFieldable( ItemSetIndexBuilder.AssocField.RANK.name)
+        float patternRank = Float.parseFloat(doc
+            .getFieldable(ItemSetIndexBuilder.AssocField.RANK.name)
             .stringValue());
         
         // (k + 1)
@@ -932,7 +953,7 @@ public class FISQueryExpander {
       result.put(scoreDoc.doc, fusion);
       
       TermFreqVector termVector = fisIxReader.getTermFreqVector(scoreDoc.doc,
-           ItemSetIndexBuilder.AssocField.ITEMSET.name);
+          ItemSetIndexBuilder.AssocField.ITEMSET.name);
       for (String term : termVector.getTerms()) {
         if (queryTerms.contains(term)) {
           continue;
@@ -945,7 +966,8 @@ public class FISQueryExpander {
     return levelHits;
   }
   
-  private SetView<ScoreIxObj<String>> expandRecursive(OpenObjectIntHashMap<String> queryFreq,
+  private SetView<ScoreIxObj<String>> expandRecursive(
+      OpenObjectFloatHashMap<String> queryTermWeight,
       Set<ScoreIxObj<String>> extraTerms,
       Set<ScoreIxObj<String>> doneTerms,
       OpenIntFloatHashMap resultSet, int levelNumHits, float levelMinScore, float levelRankingParam)
@@ -1024,12 +1046,21 @@ public class FISQueryExpander {
     // Only one query (a long one), of pairs of query and extra
     // Seems to be getting high precision pairs, and performs best
     BooleanQuery query = new BooleanQuery(); // This adds trash: true);
-    for (String qterm : queryFreq.keys()) {
+    for (String qterm : queryTermWeight.keys()) {
       for (ScoreIxObj<String> xterm : extraTerms) {
         assert !doneTerms.contains(xterm);
         
-        Query xtermQuery = fisQparser.parse(qterm + "^" + queryFreq.get(qterm) + " " + xterm.obj);
-        xtermQuery.setBoost(xterm.score);
+        float xtermWeight;
+        if (QUERY_SUBSET_BOOST_IDF) {
+          xtermWeight = twtSimilarity.idf(twtIxReader.docFreq(new Term(TweetField.TEXT.name,
+              xterm.obj)), twtIxReader.numDocs());
+        } else {
+          xtermWeight = xterm.score;
+        }
+        
+        Query xtermQuery = fisQparser.parse(qterm + "^" + queryTermWeight.get(qterm) + " "
+            + xterm.obj);
+        xtermQuery.setBoost(xtermWeight);
         // Scoring the term not the query "+ xterm.toString()" causes an early topic drift
         
         query.add(xtermQuery, Occur.SHOULD);
@@ -1045,7 +1076,7 @@ public class FISQueryExpander {
     
     int levelHits = addQualifiedResults(rs,
         resultSet,
-        Sets.newCopyOnWriteArraySet(queryFreq.keys()),
+        Sets.newCopyOnWriteArraySet(queryTermWeight.keys()),
         extraTerms2,
         levelMinScore,
         levelRankingParam);
@@ -1075,9 +1106,9 @@ public class FISQueryExpander {
     
   }
   
-  private OpenObjectIntHashMap<String> queryTermFreq(String query, MutableLong qLenOut)
+  private OpenObjectFloatHashMap<String> queryTermFreq(String query, MutableLong qLenOut)
       throws IOException {
-    OpenObjectIntHashMap<String> queryFreq = new OpenObjectIntHashMap<String>();
+    OpenObjectFloatHashMap<String> queryFreq = new OpenObjectFloatHashMap<String>();
     // String[] queryTokens = query.toString().split("\\W");
     TokenStream queryTokens = ANALYZER.tokenStream(TweetField.TEXT.name,
         new StringReader(query.toString()));
@@ -1090,7 +1121,7 @@ public class FISQueryExpander {
           .getAttributeClassesIterator().next());
       String token = attr.toString();
       
-      int freq = queryFreq.get(token);
+      float freq = queryFreq.get(token);
       queryFreq.put(token, ++freq);
       
       if (qLenOut != null) {

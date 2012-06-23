@@ -432,7 +432,7 @@ public final class PFPGrowth implements Callable<Void> {
     job.setOutputKeyClass(Text.class);
     job.setOutputValueClass(LongWritable.class);
     
-    FileSystem fs = FileSystem.get(conf);
+    FileSystem fs = FileSystem.getLocal(conf);
     PartitionByTimestamp.setInputPaths(job, params, fs);
 //    FileInputFormat.addInputPath(job, new Path(input));
     
@@ -491,7 +491,7 @@ public final class PFPGrowth implements Callable<Void> {
     job.setOutputKeyClass(Text.class);
     job.setOutputValueClass(TopKStringPatterns.class);
     
-    FileSystem fs = FileSystem.get(conf);
+    FileSystem fs = FileSystem.getLocal(conf);
     PartitionByTimestamp.setInputPaths(job, params, fs);
     // FileInputFormat.addInputPath(job, input);
     
