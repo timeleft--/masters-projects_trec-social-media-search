@@ -414,19 +414,20 @@ public final class PFPGrowth implements Callable<Void> {
     // throw new IOException("Cannot find flist file: " + path);
     // }
     
-//    assert minFr >= minSupport;
-    
+    assert minFr >= minSupport;
+    double totalFreq = 0;
     List<Pair<String, Long>> freqList = Lists.newLinkedList();
     for (Pair<Text, LongWritable> record : new SequenceFileDirIterable<Text, LongWritable>(
         path, PathType.GLOB, null, null, true, conf)) {
       long freq = record.getSecond().get();
       String token = record.getFirst().toString();
       
-      char ch0 = token.charAt(0);
+//      char ch0 = token.charAt(0);
       // No special treatment for mentions: || ch0 == '@'
       // or hashtags: (ch0 == '#') || 
       if ((freq >= minFr)) {
         freqList.add(new Pair<String, Long>(token, freq));
+        totalFreq += freq;
       }
     }
     
@@ -451,13 +452,17 @@ public final class PFPGrowth implements Callable<Void> {
     // FIXME: this will remove words from only the mostly used lang
     // i.e. cannot be used for a multilingual task
     //Percentile: Pretty aggressive since the Zipfe distribution is very steep
-//    int minIx = (int) Math.round(1.0f * freqArr.length * prunePct / 100);
-//    long maxFreq = freqArr[minIx].getSecond();
-    double maxFreq =  (1.0f * MathUtils.log(2,freqArr[0].getSecond()) * prunePct / 100);
+    int minIx = (int) Math.round(1.0f * freqArr.length * (100-prunePct) / 100);
+    long maxFreq = freqArr[minIx].getSecond();
+//    double maxFreq =  (1.0f * MathUtils.log(2,freqArr[0].getSecond()) * prunePct / 100);
+//    double maxFreq =  (1.0f * totalFreq * prunePct / 100);
     boolean withinUpperBound = false;
     for (int i = 0; i < freqArr.length; ++i) {
       if (!withinUpperBound) {
-        withinUpperBound = MathUtils.log(2,freqArr[i].getSecond()) < maxFreq;
+//        totalFreq -= freqArr[i].getSecond();
+//        withinUpperBound = totalFreq <= maxFreq;
+//        withinUpperBound = MathUtils.log(2,freqArr[i].getSecond()) <= maxFreq;
+        withinUpperBound = freqArr[i].getSecond() <= maxFreq;
         if(withinUpperBound){
           result = Lists.newArrayListWithCapacity(freqArr.length - i);
         }
