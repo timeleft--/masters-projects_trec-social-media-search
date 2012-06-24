@@ -39,7 +39,8 @@ public class DumpSeqFilesFolder {
       for (File minuteDir : hourDir.listFiles()) {
         String minutePath = minuteDir.getAbsolutePath();
         try {
-          dumpFrequentPatterns(minutePath + File.separator + PFPGrowth.FREQUENT_PATTERNS, minutePath);
+          dumpFrequentPatterns(minutePath + File.separator + PFPGrowth.FREQUENT_PATTERNS,
+              minutePath);
           System.out.println("Dumped: " + minutePath);
         } catch (IOException e) {
           System.err.println("Error while processing: " + minutePath + "\n" + e.getMessage());
@@ -63,26 +64,29 @@ public class DumpSeqFilesFolder {
         return p.getName().endsWith("_conf.xml");
       }
     });
-    Configuration conf = new Configuration();
-    
-    conf.addResource(confFile[0].getPath());
-    
-    Map<String, String> params = Parameters.parseParams(conf.get("pfp.parameters"));
-    params.remove("input");
-    params.remove("output");
-    params.remove("gfisIn");
-    params.remove("countIn");
-    params.remove("encoding");
     
     StringBuilder outFilename = new StringBuilder("assoc");
     
-    String[] keys = params.keySet().toArray(new String[0]);
-    Arrays.sort(keys);
-    
-    for (String key : keys) {
-      outFilename.append('_').append(key).append(params.get(key));
+    Configuration conf = new Configuration();
+    if (confFile.length == 0) {
+      outFilename.append("_confunknown");
+    } else {
+      conf.addResource(confFile[0].getPath());
+      
+      Map<String, String> params = Parameters.parseParams(conf.get("pfp.parameters"));
+      params.remove("input");
+      params.remove("output");
+      params.remove("gfisIn");
+      params.remove("countIn");
+      params.remove("encoding");
+      
+      String[] keys = params.keySet().toArray(new String[0]);
+      Arrays.sort(keys);
+      
+      for (String key : keys) {
+        outFilename.append('_').append(key).append(params.get(key));
+      }
     }
-    
     SimpleDateFormat dateFmt = new SimpleDateFormat("MMddHHmm");
     outFilename.append('_').append(dateFmt.format(new Date()));
     

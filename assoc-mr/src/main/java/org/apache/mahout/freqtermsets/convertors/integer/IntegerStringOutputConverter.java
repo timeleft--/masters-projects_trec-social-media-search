@@ -55,6 +55,8 @@ public final class IntegerStringOutputConverter implements
   
   private static final String LANGUAGE_ITEMSET_TOKEN = "LANG";
   
+  // TODO: command line
+  public static final boolean DO_LANG_DETECTION = false;
   // private final Pattern DIGITS_PATTERN = Pattern.compile(".*[0-9].*");
   
   private TextCategorizer langCat = new TextCategorizer();
@@ -67,7 +69,7 @@ public final class IntegerStringOutputConverter implements
   
   private final OutputCollector<Text, TopKStringPatterns> collector;
   
-//  private final List<String> featureReverseMap;
+  // private final List<String> featureReverseMap;
   OpenIntObjectHashMap<String> featureReverseMap;
   
   public IntegerStringOutputConverter(OutputCollector<Text, TopKStringPatterns> collector,
@@ -95,59 +97,62 @@ public final class IntegerStringOutputConverter implements
     for (Pair<List<Integer>, Long> e : value) {
       List<String> pattern = Lists.newArrayList();
       
-      // YA langDetect
-      // totalSupport += itemSet.support();
-      patStr.setLength(0);
-      hashtags.clear();
-      patternWords = 0;
-      char k0 = stringKey.charAt(0);
-      if (k0 == '#') {
-        if (repeatHashTag)
-          hashtags.add(stringKey.substring(1));
-      } else if (!(k0 == '@' || stringKey.equals(TokenIterator.URL_PLACEHOLDER))) {
-        patStr.append(stringKey);
-        ++patternWords;
+      if (DO_LANG_DETECTION) {
+        // YA langDetect
+        // totalSupport += itemSet.support();
+        patStr.setLength(0);
+        hashtags.clear();
+        patternWords = 0;
+        char k0 = stringKey.charAt(0);
+        if (k0 == '#') {
+          if (repeatHashTag)
+            hashtags.add(stringKey.substring(1));
+        } else if (!(k0 == '@' || stringKey.equals(TokenIterator.URL_PLACEHOLDER))) {
+          patStr.append(stringKey);
+          ++patternWords;
+        }
+        // END langDetect
       }
-      // END langDetect
       
       for (Integer i : e.getFirst()) {
         String token = featureReverseMap.get(i);
         pattern.add(token);
         
-        // YA langDetect
-        
-        char ch0 = token.toString().charAt(0);
-        if (ch0 == '#') {
-          if (repeatHashTag)
-            hashtags.add(token.substring(1));
-        } else if (!(ch0 == '@' || stringKey.equals(token) || token
-            .equals(TokenIterator.URL_PLACEHOLDER))) {
-          if (hashtags.contains(token)) {
-            hashtags.remove(token);
-            // This is the extra token that is returned after the hashtag
-            // Hashtags are no good for language detection
-            // if (DIGITS_PATTERN.matcher(token).matches()) {
-            // contains digits so it is not a proper word
-            // TODO: any other heuristics
-            continue;
+        if (DO_LANG_DETECTION) {
+          // YA langDetect
+          char ch0 = token.toString().charAt(0);
+          if (ch0 == '#') {
+            if (repeatHashTag)
+              hashtags.add(token.substring(1));
+          } else if (!(ch0 == '@' || stringKey.equals(token) || token
+              .equals(TokenIterator.URL_PLACEHOLDER))) {
+            if (hashtags.contains(token)) {
+              hashtags.remove(token);
+              // This is the extra token that is returned after the hashtag
+              // Hashtags are no good for language detection
+              // if (DIGITS_PATTERN.matcher(token).matches()) {
+              // contains digits so it is not a proper word
+              // TODO: any other heuristics
+              continue;
+            }
+            patStr.append(' ').append(token);
+            ++patternWords;
           }
-          patStr.append(' ').append(token);
-          ++patternWords;
-        }
-        
-        if (patternWords >= minWordsForLangDetect) {
-          String lang = langCat.categorize(patStr.toString());
-          if (!langVotes.containsKey(lang)) {
-            langVotes.put(lang, new MutableLong(0));
-          }
-          MutableLong voteCnt = langVotes.get(lang);
-          voteCnt.add(e.getSecond());
           
-          log.info("Detected language for attribute '{}' to be '{}'",
-              stringKey,
-              lang);
+          if (patternWords >= minWordsForLangDetect) {
+            String lang = langCat.categorize(patStr.toString());
+            if (!langVotes.containsKey(lang)) {
+              langVotes.put(lang, new MutableLong(0));
+            }
+            MutableLong voteCnt = langVotes.get(lang);
+            voteCnt.add(e.getSecond());
+            
+            log.info("Detected language for attribute '{}' to be '{}'",
+                stringKey,
+                lang);
+          }
+          // END langDetect
         }
-        // END langDetect
       }
       stringValues.add(new Pair<List<String>, Long>(pattern, e.getSecond()));
     }
@@ -182,6 +187,7 @@ public final class IntegerStringOutputConverter implements
     // langSure = "unknown";
     // }
     
+    // langvotes will be empty anyway: if(DO_LANG_DETECTION)
     for (Entry<String, MutableLong> voteEntry : langVotes.entrySet()) {
       stringValues
           .add(new Pair<List<String>, Long>(Arrays.asList(stringKey,

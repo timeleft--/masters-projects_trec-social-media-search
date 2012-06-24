@@ -18,14 +18,13 @@
 package org.apache.mahout.freqtermsets;
 
 import java.io.IOException;
+import java.nio.charset.Charset;
 import java.util.Iterator;
 import java.util.LinkedList;
-import java.util.List;
 
 import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Mapper;
-import org.apache.mahout.common.Pair;
 import org.apache.mahout.common.Parameters;
 import org.apache.mahout.freqtermsets.stream.TimeWeightFunction;
 import org.apache.mahout.math.list.IntArrayList;
@@ -33,10 +32,12 @@ import org.apache.mahout.math.map.OpenObjectIntHashMap;
 import org.apache.mahout.math.map.OpenObjectLongHashMap;
 import org.apache.mahout.math.set.OpenIntHashSet;
 
-import com.google.common.collect.Lists;
-
 import ca.uwaterloo.twitter.TokenIterator;
 import ca.uwaterloo.twitter.TokenIterator.LatinTokenIterator;
+
+import com.google.common.collect.Lists;
+import com.google.common.hash.Hashing;
+
 import edu.umd.cloud9.io.pair.PairOfStringLong;
 
 /**
@@ -155,12 +156,16 @@ public class ParallelFPStreamMapper extends
       // featureReverseMap.add(e.getFirst());
       // freqList.add(e.getSecond());
       String t = termsIter.next();
-      int id = t.hashCode();
+      int id = Hashing.murmur3_32().hashString(t, Charset.forName("UTF-8")).asInt();
+      int c = 0;
       while (usedIds.contains(id)) {
-        // throw new AssertionError("Hashing collision.. think of another way");
-        // FIXME: This will cause trouble if the two colliding attrs don't come in the same
-        // order everytime they are encountered.. also, if a new colliding attr came :(.
-        ++id;
+        // Best effort
+        if (c < t.length()) {
+          id = Hashing.murmur3_32((int) t.charAt(c++)).hashString(t, Charset.forName("UTF-8"))
+              .asInt();
+        } else {
+          ++id;
+        }
       }
       fMap.put(t, id);
       usedIds.add(id);

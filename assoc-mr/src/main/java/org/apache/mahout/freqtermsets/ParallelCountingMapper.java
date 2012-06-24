@@ -18,6 +18,7 @@
 package org.apache.mahout.freqtermsets;
 
 import java.io.IOException;
+import java.util.Set;
 
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
@@ -26,6 +27,9 @@ import org.apache.mahout.common.Parameters;
 
 import ca.uwaterloo.twitter.TokenIterator;
 import ca.uwaterloo.twitter.TokenIterator.LatinTokenIterator;
+
+import com.google.common.collect.Sets;
+
 import edu.umd.cloud9.io.pair.PairOfStringLong;
 
 /**
@@ -38,6 +42,7 @@ public class ParallelCountingMapper extends
     Mapper<PairOfStringLong, Text, Text, LongWritable> {
   
   private static final LongWritable ONE = new LongWritable(1);
+  private static final boolean COUNT_DOCUMENT_OCCURRENCES = true;
   private boolean repeatHashTag;
   private long intervalStart;
   private long intervalEnd;
@@ -69,11 +74,19 @@ public class ParallelCountingMapper extends
     }
     LatinTokenIterator items = new LatinTokenIterator(inputStr);
     items.setRepeatHashTag(repeatHashTag);
+    Set<String> countedItems = Sets.newHashSet();
     while (items.hasNext()) {
       String item = items.next();
       // if (item.trim().isEmpty()) {
       // continue;
       // }
+      if(COUNT_DOCUMENT_OCCURRENCES){
+        if(countedItems.contains(item)){
+          continue;
+        } else {
+          countedItems.add(item);
+        }
+      }
       context.setStatus("Parallel Counting Mapper: " + item);
       context.write(new Text(item), ONE);
     }

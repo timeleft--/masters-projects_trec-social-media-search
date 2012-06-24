@@ -22,12 +22,11 @@ import java.io.IOException;
 import java.net.URI;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
-import java.util.PriorityQueue;
 import java.util.concurrent.Callable;
 
 import org.apache.commons.io.FileUtils;
@@ -62,8 +61,6 @@ import org.apache.mahout.math.map.OpenObjectLongHashMap;
 
 import ca.uwaterloo.twitter.ItemSetIndexBuilder;
 
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableList.Builder;
 import com.google.common.collect.Lists;
 import com.twitter.corpus.data.CSVTweetInputFormat;
 import com.twitter.corpus.data.util.PartitionByTimestamp;
@@ -109,8 +106,11 @@ public final class PFPGrowth implements Callable<Void> {
   public static final String PARAM_WINDOW_SIZE = "windowSize";
   
   // TODO command line
-  private static final boolean FPSTREAM = false;
+  private static final boolean FPSTREAM = true;
   public static final float FPSTREAM_LINEAR_DECAY_COEFF = 0.99f;
+  private static final double AVG_TOKENS_PER_DOC = 7;
+  
+  // private static final long DIRICHLET_SMOOTHING_PARAM = 3579L;
   
   // public static final long TREC2011_MIN_TIMESTAMP = 1296130141000L; // 1297209010000L;
   // public static final long GMT23JAN2011 = 1295740800000L;
@@ -310,6 +310,89 @@ public final class PFPGrowth implements Callable<Void> {
     DistributedCache.addCacheFile(flistPath.toUri(), conf);
   }
   
+  // /**
+  // * read the feature frequency List which is built at the end of the Parallel counting job
+  // *
+  // * @param countIn
+  // * @param minSupport
+  // * @param minFr
+  // * @param prunePct
+  // *
+  // * @return Feature Frequency List
+  // */
+  // public static List<Pair<String, Long>> readFList(String countIn, int minSupport, int minFr,
+  // int prunePct) throws IOException {
+  //
+  // Path parallelCountingPath = new Path(countIn, PARALLEL_COUNTING);
+  //
+  // PriorityQueue<Pair<String, Long>> queue = new PriorityQueue<Pair<String, Long>>(11,
+  // new Comparator<Pair<String, Long>>() {
+  // @Override
+  // public int compare(Pair<String, Long> o1, Pair<String, Long> o2) {
+  // int ret = o2.getSecond().compareTo(o1.getSecond());
+  // if (ret != 0) {
+  // return ret;
+  // }
+  // return o1.getFirst().compareTo(o2.getFirst());
+  // }
+  // });
+  //
+  // Path path = new Path(parallelCountingPath, FILE_PATTERN);
+  // // if(!FileSystem.get(path.toUri(),conf).exists(path)){
+  // // throw new IOException("Cannot find flist file: " + path);
+  // // }
+  // Configuration conf = new Configuration();
+  // // double totalFreq = 0;
+  // for (Pair<Text, LongWritable> record : new SequenceFileDirIterable<Text, LongWritable>(
+  // path, PathType.GLOB, null, null, true, conf)) {
+  // long freq = record.getSecond().get();
+  // // totalFreq += freq;
+  // queue.add(new Pair<String, Long>(record.getFirst().toString(), freq));
+  // }
+  // //
+  // // YA: language indipendent stop words.. the 5% most frequent
+  // // FIXME: this will remove words from only the mostly used lang
+  // // i.e. cannot be used for a multilingual task
+  // long maxFreq = Long.MAX_VALUE;
+  // if (!queue.isEmpty()) {
+  // maxFreq = Math.round(1.0f * queue.peek().getSecond() * prunePct / 100);
+  // // maxFreq = Math.round(1.0f * queue.size() * prunePct / 100);
+  // }
+  // // totalFreq += DIRICHLET_SMOOTHING_PARAM;
+  // // double pruneProb = prunePct / 100.0;
+  // assert minFr >= minSupport;
+  // // double numDocs = totalFreq / AVG_TOKENS_PER_DOC;
+  //
+  // List<Pair<String, Long>> fList = Lists.newArrayList();
+  // boolean withinUpperBound = false;
+  // // int i=0;
+  // while (!queue.isEmpty()) {
+  // Pair<String, Long> record = queue.poll();
+  // String token = record.getFirst().toString();
+  // char ch0 = token.charAt(0);
+  // long value = record.getSecond();
+  // // Always Count patterns associated with hashtags and mentions,
+  // // but for other tokens ONLY those who are within medium range
+  // // double prob = (value + DIRICHLET_SMOOTHING_PARAM) / totalFreq;
+  // if (!withinUpperBound) {
+  // // double idf = MathUtils.log(2, numDocs / value+1) + 1;
+  // // withinUpperBound = idf >= prunePct/* value <= maxFreq */;
+  // // withinUpperBound = (value/totalFreq) < pruneProb;
+  // withinUpperBound = value <= maxFreq;
+  // // withinUpperBound = i > maxFreq;
+  // // ++i;
+  // }
+  // if (!(value >= minFr)) { // (withinLoweBound){
+  // break;
+  // }
+  // if ((ch0 == '#' || ch0 == '@')
+  // || (withinUpperBound)) { // && withinLoweBound)) {
+  // fList.add(record);
+  // }
+  // }
+  // return fList; // This prevents a null exception when using FP2 --> .subList(0, fList.size());
+  // }
+  
   /**
    * read the feature frequency List which is built at the end of the Parallel counting job
    * 
@@ -325,7 +408,29 @@ public final class PFPGrowth implements Callable<Void> {
     
     Path parallelCountingPath = new Path(countIn, PARALLEL_COUNTING);
     
-    PriorityQueue<Pair<String, Long>> queue = new PriorityQueue<Pair<String, Long>>(11,
+    Path path = new Path(parallelCountingPath, FILE_PATTERN);
+    Configuration conf = new Configuration();
+    // if (!FileSystem.get(path.toUri(), conf).exists(path)) {
+    // throw new IOException("Cannot find flist file: " + path);
+    // }
+    
+//    assert minFr >= minSupport;
+    
+    List<Pair<String, Long>> freqList = Lists.newLinkedList();
+    for (Pair<Text, LongWritable> record : new SequenceFileDirIterable<Text, LongWritable>(
+        path, PathType.GLOB, null, null, true, conf)) {
+      long freq = record.getSecond().get();
+      String token = record.getFirst().toString();
+      
+      char ch0 = token.charAt(0);
+      // No special treatment for mentions: || ch0 == '@'
+      // or hashtags: (ch0 == '#') || 
+      if ((freq >= minFr)) {
+        freqList.add(new Pair<String, Long>(token, freq));
+      }
+    }
+    
+    Comparator<Pair<String, Long>> descComp =
         new Comparator<Pair<String, Long>>() {
           @Override
           public int compare(Pair<String, Long> o1, Pair<String, Long> o2) {
@@ -335,48 +440,52 @@ public final class PFPGrowth implements Callable<Void> {
             }
             return o1.getFirst().compareTo(o2.getFirst());
           }
-        });
+        };
     
-    Path path = new Path(parallelCountingPath, FILE_PATTERN);
-    // if(!FileSystem.get(path.toUri(),conf).exists(path)){
-    // throw new IOException("Cannot find flist file: " + path);
-    // }
-    Configuration conf = new Configuration();
+    @SuppressWarnings("unchecked")
+    Pair<String, Long>[] freqArr = freqList.toArray(new Pair[0]);
+    Arrays.sort(freqArr, descComp);
     
-    for (Pair<Text, LongWritable> record : new SequenceFileDirIterable<Text, LongWritable>(
-        path, PathType.GLOB, null, null, true, conf)) {
-      queue.add(new Pair<String, Long>(record.getFirst().toString(), record.getSecond().get()));
-    }
-    
+    List<Pair<String, Long>> result = null; // = Lists.newLinkedList();
     // YA: language indipendent stop words.. the 5% most frequent
     // FIXME: this will remove words from only the mostly used lang
     // i.e. cannot be used for a multilingual task
-    long maxFreq = Long.MAX_VALUE;
-    if (!queue.isEmpty()) {
-      maxFreq = Math.round(1.0f * queue.peek().getSecond() * prunePct / 100);
-    }
-    
-    assert minFr >= minSupport;
-    
-    List<Pair<String, Long>> fList = Lists.newArrayList();
-    while (!queue.isEmpty()) {
+    //Percentile: Pretty aggressive since the Zipfe distribution is very steep
+//    int minIx = (int) Math.round(1.0f * freqArr.length * prunePct / 100);
+//    long maxFreq = freqArr[minIx].getSecond();
+    double maxFreq =  (1.0f * MathUtils.log(2,freqArr[0].getSecond()) * prunePct / 100);
+    boolean withinUpperBound = false;
+    for (int i = 0; i < freqArr.length; ++i) {
+      if (!withinUpperBound) {
+        withinUpperBound = MathUtils.log(2,freqArr[i].getSecond()) < maxFreq;
+        if(withinUpperBound){
+          result = Lists.newArrayListWithCapacity(freqArr.length - i);
+        }
+      }
       
-      Pair<String, Long> record = queue.poll();
-      String token = record.getFirst().toString();
-      char ch0 = token.charAt(0);
-      long value = record.getSecond();
-      if ((ch0 == '#' || ch0 == '@') || (value >= minFr /* Support */&& value <= maxFreq)) {
-        fList.add(record);
+      if (withinUpperBound) {
+        result.add(freqArr[i]);
       }
     }
-    return fList; // This prevents a null exception when using FP2 --> .subList(0, fList.size());
+    
+    return result;
   }
   
   private static int cacheFList(Parameters params, Configuration conf, String countIn,
       int minSupport, int minFr, int prunePct) throws IOException {
-    List<Pair<String, Long>> flist = readFList(countIn, minSupport, minFr, prunePct);
-    saveFList(flist, params, conf, new Path(countIn, F_LIST));
-    return flist.size();
+    Path cachedPath = new Path(countIn, F_LIST);
+    FileSystem fs = FileSystem.get(conf);
+    int result;
+    if (fs.exists(cachedPath)) {
+      assert FPSTREAM;
+      result = -1;
+      DistributedCache.addCacheFile(cachedPath.toUri(), conf);
+    } else {
+      List<Pair<String, Long>> flist = readFList(countIn, minSupport, minFr, prunePct);
+      saveFList(flist, params, conf, cachedPath);
+      result = flist.size();
+    }
+    return result;
   }
   
   public static int getGroup(int itemId, int maxPerGroup) {
