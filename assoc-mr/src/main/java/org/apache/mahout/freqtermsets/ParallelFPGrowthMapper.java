@@ -117,7 +117,7 @@ public class ParallelFPGrowthMapper extends
     super.setup(context);
     
     int i = 0;
-    for (Pair<String, Long> e : PFPGrowth.readFList(context.getConfiguration())) {
+    for (Pair<String, Long> e : PFPGrowth.readCachedFList(context.getConfiguration())) {
       fMap.put(e.getFirst(), i++);
     }
     

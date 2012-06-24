@@ -20,6 +20,7 @@ package org.apache.mahout.freqtermsets;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map.Entry;
 
@@ -34,8 +35,10 @@ import org.apache.mahout.freqtermsets.convertors.ContextWriteOutputCollector;
 import org.apache.mahout.freqtermsets.convertors.integer.IntegerStringOutputConverter;
 import org.apache.mahout.freqtermsets.convertors.string.TopKStringPatterns;
 import org.apache.mahout.freqtermsets.fpgrowth.FPStream;
+import org.apache.mahout.freqtermsets.stream.TimeWeightFunction;
 import org.apache.mahout.math.list.IntArrayList;
 import org.apache.mahout.math.map.OpenIntObjectHashMap;
+import org.apache.mahout.math.map.OpenObjectLongHashMap;
 
 import ca.uwaterloo.twitter.TokenIterator;
 
@@ -72,6 +75,10 @@ public class ParallelFPStreamReducer extends
   private int minWordsForLangDetection;
   // private double superiorityRatio;
   private boolean repeatHashTag;
+  private long intervalStart;
+  private long intervalEnd;
+  private long windowSize;
+  private long endTimestamp;
   
   private static class IteratorAdapter implements Iterator<Pair<List<Integer>, Long>> {
     private Iterator<Pair<IntArrayList, Long>> innerIter;
@@ -163,11 +170,29 @@ public class ParallelFPStreamReducer extends
     
     super.setup(context);
     Parameters params = new Parameters(context.getConfiguration().get(PFPGrowth.PFP_PARAMETERS, ""));
+    
+    intervalStart = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_START));
+    // Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP))); //GMT23JAN2011)));
+    intervalEnd = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_END));
+    // Long.toString(Long.MAX_VALUE)));
+    windowSize = Long.parseLong(params.get(PFPGrowth.PARAM_WINDOW_SIZE,
+        Long.toString(intervalEnd - intervalStart)));
+    endTimestamp = Math.min(intervalEnd, intervalStart + windowSize - 1);
+    
+    OpenObjectLongHashMap<String> prevFLists = PFPGrowth.readOlderCachedFLists(context
+        .getConfiguration(),
+        intervalStart, TimeWeightFunction.getDefault(params));
+    
+    LinkedList<String> terms = Lists.newLinkedList();
+    prevFLists.keysSortedByValue(terms);
+    Iterator<String> termsIter = terms.descendingIterator();
     int ix = 0;
-    for (Pair<String, Long> e : PFPGrowth.readFList(context.getConfiguration())) {
+    while (termsIter.hasNext()) {
+      
+      String t = termsIter.next();
       // featureReverseMap.add(e.getFirst());
       // freqList.add(e.getSecond());
-      int id = e.getFirst().hashCode();
+      int id = t.hashCode();
       while (idStringMap.containsKey(id)) {
 //          idIxMap.containsKey(id) || idFreqMap.containsKey(id) || 
         // throw new AssertionError("Hashing collision.. think of another way");
@@ -176,7 +201,7 @@ public class ParallelFPStreamReducer extends
         ++id;
       }
 //      idFreqMap.put(id, e.getSecond().intValue());
-      idStringMap.put(id, e.getFirst());
+      idStringMap.put(id, t);
       
 //      idIxMap.put(id, ix);
 //      ixIdMap.put(ix, id);

@@ -145,7 +145,7 @@ public class ParallelFPGrowthReducer extends Reducer<IntWritable,TransactionTree
     Parameters params = new Parameters(context.getConfiguration().get(PFPGrowth.PFP_PARAMETERS, ""));
     
     int ix = 0;
-    for (Pair<String,Long> e : PFPGrowth.readFList(context.getConfiguration())) {
+    for (Pair<String,Long> e : PFPGrowth.readCachedFList(context.getConfiguration())) {
       featureReverseMap.put(ix++,e.getFirst());
       freqList.add(e.getSecond());
     }

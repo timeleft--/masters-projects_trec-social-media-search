@@ -191,14 +191,18 @@ public class AggregatorReducer extends Reducer<Text, TopKStringPatterns, Text, T
   @Override
   protected void setup(Context context) throws IOException, InterruptedException {
     super.setup(context);
-    Parameters params = new Parameters(context.getConfiguration().get("pfp.parameters", ""));
-    maxHeapSize = Integer.valueOf(params.get("maxHeapSize", "50"));
+    Configuration conf = context.getConfiguration();
+    Parameters params = new Parameters(conf.get(PFPGrowth.PFP_PARAMETERS, ""));
+    maxHeapSize = Integer.valueOf(params.get(PFPGrowth.MAX_HEAPSIZE, "50"));
     
-    totalNterms = 0;
-    for (Pair<String, Long> e : PFPGrowth.readFList(params)) {
-      fMap.put(e.getFirst(), e.getSecond());
-      totalNterms += e.getSecond();
-    }
+//    totalNterms = 0;
+//    for (Pair<String, Long> e : PFPGrowth.readFList(conf)) {
+//      fMap.put(e.getFirst(), e.getSecond());
+//      totalNterms += e.getSecond();
+//    }
+    
+    totalNterms = PFPGrowth.readFMap(conf,fMap);
+    
     lnTotalNTerms = Math.log(totalNterms);
     sortByMutualInfo = "true".equals(params.get(MUTUAL_INFO_FLAG));
   }

@@ -40,11 +40,11 @@ public class DumpFList {
     File outF = new File(inDir, "flist_dump.txt");
     Writer wr = Channels.newWriter(FileUtils.openOutputStream(outF).getChannel(), "UTF-8");
     try{
-    Parameters params = new Parameters();
-    params.set(PFPGrowth.COUNT_IN, inDir);
+//    Parameters params = new Parameters();
+//    params.set(PFPGrowth.COUNT_IN, inDir);
     
     SummaryStatistics flistStats = new SummaryStatistics();
-    for (Pair<String, Long> e : PFPGrowth.readFList(params)) {
+    for (Pair<String, Long> e : PFPGrowth.readFList(inDir,0,0,100)) {
       wr.append(e.getFirst() + "\t" + e.getSecond() + "\n");
       flistStats.addValue(e.getFirst().length());
     }

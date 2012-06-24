@@ -18,15 +18,22 @@
 package org.apache.mahout.freqtermsets;
 
 import java.io.IOException;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
 
 import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.mahout.common.Pair;
 import org.apache.mahout.common.Parameters;
+import org.apache.mahout.freqtermsets.stream.TimeWeightFunction;
 import org.apache.mahout.math.list.IntArrayList;
 import org.apache.mahout.math.map.OpenObjectIntHashMap;
+import org.apache.mahout.math.map.OpenObjectLongHashMap;
 import org.apache.mahout.math.set.OpenIntHashSet;
+
+import com.google.common.collect.Lists;
 
 import ca.uwaterloo.twitter.TokenIterator;
 import ca.uwaterloo.twitter.TokenIterator.LatinTokenIterator;
@@ -43,7 +50,7 @@ public class ParallelFPStreamMapper extends
   private final OpenObjectIntHashMap<String> fMap = new OpenObjectIntHashMap<String>();
   
   // private Pattern splitter;
-//  private int maxPerGroup;
+  // private int maxPerGroup;
   private int numGroups;
   private long intervalStart;
   private long intervalEnd;
@@ -71,11 +78,11 @@ public class ParallelFPStreamMapper extends
     // String[] items = splitter.split(input.toString());
     
     OpenIntHashSet itemSet = new OpenIntHashSet();
-//    OpenIntObjectHashMap<String> itemSet =  new OpenIntObjectHashMap<String>();
+    // OpenIntObjectHashMap<String> itemSet = new OpenIntObjectHashMap<String>();
     
     String inputStr;
     // for (String item : items) {
-    if(prependUserName){
+    if (prependUserName) {
       inputStr = "@" + screenname + ": " + input;
     } else {
       inputStr = input.toString();
@@ -100,8 +107,8 @@ public class ParallelFPStreamMapper extends
     for (int j = itemArr.size() - 1; j >= 0; j--) {
       // generate group dependent shards
       int item = itemArr.get(j);
-//      int groupID = PFPGrowth.getGroup(item, maxPerGroup);
-
+      // int groupID = PFPGrowth.getGroup(item, maxPerGroup);
+      
       int groupID = PFPGrowth.getGroupHash(item, numGroups);
       
       if (!groups.contains(groupID)) {
@@ -120,45 +127,52 @@ public class ParallelFPStreamMapper extends
   @Override
   protected void setup(Context context) throws IOException, InterruptedException {
     super.setup(context);
+    Parameters params =
+        new Parameters(context.getConfiguration().get(PFPGrowth.PFP_PARAMETERS, ""));
     
-//    int i = 0;
-//    for (Pair<String, Long> e : PFPGrowth.readFList(context.getConfiguration())) {
-//      fMap.put(e.getFirst(), i++);
-//    }
+    intervalStart = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_START));
+    // Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP))); //GMT23JAN2011)));
+    intervalEnd = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_END));
+    // Long.toString(Long.MAX_VALUE)));
+    windowSize = Long.parseLong(params.get(PFPGrowth.PARAM_WINDOW_SIZE,
+        Long.toString(intervalEnd - intervalStart)));
+    endTimestamp = Math.min(intervalEnd, intervalStart + windowSize - 1);
+    
+    // int i = 0;
+    // for (Pair<String, Long> e : PFPGrowth.readFList(context.getConfiguration())) {
+    // fMap.put(e.getFirst(), i++);
+    // }
     
     OpenIntHashSet usedIds = new OpenIntHashSet();
-    for (Pair<String, Long> e : PFPGrowth.readFList(context.getConfiguration())) {
+    OpenObjectLongHashMap<String> prevFLists = PFPGrowth.readOlderCachedFLists(context
+        .getConfiguration(),
+        intervalStart, TimeWeightFunction.getDefault(params));
+    
+    LinkedList<String> terms = Lists.newLinkedList();
+    prevFLists.keysSortedByValue(terms);
+    Iterator<String> termsIter = terms.descendingIterator();
+    while (termsIter.hasNext()) {
       // featureReverseMap.add(e.getFirst());
       // freqList.add(e.getSecond());
-      int id = e.getFirst().hashCode();
+      String t = termsIter.next();
+      int id = t.hashCode();
       while (usedIds.contains(id)) {
         // throw new AssertionError("Hashing collision.. think of another way");
         // FIXME: This will cause trouble if the two colliding attrs don't come in the same
         // order everytime they are encountered.. also, if a new colliding attr came :(.
         ++id;
       }
-      fMap.put(e.getFirst(), id);
+      fMap.put(t, id);
       usedIds.add(id);
     }
-    
-    Parameters params =
-        new Parameters(context.getConfiguration().get(PFPGrowth.PFP_PARAMETERS, ""));
     
     repeatHashTag = Boolean.parseBoolean(params.get(TokenIterator.PARAM_REPEAT_HASHTAG, "false"));
     
     // splitter = Pattern.compile(params.get(PFPGrowth.SPLIT_PATTERN,
     // PFPGrowth.SPLITTER.toString()));
     
-//    maxPerGroup = Integer.valueOf(params.getInt(PFPGrowth.MAX_PER_GROUP, 0));
+    // maxPerGroup = Integer.valueOf(params.getInt(PFPGrowth.MAX_PER_GROUP, 0));
     numGroups = params.getInt(PFPGrowth.NUM_GROUPS, PFPGrowth.NUM_GROUPS_DEFAULT);
-    
-    intervalStart = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_START));
-//        Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP))); //GMT23JAN2011)));
-    intervalEnd = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_END));
-//        Long.toString(Long.MAX_VALUE)));
-    windowSize = Long.parseLong(params.get(PFPGrowth.PARAM_WINDOW_SIZE,
-        Long.toString(intervalEnd - intervalStart)));
-    endTimestamp = Math.min(intervalEnd, intervalStart + windowSize - 1);
     
     prependUserName = true;
   }
