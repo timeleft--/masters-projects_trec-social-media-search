@@ -452,7 +452,7 @@ public final class PFPGrowth implements Callable<Void> {
     // FIXME: this will remove words from only the mostly used lang
     // i.e. cannot be used for a multilingual task
     //Percentile: Pretty aggressive since the Zipfe distribution is very steep
-    int minIx = (int) Math.round(1.0f * freqArr.length * (100-prunePct) / 100);
+    int minIx = (int) Math.round(1.0f * (freqArr.length+1) * (100-prunePct) / 100);
     long maxFreq = freqArr[minIx].getSecond();
 //    double maxFreq =  (1.0f * MathUtils.log(2,freqArr[0].getSecond()) * prunePct / 100);
 //    double maxFreq =  (1.0f * totalFreq * prunePct / 100);
