@@ -21,40 +21,33 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.Map.Entry;
 
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
 import org.apache.commons.lang.mutable.MutableLong;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.Writable;
 import org.apache.hadoop.mapred.OutputCollector;
 import org.apache.mahout.common.Pair;
-import org.apache.mahout.common.Parameters;
 import org.apache.mahout.common.iterator.sequencefile.SequenceFileIterable;
 import org.apache.mahout.freqtermsets.CountDescendingPairComparator;
+import org.apache.mahout.freqtermsets.PFPGrowth;
 import org.apache.mahout.freqtermsets.convertors.StatusUpdater;
 import org.apache.mahout.freqtermsets.convertors.TopKPatternsOutputConverter;
 import org.apache.mahout.freqtermsets.convertors.TransactionIterator;
 import org.apache.mahout.freqtermsets.convertors.string.TopKStringPatterns;
-import org.apache.mahout.freqtermsets.fpgrowth.FPGrowth;
-import org.apache.mahout.freqtermsets.fpgrowth.FPTree;
-import org.apache.mahout.freqtermsets.fpgrowth.FPTreeDepthCache;
-import org.apache.mahout.freqtermsets.fpgrowth.FrequentPatternMaxHeap;
-import org.apache.mahout.freqtermsets.fpgrowth.Pattern;
 import org.apache.mahout.math.map.OpenIntIntHashMap;
 import org.apache.mahout.math.map.OpenIntObjectHashMap;
 import org.apache.mahout.math.map.OpenObjectIntHashMap;
-import org.knallgrau.utils.textcat.TextCategorizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 
 /**
  * Implementation of PFGrowth Algorithm with FP-Bonsai pruning
@@ -62,7 +55,7 @@ import org.slf4j.LoggerFactory;
  * @param <A>
  *          object type used as the cell items in a transaction list
  */
-public class FPGrowth<A extends Comparable<? super A>> {
+public class FPGrowth<A extends Integer> {//Comparable<? super A>> {
   
   private static final Logger log = LoggerFactory.getLogger(FPGrowth.class);
   
@@ -134,6 +127,8 @@ public class FPGrowth<A extends Comparable<? super A>> {
    * @param output
    *          The output collector to which the the generated patterns are
    *          written
+   * @param numGroups 
+   * @param groupId 
    * @throws IOException
    */
   public final void generateTopKFrequentPatterns(Iterator<Pair<List<A>, Long>> transactionStream,
@@ -142,7 +137,7 @@ public class FPGrowth<A extends Comparable<? super A>> {
       int k,
       Collection<A> returnableFeatures,
       OutputCollector<A, List<Pair<List<A>, Long>>> output,
-      StatusUpdater updater) throws IOException {
+      StatusUpdater updater, int numGroups, int groupId) throws IOException {
     
     OpenIntObjectHashMap<A> reverseMapping = new OpenIntObjectHashMap<A>();
     OpenObjectIntHashMap<A> attributeIdMapping = new OpenObjectIntHashMap<A>();
@@ -179,12 +174,16 @@ public class FPGrowth<A extends Comparable<? super A>> {
         }
       }
     } else {
-      // YA: why would we need that? It might hide a bug
-      throw new UnsupportedOperationException("Must send a full returnable featureset");
-      // for (int j = 0; j < attributeIdMapping.size(); j++) {
-      // returnFeatures.add(j);
-      // }
-      // END YA: unsupported
+      // YA: Streaming conistent group assignment
+//      if(Integer.class.isAssignableFrom(A)){
+      for (A attrib: attributeIdMapping.keys()){
+        if(PFPGrowth.isGroupMember(groupId, attrib, numGroups)){
+          returnFeatures.add(attributeIdMapping.get(attrib));
+          log.info("Adding Pattern {}=>{}", attrib, attributeIdMapping
+              .get(attrib));
+        }
+      }
+//      }
     }
     
     log.info("Number of unique pruned items {}", attributeIdMapping.size());

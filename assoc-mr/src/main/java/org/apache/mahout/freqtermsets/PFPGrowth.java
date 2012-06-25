@@ -796,7 +796,8 @@ public final class PFPGrowth implements Callable<Void> {
     job.setInputFormatClass(CSVTweetInputFormat.class);
     if (FPSTREAM) {
       job.setMapperClass(ParallelFPStreamMapper.class);
-      job.setCombinerClass(ParallelFPStreamCombiner.class);
+//      job.setCombinerClass(ParallelFPStreamCombiner.class);
+      job.setCombinerClass(ParallelFPGrowthCombiner.class);
       job.setReducerClass(ParallelFPStreamReducer.class);
     } else {
       job.setMapperClass(ParallelFPGrowthMapper.class);

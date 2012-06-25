@@ -134,7 +134,8 @@ public class ParallelFPGrowthReducer extends Reducer<IntWritable,TransactionTree
           new IntegerStringOutputConverter(
               new ContextWriteOutputCollector<IntWritable,TransactionTree,Text,TopKStringPatterns>(context),
               featureReverseMap,minWordsForLangDetection/*, superiorityRatio*/, repeatHashTag),
-          new ContextStatusUpdater<IntWritable,TransactionTree,Text,TopKStringPatterns>(context));
+          new ContextStatusUpdater<IntWritable,TransactionTree,Text,TopKStringPatterns>(context),
+          -1,-1); //those will not be used as long as there is something in the returnable features
 //    }
   }
   

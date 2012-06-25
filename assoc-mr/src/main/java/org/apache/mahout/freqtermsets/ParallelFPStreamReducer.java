@@ -58,7 +58,7 @@ import org.apache.mahout.freqtermsets.convertors.ContextStatusUpdater;
 import org.apache.mahout.freqtermsets.convertors.ContextWriteOutputCollector;
 import org.apache.mahout.freqtermsets.convertors.integer.IntegerStringOutputConverter;
 import org.apache.mahout.freqtermsets.convertors.string.TopKStringPatterns;
-import org.apache.mahout.freqtermsets.fpgrowth.FPStream;
+import org.apache.mahout.freqtermsets.fpgrowth.FPGrowth;
 import org.apache.mahout.freqtermsets.stream.TimeWeightFunction;
 import org.apache.mahout.math.list.IntArrayList;
 import org.apache.mahout.math.map.OpenIntObjectHashMap;
@@ -257,44 +257,21 @@ public class ParallelFPStreamReducer extends
     
     Collections.sort(localFList, new CountDescendingPairComparator<Integer, Long>());
     
-    // if (useFP2) {
-    // org.apache.mahout.freqtermsets.fpgrowth2.FPGrowthIds fpGrowth =
-    // new org.apache.mahout.freqtermsets.fpgrowth2.FPGrowthIds(featureReverseMap);
-    // fpGrowth.generateTopKFrequentPatterns(
-    // cTree.iterator(),
-    // freqList,
-    // minSupport,
-    // maxHeapSize,
-    // PFPGrowth.getGroupMembers(key.get(), maxPerGroup, numFeatures),
-    // new IntegerStringOutputConverter(
-    // new
-    // ContextWriteOutputCollector<IntWritable,TransactionTree,Text,TopKStringPatterns>(context),
-    // featureReverseMap,minWordsForLangDetection/*, superiorityRatio*/),
-    // new ContextStatusUpdater<IntWritable,TransactionTree,Text,TopKStringPatterns>(context));
-    // } else {
-    
-    FPStream<Integer> fpStream = new FPStream<Integer>();
-    fpStream
+    FPGrowth<Integer> fpGrowth = new FPGrowth<Integer>();
+    fpGrowth
         .generateTopKFrequentPatterns(
             new IteratorAdapter(cTree.iterator()),
             localFList,
             minSupport,
             maxHeapSize,
-            // new HashSet<Integer>(PFPGrowth.getGroupMembers(key.get(),
-            // maxPerGroup,
-            // numFeatures).toList()),
+            null,
             new IntegerStringOutputConverter(
                 new ContextWriteOutputCollector<IntWritable, TransactionTree, Text, TopKStringPatterns>(
                     context),
-                // featureReverseMap,
                 idStringMap,
-                minWordsForLangDetection/* , superiorityRatio */, repeatHashTag),
+                minWordsForLangDetection, repeatHashTag),
             new ContextStatusUpdater<IntWritable, TransactionTree, Text, TopKStringPatterns>(
                 context),
-            // ixIdMap,
-            // idIxMap,
-            // idFreqMap,
-            // idStringMap,
             key.get(),
             numGroups);
     

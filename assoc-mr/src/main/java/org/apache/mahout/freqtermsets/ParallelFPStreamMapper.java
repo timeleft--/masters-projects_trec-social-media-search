@@ -64,14 +64,7 @@ import edu.umd.cloud9.io.pair.PairOfStringLong;
  */
 public class ParallelFPStreamMapper extends
     Mapper<PairOfStringLong, Text, IntWritable, TransactionTree> {
-  
-  private static final boolean PATTERNS_FROM_EARLIER_WINDOWS = false;
-
   private final OpenObjectIntHashMap<String> fMap = new OpenObjectIntHashMap<String>();
-  // private final OpenIntObjectHashMap<String> idToString = new OpenIntObjectHashMap<String>();
-  
-  // private Pattern splitter;
-  // private int maxPerGroup;
   private int numGroups;
   private long intervalStart;
   private long intervalEnd;
@@ -82,9 +75,6 @@ public class ParallelFPStreamMapper extends
   private long endTimestamp;
   private boolean prependUserName;
   
-  private IndexReader fisIxReader;
-  private TimeWeightFunction timeWeigth;
-  private long mostRecentTime;
   
   @Override
   protected void map(PairOfStringLong key, Text input, Context context)
@@ -100,13 +90,9 @@ public class ParallelFPStreamMapper extends
       return;
     }
     
-    // String[] items = splitter.split(input.toString());
-    
-    // OpenIntHashSet itemSet = new OpenIntHashSet();
     OpenIntObjectHashMap<String> itemSet = new OpenIntObjectHashMap<String>();
     
     String inputStr;
-    // for (String item : items) {
     if (prependUserName) {
       inputStr = "@" + screenname + ": " + input;
     } else {
@@ -124,8 +110,6 @@ public class ParallelFPStreamMapper extends
     
     IntArrayList itemArr = new IntArrayList(itemSet.size());
     itemSet.keys(itemArr);
-    // YA: why is sort needed here? won't group dependent transactions (below) become
-    // just monotonically increasing lists of items because of this?
     itemArr.sort();
     
     OpenIntHashSet groups = new OpenIntHashSet();
@@ -133,11 +117,10 @@ public class ParallelFPStreamMapper extends
       // generate group dependent shards
       int itemId = itemArr.get(j);
       // int groupID = PFPGrowth.getGroup(item, maxPerGroup);
-      
+     
       int groupID = PFPGrowth.getGroupHash(itemId, numGroups);
       
       if (!groups.contains(groupID)) {
-        // String item = idToString.get(itemId);
         String item = itemSet.get(itemId);
         
         IntArrayList tempItems = new IntArrayList(j + 1);
@@ -146,43 +129,6 @@ public class ParallelFPStreamMapper extends
             .setStatus("Parallel FPGrowth: Generating Group Dependent transactions for: " + item);
         wGroupID.set(groupID);
         
-//        TransactionTree patternTree = new TransactionTree();
-//        patternTree.addPattern(tempItems, 1L);
-//        if (PATTERNS_FROM_EARLIER_WINDOWS && fisIxReader != null) {
-//          Term term = new Term(ItemSetIndexBuilder.AssocField.ITEMSET.name, item);
-//          TermDocs termDocs = fisIxReader.termDocs(term);
-//          while (termDocs.next()) {
-//            int docId = termDocs.doc();
-//            Document doc = fisIxReader.document(docId);
-//            TermFreqVector terms = fisIxReader.getTermFreqVector(docId,
-//                ItemSetIndexBuilder.AssocField.ITEMSET.name);
-//            
-//            Set<Integer> appearingGroups = Sets.newHashSet();
-//            IntArrayList pattern = new IntArrayList(terms.size());
-//            for (String t : terms.getTerms()) {
-//              if (fMap.containsKey(t)) {
-//                int tId = fMap.get(t);
-//                pattern.add(tId);
-//                appearingGroups.add(PFPGrowth.getGroupHash(tId, numGroups));
-//              } else {
-//                context
-//                    .setStatus("Parallel FPGrowth: Term from previous pattern not part of the current fList: "
-//                        + t);
-//              }
-//            }
-//            
-//            float patternFreq = Float.parseFloat(doc
-//                .getFieldable(ItemSetIndexBuilder.AssocField.SUPPORT.name)
-//                .stringValue());
-//            // patternFreq /= (j + 1);
-//            // will be added that many times
-//            patternFreq /= (terms.size() * appearingGroups.size());
-//            long support = Math.round(timeWeigth.apply(patternFreq, mostRecentTime, intervalStart));
-//            
-//            patternTree.addPattern(pattern, support);
-//          }
-//        }
-//        context.write(wGroupID, patternTree);
         context.write(wGroupID, new TransactionTree(tempItems, 1L));
       }
       groups.add(groupID);
@@ -197,17 +143,10 @@ public class ParallelFPStreamMapper extends
         new Parameters(context.getConfiguration().get(PFPGrowth.PFP_PARAMETERS, ""));
     
     intervalStart = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_START));
-    // Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP))); //GMT23JAN2011)));
     intervalEnd = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_END));
-    // Long.toString(Long.MAX_VALUE)));
     windowSize = Long.parseLong(params.get(PFPGrowth.PARAM_WINDOW_SIZE,
         Long.toString(intervalEnd - intervalStart)));
     endTimestamp = Math.min(intervalEnd, intervalStart + windowSize - 1);
-    
-    // int i = 0;
-    // for (Pair<String, Long> e : PFPGrowth.readFList(context.getConfiguration())) {
-    // fMap.put(e.getFirst(), i++);
-    // }
     
     OpenIntHashSet usedIds = new OpenIntHashSet();
     OpenObjectLongHashMap<String> prevFLists = PFPGrowth.readOlderCachedFLists(context
@@ -218,13 +157,10 @@ public class ParallelFPStreamMapper extends
     prevFLists.keysSortedByValue(terms);
     Iterator<String> termsIter = terms.descendingIterator();
     while (termsIter.hasNext()) {
-      // featureReverseMap.add(e.getFirst());
-      // freqList.add(e.getSecond());
       String t = termsIter.next();
       int id = Hashing.murmur3_32().hashString(t, Charset.forName("UTF-8")).asInt();
       int c = 0;
       while (usedIds.contains(id)) {
-        // while(idToString.containsKey(id)){
         // Best effort
         if (c < t.length()) {
           id = Hashing.murmur3_32((int) t.charAt(c++)).hashString(t, Charset.forName("UTF-8"))
@@ -235,59 +171,12 @@ public class ParallelFPStreamMapper extends
       }
       fMap.put(t, id);
       usedIds.add(id);
-      // idToString.put(id,t);
     }
     
     repeatHashTag = Boolean.parseBoolean(params.get(TokenIterator.PARAM_REPEAT_HASHTAG, "false"));
     
-    // splittReaderer = Pattern.compile(params.get(PFPGrowth.SPLIT_PATTERN,
-    // PFPGrowth.SPLITTER.toString()));
-    
-    // maxPerGroup = Integer.valueOf(params.getInt(PFPGrowth.MAX_PER_GROUP, 0));
     numGroups = params.getInt(PFPGrowth.NUM_GROUPS, PFPGrowth.NUM_GROUPS_DEFAULT);
     
     prependUserName = true;
-    
-//    if (PATTERNS_FROM_EARLIER_WINDOWS) {
-//      Configuration conf = context.getConfiguration();
-//      Path outPath = new Path(params.get(PFPGrowth.OUTPUT));
-//      Path timeRoot = outPath.getParent().getParent();
-//      FileSystem fs = FileSystem.get(conf);
-//      FileStatus[] otherWindows = fs.listStatus(timeRoot);
-//      mostRecentTime = Long.MIN_VALUE;
-//      Path mostRecentPath = null;
-//      for (int f = otherWindows.length - 1; f >= 0; --f) {
-//        Path p = otherWindows[f].getPath();
-//        long pathStartTime = Long.parseLong(p.getName());
-//        // should have used end time, but it doesn't make a difference,
-//        // AS LONG AS windows don't overlap
-//        if (pathStartTime < intervalStart && pathStartTime > mostRecentTime) {
-//          p = fs.listStatus(p)[0].getPath();
-//          p = new Path(p, "index");
-//          if (fs.exists(p)) {
-//            mostRecentTime = pathStartTime;
-//            mostRecentPath = p;
-//          }
-//        } else if (mostRecentPath != null) {
-//          break;
-//        }
-//      }
-//      if (mostRecentPath != null) {
-//        File indexDir = FileUtils.toFile(mostRecentPath.toUri().toURL());
-//        // FIXME: this will work only on local filesystem.. like many other parts of the code
-//        Directory fisdir = new MMapDirectory(indexDir);
-//        fisIxReader = IndexReader.open(fisdir);
-//        // fisSearcher = new IndexSearcher(fisIxReader);
-//        // fisSimilarity = new ItemSetSimilarity();
-//        // fisSearcher.setSimilarity(fisSimilarity);
-//        //
-//        // fisQparser = new QueryParser(Version.LUCENE_36,
-//        // ItemSetIndexBuilder.AssocField.ITEMSET.name,
-//        // ANALYZER);
-//        // fisQparser.setDefaultOperator(Operator.AND);
-//        
-//        timeWeigth = TimeWeightFunction.getDefault(params);
-//      }
-//    }
   }
 }
