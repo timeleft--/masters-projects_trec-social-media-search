@@ -30,8 +30,75 @@ import org.apache.mahout.math.list.IntArrayList;
  */
 public class ParallelFPStreamCombiner extends
     Reducer<IntWritable, TransactionTree, IntWritable, TransactionTree> {
-  
+//  
+//  class OldPatternsCollector extends Collector {
+//    private int docBase;
+//    private IndexReader reader;
+//    private Set<Set<String>> encounteredDocs = Sets.newHashSet();
+//    private final TaskInputOutputContext<IntWritable, TransactionTree, IntWritable, TransactionTree> context;
+//    private final TransactionTree extendedTree;
+//    
+//    private OldPatternsCollector(
+//        TaskInputOutputContext<IntWritable, TransactionTree, IntWritable, TransactionTree> context,
+//        TransactionTree extendedTree) {
+//      super();
+//      this.context = context;
+//      this.extendedTree = extendedTree;
+//    }
+//    
+//    @Override
+//    public void setScorer(Scorer scorer) throws IOException {
+//    }
+//    
+//    @Override
+//    public void setNextReader(IndexReader reader, int docBase) throws IOException {
+//      this.docBase = docBase;
+//      this.reader = reader;
+//    }
+//    
+//    @Override
+//    public void collect(int docId) throws IOException {
+//      Document doc = fisIxReader.document(docId); // +docBase??
+//      String[] terms = fisIxReader.getTermFreqVector(docId,
+//          ItemSetIndexBuilder.AssocField.ITEMSET.name).getTerms();
+//      Set<String> termSet = Sets.newCopyOnWriteArraySet(Arrays.asList(terms));
+//      if (encounteredDocs.contains(termSet)) {
+//        return;
+//      } else {
+//        encounteredDocs.add(termSet);
+//      }
+//      
+//      float patternFreq = Float.parseFloat(doc
+//          .getFieldable(ItemSetIndexBuilder.AssocField.SUPPORT.name)
+//          .stringValue());
+//      // patternFreq /= terms.size(); // (j + 1);
+//      long support = Math.round(timeWeigth.apply(patternFreq, mostRecentTime, intervalStart));
+//      
+//      IntArrayList pattern = new IntArrayList(terms.length);
+//      for (String t : terms) {
+//        if (fMap.containsKey(t)) {
+//          pattern.add(fMap.get(t));
+//        } else {
+//          context
+//              .setStatus("Parallel FPGrowth: Term from previous pattern not part of the current fList: "
+//                  + t);
+//        }
+//      }
+//      extendedTree.addPattern(pattern, support);
+//    }
+//    
+//    @Override
+//    public boolean acceptsDocsOutOfOrder() {
+//      return true;
+//    }
+//  }
+//  
 //  private IndexReader fisIxReader;
+//  private IndexSearcher fisSearcher;
+//  private ItemSetSimilarity fisSimilarity;
+//  private QueryParser fisQparser;
+//  private Analyzer ANALYZER = new TwitterAnalyzer();
+  
 //  private TimeWeightFunction timeWeigth;
 //  private long mostRecentTime;
 //  private long windowSize;
@@ -41,45 +108,47 @@ public class ParallelFPStreamCombiner extends
 //  
 //  private final OpenIntObjectHashMap<String> idToString = new OpenIntObjectHashMap<String>();
 //  private final OpenObjectIntHashMap<String> fMap = new OpenObjectIntHashMap<String>();
+// 
   
   @Override
-  protected void reduce(IntWritable key, Iterable<TransactionTree> values, Context context)
+  protected void reduce(IntWritable key, Iterable<TransactionTree> values, final Context context)
       throws IOException, InterruptedException {
     TransactionTree cTree = new TransactionTree();
     for (TransactionTree tr : values) {
       for (Pair<IntArrayList, Long> p : tr) {
         cTree.addPattern(p.getFirst(), p.getSecond());
       }
-//      if (fisIxReader != null) {
-//        String item = idToString.get(key.get());
-//        Term term = new Term(ItemSetIndexBuilder.AssocField.ITEMSET.name, item);
-//        TermDocs termDocs = fisIxReader.termDocs(term);
-//        while (termDocs.next()) {
-//          int docId = termDocs.doc();
-//          Document doc = fisIxReader.document(docId);
-//          TermFreqVector terms = fisIxReader.getTermFreqVector(docId,
-//              ItemSetIndexBuilder.AssocField.ITEMSET.name);
-//          
-//          float patternFreq = Float.parseFloat(doc
-//              .getFieldable(ItemSetIndexBuilder.AssocField.SUPPORT.name)
-//              .stringValue());
-//          patternFreq /= terms.size(); // (j + 1);
-//          long support = Math.round(timeWeigth.apply(patternFreq, mostRecentTime, intervalStart));
-//          
-//          IntArrayList pattern = new IntArrayList(terms.size());
-//          for (String t : terms.getTerms()) {
-//            if (fMap.containsKey(t)) {
-//              pattern.add(fMap.get(t));
-//            } else {
-//              context
-//                  .setStatus("Parallel FPGrowth: Term from previous pattern not part of the current fList: "
-//                      + t);
-//            }
-//          }
-//          cTree.addPattern(pattern, support);
+    }
+    
+//    final TransactionTree extendedTree = cTree; // this might result in a list:
+//                                                // .getCompressedTree();
+//    if (fisIxReader != null) {
+//      BooleanQuery allPatternsQuery = new BooleanQuery();
+//      Iterator<Pair<IntArrayList, Long>> cTreeIter = cTree.iterator(false);
+//      while (cTreeIter.hasNext()) {
+//        IntArrayList newPatternIds = cTreeIter.next().getFirst();
+//        if (newPatternIds.size() == 1) {
+//          // This is already carried over by loading the older flists
+//          continue;
+//        }
+//        StringBuilder newPattenStr = new StringBuilder();
+//        for (int i = 0; i < newPatternIds.size(); ++i) {
+//          int id = newPatternIds.getQuick(i);
+//          String str = idToString.get(id);
+//          newPattenStr.append(str).append(" ");
+//        }
+//        try {
+//          allPatternsQuery.add(fisQparser.parse(newPattenStr.toString()), Occur.SHOULD);
+//          // fisSearcher.search(fisQparser.parse(newPattenStr.toString()),oldPatternsCollector);
+//        } catch (ParseException e) {
+//          context.setStatus("Parallel FPGrowth: caught a parse exception: " + e.getMessage());
+//          continue;
 //        }
 //      }
-    }
+//      
+//      fisSearcher.search(allPatternsQuery, new OldPatternsCollector(context, extendedTree));
+//      
+//    }
     context.write(key, cTree.getCompressedTree());
   }
   
@@ -152,14 +221,14 @@ public class ParallelFPStreamCombiner extends
 //      // FIXME: this will work only on local filesystem.. like many other parts of the code
 //      Directory fisdir = new MMapDirectory(indexDir);
 //      fisIxReader = IndexReader.open(fisdir);
-//      // fisSearcher = new IndexSearcher(fisIxReader);
-//      // fisSimilarity = new ItemSetSimilarity();
-//      // fisSearcher.setSimilarity(fisSimilarity);
-//      //
-//      // fisQparser = new QueryParser(Version.LUCENE_36,
-//      // ItemSetIndexBuilder.AssocField.ITEMSET.name,
-//      // ANALYZER);
-//      // fisQparser.setDefaultOperator(Operator.AND);
+//      fisSearcher = new IndexSearcher(fisIxReader);
+//      fisSimilarity = new ItemSetSimilarity();
+//      fisSearcher.setSimilarity(fisSimilarity);
+//      
+//      fisQparser = new QueryParser(Version.LUCENE_36,
+//          ItemSetIndexBuilder.AssocField.ITEMSET.name,
+//          ANALYZER);
+//      fisQparser.setDefaultOperator(Operator.AND);
 //      
 //      timeWeigth = TimeWeightFunction.getDefault(params);
 //    }

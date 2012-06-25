@@ -146,43 +146,44 @@ public class ParallelFPStreamMapper extends
             .setStatus("Parallel FPGrowth: Generating Group Dependent transactions for: " + item);
         wGroupID.set(groupID);
         
-        TransactionTree patternTree = new TransactionTree();
-        patternTree.addPattern(tempItems, 1L);
-        if (PATTERNS_FROM_EARLIER_WINDOWS && fisIxReader != null) {
-          Term term = new Term(ItemSetIndexBuilder.AssocField.ITEMSET.name, item);
-          TermDocs termDocs = fisIxReader.termDocs(term);
-          while (termDocs.next()) {
-            int docId = termDocs.doc();
-            Document doc = fisIxReader.document(docId);
-            TermFreqVector terms = fisIxReader.getTermFreqVector(docId,
-                ItemSetIndexBuilder.AssocField.ITEMSET.name);
-            
-            Set<Integer> appearingGroups = Sets.newHashSet();
-            IntArrayList pattern = new IntArrayList(terms.size());
-            for (String t : terms.getTerms()) {
-              if (fMap.containsKey(t)) {
-                int tId = fMap.get(t);
-                pattern.add(tId);
-                appearingGroups.add(PFPGrowth.getGroupHash(tId, numGroups));
-              } else {
-                context
-                    .setStatus("Parallel FPGrowth: Term from previous pattern not part of the current fList: "
-                        + t);
-              }
-            }
-            
-            float patternFreq = Float.parseFloat(doc
-                .getFieldable(ItemSetIndexBuilder.AssocField.SUPPORT.name)
-                .stringValue());
-            // patternFreq /= (j + 1);
-            // will be added that many times
-            patternFreq /= (terms.size() * appearingGroups.size());
-            long support = Math.round(timeWeigth.apply(patternFreq, mostRecentTime, intervalStart));
-            
-            patternTree.addPattern(pattern, support);
-          }
-        }
-        context.write(wGroupID, patternTree);
+//        TransactionTree patternTree = new TransactionTree();
+//        patternTree.addPattern(tempItems, 1L);
+//        if (PATTERNS_FROM_EARLIER_WINDOWS && fisIxReader != null) {
+//          Term term = new Term(ItemSetIndexBuilder.AssocField.ITEMSET.name, item);
+//          TermDocs termDocs = fisIxReader.termDocs(term);
+//          while (termDocs.next()) {
+//            int docId = termDocs.doc();
+//            Document doc = fisIxReader.document(docId);
+//            TermFreqVector terms = fisIxReader.getTermFreqVector(docId,
+//                ItemSetIndexBuilder.AssocField.ITEMSET.name);
+//            
+//            Set<Integer> appearingGroups = Sets.newHashSet();
+//            IntArrayList pattern = new IntArrayList(terms.size());
+//            for (String t : terms.getTerms()) {
+//              if (fMap.containsKey(t)) {
+//                int tId = fMap.get(t);
+//                pattern.add(tId);
+//                appearingGroups.add(PFPGrowth.getGroupHash(tId, numGroups));
+//              } else {
+//                context
+//                    .setStatus("Parallel FPGrowth: Term from previous pattern not part of the current fList: "
+//                        + t);
+//              }
+//            }
+//            
+//            float patternFreq = Float.parseFloat(doc
+//                .getFieldable(ItemSetIndexBuilder.AssocField.SUPPORT.name)
+//                .stringValue());
+//            // patternFreq /= (j + 1);
+//            // will be added that many times
+//            patternFreq /= (terms.size() * appearingGroups.size());
+//            long support = Math.round(timeWeigth.apply(patternFreq, mostRecentTime, intervalStart));
+//            
+//            patternTree.addPattern(pattern, support);
+//          }
+//        }
+//        context.write(wGroupID, patternTree);
+        context.write(wGroupID, new TransactionTree(tempItems, 1L));
       }
       groups.add(groupID);
     }
@@ -247,46 +248,46 @@ public class ParallelFPStreamMapper extends
     
     prependUserName = true;
     
-    if (PATTERNS_FROM_EARLIER_WINDOWS) {
-      Configuration conf = context.getConfiguration();
-      Path outPath = new Path(params.get(PFPGrowth.OUTPUT));
-      Path timeRoot = outPath.getParent().getParent();
-      FileSystem fs = FileSystem.get(conf);
-      FileStatus[] otherWindows = fs.listStatus(timeRoot);
-      mostRecentTime = Long.MIN_VALUE;
-      Path mostRecentPath = null;
-      for (int f = otherWindows.length - 1; f >= 0; --f) {
-        Path p = otherWindows[f].getPath();
-        long pathStartTime = Long.parseLong(p.getName());
-        // should have used end time, but it doesn't make a difference,
-        // AS LONG AS windows don't overlap
-        if (pathStartTime < intervalStart && pathStartTime > mostRecentTime) {
-          p = fs.listStatus(p)[0].getPath();
-          p = new Path(p, "index");
-          if (fs.exists(p)) {
-            mostRecentTime = pathStartTime;
-            mostRecentPath = p;
-          }
-        } else if (mostRecentPath != null) {
-          break;
-        }
-      }
-      if (mostRecentPath != null) {
-        File indexDir = FileUtils.toFile(mostRecentPath.toUri().toURL());
-        // FIXME: this will work only on local filesystem.. like many other parts of the code
-        Directory fisdir = new MMapDirectory(indexDir);
-        fisIxReader = IndexReader.open(fisdir);
-        // fisSearcher = new IndexSearcher(fisIxReader);
-        // fisSimilarity = new ItemSetSimilarity();
-        // fisSearcher.setSimilarity(fisSimilarity);
-        //
-        // fisQparser = new QueryParser(Version.LUCENE_36,
-        // ItemSetIndexBuilder.AssocField.ITEMSET.name,
-        // ANALYZER);
-        // fisQparser.setDefaultOperator(Operator.AND);
-        
-        timeWeigth = TimeWeightFunction.getDefault(params);
-      }
-    }
+//    if (PATTERNS_FROM_EARLIER_WINDOWS) {
+//      Configuration conf = context.getConfiguration();
+//      Path outPath = new Path(params.get(PFPGrowth.OUTPUT));
+//      Path timeRoot = outPath.getParent().getParent();
+//      FileSystem fs = FileSystem.get(conf);
+//      FileStatus[] otherWindows = fs.listStatus(timeRoot);
+//      mostRecentTime = Long.MIN_VALUE;
+//      Path mostRecentPath = null;
+//      for (int f = otherWindows.length - 1; f >= 0; --f) {
+//        Path p = otherWindows[f].getPath();
+//        long pathStartTime = Long.parseLong(p.getName());
+//        // should have used end time, but it doesn't make a difference,
+//        // AS LONG AS windows don't overlap
+//        if (pathStartTime < intervalStart && pathStartTime > mostRecentTime) {
+//          p = fs.listStatus(p)[0].getPath();
+//          p = new Path(p, "index");
+//          if (fs.exists(p)) {
+//            mostRecentTime = pathStartTime;
+//            mostRecentPath = p;
+//          }
+//        } else if (mostRecentPath != null) {
+//          break;
+//        }
+//      }
+//      if (mostRecentPath != null) {
+//        File indexDir = FileUtils.toFile(mostRecentPath.toUri().toURL());
+//        // FIXME: this will work only on local filesystem.. like many other parts of the code
+//        Directory fisdir = new MMapDirectory(indexDir);
+//        fisIxReader = IndexReader.open(fisdir);
+//        // fisSearcher = new IndexSearcher(fisIxReader);
+//        // fisSimilarity = new ItemSetSimilarity();
+//        // fisSearcher.setSimilarity(fisSimilarity);
+//        //
+//        // fisQparser = new QueryParser(Version.LUCENE_36,
+//        // ItemSetIndexBuilder.AssocField.ITEMSET.name,
+//        // ANALYZER);
+//        // fisQparser.setDefaultOperator(Operator.AND);
+//        
+//        timeWeigth = TimeWeightFunction.getDefault(params);
+//      }
+//    }
   }
 }
