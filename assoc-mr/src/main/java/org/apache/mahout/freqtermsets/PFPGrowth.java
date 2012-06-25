@@ -20,6 +20,7 @@ package org.apache.mahout.freqtermsets;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.charset.Charset;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -43,6 +44,7 @@ import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.SequenceFile;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.JobContext;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.hadoop.mapreduce.lib.input.SequenceFileInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
@@ -57,11 +59,14 @@ import org.apache.mahout.freqtermsets.convertors.string.TopKStringPatterns;
 import org.apache.mahout.freqtermsets.fpgrowth.FPGrowth;
 import org.apache.mahout.freqtermsets.stream.TimeWeightFunction;
 import org.apache.mahout.math.list.IntArrayList;
+import org.apache.mahout.math.map.OpenIntObjectHashMap;
+import org.apache.mahout.math.map.OpenObjectIntHashMap;
 import org.apache.mahout.math.map.OpenObjectLongHashMap;
 
 import ca.uwaterloo.twitter.ItemSetIndexBuilder;
 
 import com.google.common.collect.Lists;
+import com.google.common.hash.Hashing;
 import com.twitter.corpus.data.CSVTweetInputFormat;
 import com.twitter.corpus.data.util.PartitionByTimestamp;
 
@@ -121,6 +126,41 @@ public final class PFPGrowth implements Callable<Void> {
   // END YA
   // private PFPGrowth() {
   // }
+  
+ public static void loadEarlierFlists(JobContext context, Parameters params, long intervalStart, 
+     OpenIntObjectHashMap<String> idStringMapOut, OpenObjectIntHashMap<String> stringIdMapOut) 
+         throws IOException{
+   // I resist the urge to cache this list because I don't know what exactly would happen 
+   // when the job is run in hadoop where every job has its own JVM.. will static 
+   // fields somehow leak? Can I be sure that the static WeakHashMap used as a cache is mine?
+   // FINALLY.. the list would be loaded only twice, once for mapper, and once for reducer
+   
+   OpenObjectLongHashMap<String> prevFLists = PFPGrowth.readOlderCachedFLists(context
+       .getConfiguration(),
+       intervalStart, TimeWeightFunction.getDefault(params));
+   
+   LinkedList<String> terms = Lists.newLinkedList();
+   prevFLists.keysSortedByValue(terms);
+   Iterator<String> termsIter = terms.descendingIterator();
+   while (termsIter.hasNext()) {
+     
+     String t = termsIter.next();
+     int id = Hashing.murmur3_32().hashString(t, Charset.forName("UTF-8")).asInt();
+     int c = 0;
+     while (idStringMapOut.containsKey(id)) {
+       // Best effort
+       if (c < t.length()) {
+         id = Hashing.murmur3_32((int) t.charAt(c++)).hashString(t, Charset.forName("UTF-8"))
+             .asInt();
+       } else {
+         ++id;
+       }
+     }
+     
+     idStringMapOut.put(id, t);
+     stringIdMapOut.put(t, id);
+   }
+ }
   
   public static long readFMap(Configuration conf, OpenObjectLongHashMap<String> fMap)
       throws IOException {

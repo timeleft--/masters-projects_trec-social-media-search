@@ -64,7 +64,7 @@ import edu.umd.cloud9.io.pair.PairOfStringLong;
  */
 public class ParallelFPStreamMapper extends
     Mapper<PairOfStringLong, Text, IntWritable, TransactionTree> {
-  private final OpenObjectIntHashMap<String> fMap = new OpenObjectIntHashMap<String>();
+  private final OpenObjectIntHashMap<String> stringToIdMap = new OpenObjectIntHashMap<String>();
   private int numGroups;
   private long intervalStart;
   private long intervalEnd;
@@ -74,7 +74,6 @@ public class ParallelFPStreamMapper extends
   private long windowSize;
   private long endTimestamp;
   private boolean prependUserName;
-  
   
   @Override
   protected void map(PairOfStringLong key, Text input, Context context)
@@ -103,8 +102,8 @@ public class ParallelFPStreamMapper extends
     items.setRepeatHashTag(repeatHashTag);
     while (items.hasNext()) {
       String item = items.next();
-      if (fMap.containsKey(item) && !item.trim().isEmpty()) {
-        itemSet.put(fMap.get(item), item);
+      if (stringToIdMap.containsKey(item) && !item.trim().isEmpty()) {
+        itemSet.put(stringToIdMap.get(item), item);
       }
     }
     
@@ -117,7 +116,7 @@ public class ParallelFPStreamMapper extends
       // generate group dependent shards
       int itemId = itemArr.get(j);
       // int groupID = PFPGrowth.getGroup(item, maxPerGroup);
-     
+      
       int groupID = PFPGrowth.getGroupHash(itemId, numGroups);
       
       if (!groups.contains(groupID)) {
@@ -148,30 +147,11 @@ public class ParallelFPStreamMapper extends
         Long.toString(intervalEnd - intervalStart)));
     endTimestamp = Math.min(intervalEnd, intervalStart + windowSize - 1);
     
-    OpenIntHashSet usedIds = new OpenIntHashSet();
-    OpenObjectLongHashMap<String> prevFLists = PFPGrowth.readOlderCachedFLists(context
-        .getConfiguration(),
-        intervalStart, TimeWeightFunction.getDefault(params));
-    
-    LinkedList<String> terms = Lists.newLinkedList();
-    prevFLists.keysSortedByValue(terms);
-    Iterator<String> termsIter = terms.descendingIterator();
-    while (termsIter.hasNext()) {
-      String t = termsIter.next();
-      int id = Hashing.murmur3_32().hashString(t, Charset.forName("UTF-8")).asInt();
-      int c = 0;
-      while (usedIds.contains(id)) {
-        // Best effort
-        if (c < t.length()) {
-          id = Hashing.murmur3_32((int) t.charAt(c++)).hashString(t, Charset.forName("UTF-8"))
-              .asInt();
-        } else {
-          ++id;
-        }
-      }
-      fMap.put(t, id);
-      usedIds.add(id);
-    }
+    PFPGrowth.loadEarlierFlists(context,
+        params,
+        intervalStart,
+        new OpenIntObjectHashMap<String>(),
+        stringToIdMap);
     
     repeatHashTag = Boolean.parseBoolean(params.get(TokenIterator.PARAM_REPEAT_HASHTAG, "false"));
     

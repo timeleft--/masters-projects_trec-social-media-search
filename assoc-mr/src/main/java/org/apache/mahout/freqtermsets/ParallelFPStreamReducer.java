@@ -159,13 +159,7 @@ public class ParallelFPStreamReducer extends
   public static final String MIN_WORDS_FOR_LANG_ID = "lenLangId";
   public static final int MIN_WORDS_FOR_LANG_ID_DEFAULT = 3;
   
-  // private final List<String> featureReverseMap = Lists.newArrayList();
-  // private final LongArrayList freqList = new LongArrayList();
-  // private final LinkedHashMap<Integer, String> reverseMap = Maps.newLinkedHashMap();
   private final OpenIntObjectHashMap<String> idStringMap = new OpenIntObjectHashMap<String>();
-  // private final OpenObjectIntHashMap<Integer> ixIdMap = new OpenObjectIntHashMap<Integer>();
-  // private final OpenIntObjectHashMap<Integer> idIxMap = new OpenIntObjectHashMap<Integer>();
-  // private final OpenIntIntHashMap idFreqMap = new OpenIntIntHashMap();
   private final OpenObjectIntHashMap<String> stringIdMap = new OpenObjectIntHashMap<String>();
   
   private TimeWeightFunction timeWeigth;
@@ -175,13 +169,9 @@ public class ParallelFPStreamReducer extends
   
   private int minSupport = 3;
   
-  private int numFeatures;
-  // private int maxPerGroup;
   private int numGroups;
   
-  // private boolean useFP2 = true;
   private int minWordsForLangDetection;
-  // private double superiorityRatio;
   private boolean repeatHashTag;
   private long intervalStart;
   private long intervalEnd;
@@ -203,7 +193,7 @@ public class ParallelFPStreamReducer extends
     @Override
     public Pair<List<Integer>, Long> next() {
       Pair<IntArrayList, Long> innerNext = innerIter.next();
-      return new Pair(innerNext.getFirst().toList(), innerNext.getSecond());
+      return new Pair<List<Integer>, Long>(innerNext.getFirst().toList(), innerNext.getSecond());
     }
     
     @Override
@@ -285,61 +275,19 @@ public class ParallelFPStreamReducer extends
     Parameters params = new Parameters(conf.get(PFPGrowth.PFP_PARAMETERS, ""));
     
     intervalStart = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_START));
-    // Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP))); //GMT23JAN2011)));
     intervalEnd = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_END));
-    // Long.toString(Long.MAX_VALUE)));
     windowSize = Long.parseLong(params.get(PFPGrowth.PARAM_WINDOW_SIZE,
         Long.toString(intervalEnd - intervalStart)));
     endTimestamp = Math.min(intervalEnd, intervalStart + windowSize - 1);
     
-    OpenObjectLongHashMap<String> prevFLists = PFPGrowth.readOlderCachedFLists(context
-        .getConfiguration(),
-        intervalStart, TimeWeightFunction.getDefault(params));
-    
-    LinkedList<String> terms = Lists.newLinkedList();
-    prevFLists.keysSortedByValue(terms);
-    Iterator<String> termsIter = terms.descendingIterator();
-    int ix = 0;
-    while (termsIter.hasNext()) {
-      
-      String t = termsIter.next();
-      // featureReverseMap.add(e.getFirst());
-      // freqList.add(e.getSecond());
-      int id = Hashing.murmur3_32().hashString(t, Charset.forName("UTF-8")).asInt();
-      int c = 0;
-      while (idStringMap.containsKey(id)) {
-        // Best effort
-        if (c < t.length()) {
-          id = Hashing.murmur3_32((int) t.charAt(c++)).hashString(t, Charset.forName("UTF-8"))
-              .asInt();
-        } else {
-          ++id;
-        }
-      }
-      
-      // idFreqMap.put(id, e.getSecond().intValue());
-      idStringMap.put(id, t);
-      stringIdMap.put(t, id);
-      
-      // idIxMap.put(id, ix);
-      // ixIdMap.put(ix, id);
-      
-      ++ix;
-    }
+    PFPGrowth.loadEarlierFlists(context, params, intervalStart, idStringMap, stringIdMap);
     
     maxHeapSize = Integer.valueOf(params.get(PFPGrowth.MAX_HEAPSIZE, "50"));
     minSupport = Integer.valueOf(params.get(PFPGrowth.MIN_SUPPORT, "3"));
     
-    // maxPerGroup = params.getInt(PFPGrowth.MAX_PER_GROUP, 0);
     numGroups = params.getInt(PFPGrowth.NUM_GROUPS, PFPGrowth.NUM_GROUPS_DEFAULT);
     
-    // numFeatures = featureReverseMap.size();
-    numFeatures = ix;
-    
-    // useFP2 = "true".equals(params.get(PFPGrowth.USE_FPG2));
     minWordsForLangDetection = params.getInt(MIN_WORDS_FOR_LANG_ID, MIN_WORDS_FOR_LANG_ID_DEFAULT);
-    // superiorityRatio = Double.parseDouble(params.get(SUPERIORITY_RATIO_PARAM, "1.11"));
-    // useFP2 = !"false".equals(params.get(PFPGrowth.USE_FPG2));
     repeatHashTag = Boolean.parseBoolean(params.get(TokenIterator.PARAM_REPEAT_HASHTAG, "false"));
     
     Path outPath = new Path(params.get(PFPGrowth.OUTPUT));
