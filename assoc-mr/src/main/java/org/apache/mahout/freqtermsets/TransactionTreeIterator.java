@@ -56,11 +56,14 @@ final class TransactionTreeIterator extends AbstractIterator<Pair<IntArrayList, 
       int[] top = depth.peek();
       while (top[1] + 1 == transactionTree.childCount(top[0])) {
         depth.pop();
+        if (depth.isEmpty()) {
+          return endOfData();
+        }
         top = depth.peek();
       }
-      if (depth.isEmpty()) {
-        return endOfData();
-      }
+//      if (depth.isEmpty()) {
+//        return endOfData();
+//      }
       top[1]++;
       childId = transactionTree.childAtIndex(top[0], top[1]);
       depth.push(new int[] { childId, -1 });

@@ -16,7 +16,8 @@ public abstract class TimeWeightFunction {
     @Override
     public float apply(float orig, long origTimestamp, long currTimestamp) {
       long numWindows = (currTimestamp - origTimestamp) / windowLength;
-      double result = orig * Math.pow(coeff, numWindows);
+//      double result = orig * Math.pow(coeff, numWindows);
+      double result = orig - numWindows *  (1-coeff) * orig;
       return (float) result;
     }
     

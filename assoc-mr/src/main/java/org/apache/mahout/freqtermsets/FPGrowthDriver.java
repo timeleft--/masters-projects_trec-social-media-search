@@ -117,9 +117,9 @@ public final class FPGrowthDriver extends AbstractJob {
         "j",
         "The number of PFP jobs, because in case of intervals resources are under utilized");
     
-    addOption(PFPGrowth.INDEX_OUT,
-        "ix",
-        "The local folder to which the frequent itemset index will be written");
+//    addOption(PFPGrowth.INDEX_OUT,
+//        "ix",
+//        "The local folder to which the frequent itemset index will be written");
     
     if (parseArguments(args) == null) {
       return -1;
@@ -204,9 +204,9 @@ public final class FPGrowthDriver extends AbstractJob {
       params.set(PFPGrowth.PARAM_INTERVAL_START, getOption(PFPGrowth.PARAM_INTERVAL_START));
     }
     
-    if (hasOption(PFPGrowth.INDEX_OUT)) {
-      params.set(PFPGrowth.INDEX_OUT, getOption(PFPGrowth.INDEX_OUT));
-    }
+//    if (hasOption(PFPGrowth.INDEX_OUT)) {
+//      params.set(PFPGrowth.INDEX_OUT, getOption(PFPGrowth.INDEX_OUT));
+//    }
     
     if (hasOption(TokenIterator.PARAM_REPEAT_HASHTAG)) {
       params.set(TokenIterator.PARAM_REPEAT_HASHTAG, "true");

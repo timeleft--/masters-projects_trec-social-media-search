@@ -101,13 +101,13 @@ public final class PFPGrowth implements Callable<Void> {
   public static final String GROUP_FIS_IN = "gfisIn";
   public static final String PARAM_INTERVAL_START = "startTime";
   public static final String PARAM_INTERVAL_END = "endTime";
-  public static final String INDEX_OUT = "index";
+//  public static final String INDEX_OUT = "index";
   
   public static final String PARAM_WINDOW_SIZE = "windowSize";
   
   // TODO command line
   private static final boolean FPSTREAM = true;
-  public static final float FPSTREAM_LINEAR_DECAY_COEFF = 0.99f;
+  public static final float FPSTREAM_LINEAR_DECAY_COEFF = 0.9f;
   private static final double AVG_TOKENS_PER_DOC = 7;
   
   // private static final long DIRICHLET_SMOOTHING_PARAM = 3579L;
@@ -625,13 +625,13 @@ public final class PFPGrowth implements Callable<Void> {
     }
     startAggregating(params, conf);
     
-    String indexDirStr = params.get(INDEX_OUT);
-    if (indexDirStr == null || indexDirStr.isEmpty()) {
-      indexDirStr = FilenameUtils.concat(params.get(OUTPUT), "index");
-    } else {
-      indexDirStr = FilenameUtils.concat(indexDirStr, startTime);
-      indexDirStr = FilenameUtils.concat(indexDirStr, endTime);
-    }
+    String indexDirStr;// = params.get(INDEX_OUT);
+//    if (indexDirStr == null || indexDirStr.isEmpty()) {
+    indexDirStr = FilenameUtils.concat(params.get(OUTPUT), "index");
+//    } else {
+//      indexDirStr = FilenameUtils.concat(indexDirStr, startTime);
+//      indexDirStr = FilenameUtils.concat(indexDirStr, endTime);
+//    }
     File indexDir = new File(indexDirStr);
     
     // clean up
@@ -796,10 +796,9 @@ public final class PFPGrowth implements Callable<Void> {
     job.setInputFormatClass(CSVTweetInputFormat.class);
     if (FPSTREAM) {
       job.setMapperClass(ParallelFPStreamMapper.class);
-      job.setCombinerClass(ParallelFPGrowthCombiner.class);
+      job.setCombinerClass(ParallelFPStreamCombiner.class);
       job.setReducerClass(ParallelFPStreamReducer.class);
     } else {
-      
       job.setMapperClass(ParallelFPGrowthMapper.class);
       job.setCombinerClass(ParallelFPGrowthCombiner.class);
       job.setReducerClass(ParallelFPGrowthReducer.class);
