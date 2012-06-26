@@ -27,7 +27,7 @@ import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.apache.lucene.document.Document;
-import org.apache.lucene.document.Field;
+import org.apache.lucene.document.Fieldable;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.TermFreqVector;
@@ -55,6 +55,7 @@ import org.slf4j.LoggerFactory;
 import ca.uwaterloo.twitter.ItemSetIndexBuilder;
 import ca.uwaterloo.twitter.ItemSetSimilarity;
 import ca.uwaterloo.twitter.TwitterAnalyzer;
+import ca.uwaterloo.twitter.TwitterIndexBuilder.TweetField;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -117,20 +118,6 @@ public class FISQueryExpander {
     public final String name;
     
     TermWeigting(String s) {
-      name = s;
-    }
-  };
-  
-  public static enum TweetField {
-    ID("id"),
-    SCREEN_NAME("screen_name"),
-    CREATED_AT("create_at"),
-    TEXT("text"),
-    DAY("day");
-    
-    public final String name;
-    
-    TweetField(String s) {
       name = s;
     }
   };
@@ -315,15 +302,15 @@ public class FISQueryExpander {
           int t = 0;
           for (ScoreDoc scoreDoc : qEx.twtSearcher.search(twtQ, NUM_HITS_SHOWN_DEFAULT).scoreDocs) {
             Document hit = qEx.twtSearcher.doc(scoreDoc.doc);
-            Field created = hit.getField(TweetField.CREATED_AT.name);
+            Fieldable created = hit.getFieldable(TweetField.TIMESTAMP.name);
 //            out.println();
             out.println(String.format("%4d (%.4f): %s\t%s\t%s\t%s",
                 ++t,
                 scoreDoc.score,
-                hit.getField(TweetField.TEXT.name).stringValue(),
-                hit.getField(TweetField.SCREEN_NAME.name).stringValue(),
+                hit.getFieldable(TweetField.TEXT.name).stringValue(),
+                hit.getFieldable(TweetField.SCREEN_NAME.name).stringValue(),
                 (created == null ? "" : created.stringValue()),
-                hit.getField(TweetField.ID.name).stringValue()));
+                hit.getFieldable(TweetField.ID.name).stringValue()));
             
             if (t % 100 == 0) {
               LOG.trace(t + " woohoo, here's another " + 100);
@@ -793,7 +780,7 @@ public class FISQueryExpander {
       throws IOException {
     
     OpenObjectFloatHashMap<Set<String>> itemsets = new OpenObjectFloatHashMap<Set<String>>();
-    OpenObjectIntHashMap<Set<String>> isToDoc = new OpenObjectIntHashMap<Set<String>>();
+//    OpenObjectIntHashMap<Set<String>> isToDoc = new OpenObjectIntHashMap<Set<String>>();
     
     IntArrayList keyList = new IntArrayList(rs.size());
     rs.keysSortedByValue(keyList);

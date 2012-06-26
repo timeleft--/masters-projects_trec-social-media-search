@@ -30,7 +30,9 @@ import ca.uwaterloo.twitter.TokenIterator.LatinTokenIterator;
 
 import com.google.common.collect.Sets;
 
+import edu.umd.cloud9.io.pair.PairOfLongs;
 import edu.umd.cloud9.io.pair.PairOfStringLong;
+import edu.umd.cloud9.io.pair.PairOfStrings;
 
 /**
  * 
@@ -39,7 +41,7 @@ import edu.umd.cloud9.io.pair.PairOfStringLong;
  * 
  */
 public class ParallelCountingMapper extends
-    Mapper<PairOfStringLong, Text, Text, LongWritable> {
+    Mapper<PairOfLongs, PairOfStrings, Text, LongWritable> {
   
   private static final LongWritable ONE = new LongWritable(1);
   private static final boolean COUNT_DOCUMENT_OCCURRENCES = true;
@@ -53,10 +55,9 @@ public class ParallelCountingMapper extends
   // private Pattern splitter;
   
   @Override
-  protected void map(PairOfStringLong key, Text input, Context context)
+  protected void map(PairOfLongs key, PairOfStrings input, Context context)
       throws IOException, InterruptedException {
     
-    String screenname = key.getLeftElement();
     long timestamp = key.getRightElement();
     if (timestamp < intervalStart) {
       return;
@@ -68,9 +69,9 @@ public class ParallelCountingMapper extends
     // String[] items = splitter.split(input.toString());
     String inputStr;
     if(prependUserName){
-      inputStr = "@" + screenname + ": " + input;
+      inputStr = "@" + input.getLeftElement() + ": " + input.getRightElement();
     } else {
-      inputStr = input.toString();
+      inputStr = input.getRightElement();
     }
     LatinTokenIterator items = new LatinTokenIterator(inputStr);
     items.setRepeatHashTag(repeatHashTag);

@@ -1,4 +1,4 @@
-package ca.uwaterloo.twitter.queryexpand;
+package ca.uwaterloo.twitter;
 
 import org.apache.lucene.search.DefaultSimilarity;
 

@@ -62,7 +62,7 @@ public class ItemSetIndexBuilder {
   /**
    * @param args
    * @throws IOException
-   * @throws NoSuchAlgorithmException 
+   * @throws NoSuchAlgorithmException
    */
   @SuppressWarnings("static-access")
   public static void main(String[] args) throws IOException, NoSuchAlgorithmException {
@@ -91,14 +91,14 @@ public class ItemSetIndexBuilder {
     File indexLocation = new File(cmdline.getOptionValue(INDEX_OPTION));
     
     String seqPath = cmdline.getOptionValue(INPUT_OPTION);
-    seqPath += File.separator + PFPGrowth.FREQUENT_PATTERNS; //"frequentpatterns";
+    seqPath += File.separator + PFPGrowth.FREQUENT_PATTERNS; // "frequentpatterns";
     LOG.info("Indexing " + seqPath);
-    
     
     buildIndex(new Path(seqPath), indexLocation);
   }
   
-  public static void buildIndex(Path inPath, File indexDir) throws CorruptIndexException, LockObtainFailedException, IOException, NoSuchAlgorithmException{
+  public static void buildIndex(Path inPath, File indexDir) throws CorruptIndexException,
+      LockObtainFailedException, IOException, NoSuchAlgorithmException {
     
     FileSystem fs = FileSystem.get(new Configuration());
     if (!fs.exists(inPath)) {
@@ -136,7 +136,10 @@ public class ItemSetIndexBuilder {
           for (Pair<List<String>, Long> pattern : second.getPatterns()) {
             
             List<String> items = pattern.getFirst();
-            if (items.size() > 1 && items.get(1).charAt(0) == '_') {
+            if (items.size() < 2) {
+              continue;
+            }
+            if (items.get(1).charAt(0) == '_') {
               // metadata
               // TODO: read probabilities of languages of patterns
               continue;
@@ -147,32 +150,33 @@ public class ItemSetIndexBuilder {
             
             Document doc = new Document();
             
-// Itemsets are sorted by term frequency, so they are not really sets
-// That is, I don't have to worry like I do below
-//            Set<String> itemset = Sets.newCopyOnWriteArraySet(pattern.getFirst());
+            // Itemsets are sorted by term frequency, so they are not really sets
+            // That is, I don't have to worry like I do below
+            // Set<String> itemset = Sets.newCopyOnWriteArraySet(pattern.getFirst());
             
             // update the input of MD5
             MessageDigest md5 = MessageDigest.getInstance("MD5");
             md5.reset();
             md5.update(items.toString().getBytes());
-
+            
             // get the output/ digest size and hash it
             byte[] digest = md5.digest();
-
+            
             StringBuffer hexString = new StringBuffer();
             for (int i = 0; i < digest.length; i++) {
               String byteStr = Integer.toHexString(0xFF & digest[i]);
-              if(byteStr.length() < 2){
+              if (byteStr.length() < 2) {
                 byteStr = "0" + byteStr;
               }
               hexString.append(byteStr);
             }
-
+            
             doc.add(new Field(AssocField.ID.name, hexString + "",
                 Store.YES, Index.NOT_ANALYZED_NO_NORMS));
-           
-//            doc.add(new Field(AssocField.ID.name, items.toString().replaceAll("[\\S\\[\\(\\)\\]\\,]", "") + "",
-//              Store.YES, Index.NOT_ANALYZED_NO_NORMS));
+            
+            // doc.add(new Field(AssocField.ID.name,
+            // items.toString().replaceAll("[\\S\\[\\(\\)\\]\\,]", "") + "",
+            // Store.YES, Index.NOT_ANALYZED_NO_NORMS));
             
             doc.add(new Field(AssocField.ITEMSET.name, items.toString(), Store.NO,
                 Index.ANALYZED,

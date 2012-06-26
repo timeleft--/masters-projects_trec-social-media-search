@@ -38,7 +38,7 @@ import ca.uwaterloo.twitter.TokenIterator;
 public final class FPGrowthDriver extends AbstractJob {
   
   private static final Logger log = LoggerFactory.getLogger(FPGrowthDriver.class);
-  private static final String DEFAULT_NUM_THREADS = "5";
+  private static final String DEFAULT_NUM_THREADS = "1";
   private static final String PARAM_NUM_THREADS = "nJobs";
   
   private FPGrowthDriver() {
@@ -222,6 +222,9 @@ public final class FPGrowthDriver extends AbstractJob {
     HadoopUtil.delete(conf, outputDir);
     
     int nThreads = Integer.parseInt(getOption(PARAM_NUM_THREADS, DEFAULT_NUM_THREADS));
+    if(nThreads != 1){
+      throw new UnsupportedOperationException("We use mining results from earlier windows. j = 1");
+    }
     ExecutorService exec = Executors.newFixedThreadPool(nThreads);
     Future<Void> lastFuture = null;
     

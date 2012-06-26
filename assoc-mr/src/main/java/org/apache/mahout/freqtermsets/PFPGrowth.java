@@ -113,7 +113,7 @@ public final class PFPGrowth implements Callable<Void> {
   // TODO command line
   private static final boolean FPSTREAM = true;
   public static final float FPSTREAM_LINEAR_DECAY_COEFF = 0.9f;
-//  private static final double AVG_TOKENS_PER_DOC = 7;
+  // private static final double AVG_TOKENS_PER_DOC = 7;
   public static final String PARAM_MAX_PATTERN_LOAD_LAG = "maxLag";
   public static final String DEFAULT_MAX_PATTERN_LOAD_LAG = Long.toString(24 * 3600 * 1000);
   
@@ -554,7 +554,7 @@ public final class PFPGrowth implements Callable<Void> {
   }
   
   public static int getGroupFromHash(int attrHash, int numGroups) {
-    int maskLen = (int) MathUtils.log(2, numGroups-1) + 1;
+    int maskLen = (int) MathUtils.log(2, numGroups - 1) + 1;
     int mask = (int) Math.pow(2, maskLen) - 1;
     int result = 0;
     
@@ -575,7 +575,7 @@ public final class PFPGrowth implements Callable<Void> {
       attrHash >>>= maskLen;
     }
     
-    return result + 1; //group numbers are not zero based
+    return result + 1; // group numbers are not zero based
   }
   
   // Modulo doesn't work because the hash is not necessarily positive
@@ -661,7 +661,8 @@ public final class PFPGrowth implements Callable<Void> {
             return Long.parseLong(p.getName()) < currStartTime;
           }
         })) {
-          
+          // TODO: At such low frequency and support, does pruning out items with less frequency
+          // than minFreq cause loosing itemsets that are frequent but through a longer time frame
           cacheFList(params, conf,
               fs.listStatus(earlierWindow.getPath())[0].getPath().toString(),
               minSupport, minFr, prunePct);

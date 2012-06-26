@@ -30,7 +30,9 @@ import org.apache.mahout.math.set.OpenIntHashSet;
 
 import ca.uwaterloo.twitter.TokenIterator;
 import ca.uwaterloo.twitter.TokenIterator.LatinTokenIterator;
+import edu.umd.cloud9.io.pair.PairOfLongs;
 import edu.umd.cloud9.io.pair.PairOfStringLong;
+import edu.umd.cloud9.io.pair.PairOfStrings;
 
 /**
  * maps each transaction to all unique items groups in the transaction. mapper
@@ -38,7 +40,7 @@ import edu.umd.cloud9.io.pair.PairOfStringLong;
  * 
  */
 public class ParallelFPGrowthMapper extends
-    Mapper<PairOfStringLong, Text, IntWritable, TransactionTree> {
+    Mapper<PairOfLongs, PairOfStrings, IntWritable, TransactionTree> {
   
   private final OpenObjectIntHashMap<String> fMap = new OpenObjectIntHashMap<String>();
   // private Pattern splitter;
@@ -53,10 +55,9 @@ public class ParallelFPGrowthMapper extends
   private boolean prependUserName;
   
   @Override
-  protected void map(PairOfStringLong key, Text input, Context context)
+  protected void map(PairOfLongs key, PairOfStrings input, Context context)
       throws IOException, InterruptedException {
     
-    String screenname = key.getLeftElement();
     long timestamp = key.getRightElement();
     if (timestamp < intervalStart) {
       return;
@@ -73,9 +74,9 @@ public class ParallelFPGrowthMapper extends
     String inputStr;
     // for (String item : items) {
     if(prependUserName){
-      inputStr = "@" + screenname + ": " + input;
+      inputStr = "@" + input.getLeftElement() + ": " + input.getRightElement();
     } else {
-      inputStr = input.toString();
+      inputStr = input.getRightElement();
     }
     
     LatinTokenIterator items = new LatinTokenIterator(inputStr);

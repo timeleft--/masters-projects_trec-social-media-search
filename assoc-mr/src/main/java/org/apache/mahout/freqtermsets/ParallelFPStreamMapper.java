@@ -17,45 +17,22 @@
 
 package org.apache.mahout.freqtermsets;
 
-import java.io.File;
 import java.io.IOException;
-import java.nio.charset.Charset;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.Set;
 
-import org.apache.commons.io.FileUtils;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileStatus;
-import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Mapper;
-import org.apache.lucene.document.Document;
-import org.apache.lucene.index.IndexReader;
-import org.apache.lucene.index.Term;
-import org.apache.lucene.index.TermDocs;
-import org.apache.lucene.index.TermFreqVector;
-import org.apache.lucene.store.Directory;
-import org.apache.lucene.store.MMapDirectory;
 import org.apache.mahout.common.Parameters;
-import org.apache.mahout.freqtermsets.stream.TimeWeightFunction;
 import org.apache.mahout.math.list.IntArrayList;
 import org.apache.mahout.math.map.OpenIntObjectHashMap;
 import org.apache.mahout.math.map.OpenObjectIntHashMap;
-import org.apache.mahout.math.map.OpenObjectLongHashMap;
 import org.apache.mahout.math.set.OpenIntHashSet;
 
-import ca.uwaterloo.twitter.ItemSetIndexBuilder;
 import ca.uwaterloo.twitter.TokenIterator;
 import ca.uwaterloo.twitter.TokenIterator.LatinTokenIterator;
-
-import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
-import com.google.common.hash.Hashing;
-
+import edu.umd.cloud9.io.pair.PairOfLongs;
 import edu.umd.cloud9.io.pair.PairOfStringLong;
+import edu.umd.cloud9.io.pair.PairOfStrings;
 
 /**
  * maps each transaction to all unique items groups in the transaction. mapper
@@ -63,7 +40,7 @@ import edu.umd.cloud9.io.pair.PairOfStringLong;
  * 
  */
 public class ParallelFPStreamMapper extends
-    Mapper<PairOfStringLong, Text, IntWritable, TransactionTree> {
+    Mapper<PairOfLongs, PairOfStrings, IntWritable, TransactionTree> {
   private final OpenObjectIntHashMap<String> stringToIdMap = new OpenObjectIntHashMap<String>();
   private int numGroups;
   private long intervalStart;
@@ -76,10 +53,9 @@ public class ParallelFPStreamMapper extends
   private boolean prependUserName;
   
   @Override
-  protected void map(PairOfStringLong key, Text input, Context context)
+  protected void map(PairOfLongs key, PairOfStrings input, Context context)
       throws IOException, InterruptedException {
     
-    String screenname = key.getLeftElement();
     long timestamp = key.getRightElement();
     if (timestamp < intervalStart) {
       return;
@@ -93,9 +69,9 @@ public class ParallelFPStreamMapper extends
     
     String inputStr;
     if (prependUserName) {
-      inputStr = "@" + screenname + ": " + input;
+      inputStr = "@" + input.getLeftElement() + ": " + input.getRightElement();
     } else {
-      inputStr = input.toString();
+      inputStr = input.getRightElement();
     }
     
     LatinTokenIterator items = new LatinTokenIterator(inputStr);

@@ -1,10 +1,6 @@
 package com.twitter.corpus.data;
 
 import java.io.IOException;
-import java.text.DateFormat;
-import java.text.ParseException;
-import java.text.SimpleDateFormat;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.apache.commons.lang.StringEscapeUtils;
@@ -19,18 +15,18 @@ import org.apache.hadoop.mapreduce.lib.input.CombineFileSplit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.base.Preconditions;
-
+import edu.umd.cloud9.io.pair.PairOfLongs;
 import edu.umd.cloud9.io.pair.PairOfStringLong;
+import edu.umd.cloud9.io.pair.PairOfStrings;
 
-public class CSVTweetRecordReader extends RecordReader<PairOfStringLong, Text> {
-  private static final Logger LOG = LoggerFactory.getLogger(CSVTweetRecordReader.class);
+public class CSVTweetRecordReader extends RecordReader<PairOfLongs, PairOfStrings> {
+//  private static final Logger LOG = LoggerFactory.getLogger(CSVTweetRecordReader.class);
   private static final Pattern tabSplit = Pattern.compile("\\t");
   
   private FSDataInputStream reader;
-  private TaskAttemptContext context;
-  private PairOfStringLong myKey;
-  private Text myValue;
+  // private TaskAttemptContext context;
+  private PairOfLongs myKey;
+  private PairOfStrings myValue;
   
   private Configuration conf;
   
@@ -75,29 +71,33 @@ public class CSVTweetRecordReader extends RecordReader<PairOfStringLong, Text> {
     long id = Long.parseLong(fields[0]);
     long timestamp = Long.parseLong(fields[2]);
     
-    myKey = new PairOfStringLong(screenName, timestamp);
+    myKey = new PairOfLongs(id, timestamp);
     
-    myValue = new Text(/* "@" + screenName + ": " + */tweet);
+    myValue = new PairOfStrings(screenName,tweet);
     return true;
   }
   
   @Override
   public void initialize(InputSplit pSplit, TaskAttemptContext pContext) throws IOException,
       InterruptedException {
+    initialize(pSplit, pContext.getConfiguration());
+  }
+  
+  public void initialize(InputSplit pSplit, Configuration pConf) throws IOException,
+      InterruptedException {
     split = ((CombineFileSplit) pSplit);
-    context = pContext;
-    conf = context.getConfiguration();
+    conf = pConf;
     fs = FileSystem.get(conf);
     openNextFile();
   }
   
   @Override
-  public PairOfStringLong getCurrentKey() throws IOException, InterruptedException {
+  public PairOfLongs getCurrentKey() throws IOException, InterruptedException {
     return myKey;
   }
   
   @Override
-  public Text getCurrentValue() throws IOException, InterruptedException {
+  public PairOfStrings getCurrentValue() throws IOException, InterruptedException {
     return myValue;
   }
   
