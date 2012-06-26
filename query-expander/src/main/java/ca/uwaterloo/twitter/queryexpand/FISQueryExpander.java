@@ -7,6 +7,7 @@ import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.io.StringReader;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
@@ -29,6 +30,7 @@ import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Fieldable;
 import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.MultiReader;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.TermFreqVector;
 import org.apache.lucene.queryParser.QueryParser;
@@ -56,6 +58,7 @@ import ca.uwaterloo.twitter.ItemSetIndexBuilder;
 import ca.uwaterloo.twitter.ItemSetSimilarity;
 import ca.uwaterloo.twitter.TwitterAnalyzer;
 import ca.uwaterloo.twitter.TwitterIndexBuilder.TweetField;
+import ca.uwaterloo.twitter.TwitterSimilarity;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -63,6 +66,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.common.collect.Sets.SetView;
+import com.ibm.icu.text.SimpleDateFormat;
 
 public class FISQueryExpander {
   
@@ -199,8 +203,7 @@ public class FISQueryExpander {
     PrintStream out = new PrintStream(System.out, true, "UTF-8");
     FISQueryExpander qEx = null;
     try {
-      qEx = new FISQueryExpander(fisIndexLocation, twtIndexLocation);
-      
+      // qEx = new FISQueryExpander(fisIndexLocation, twtIndexLocation, System.currentTimeMillis());
       StringBuilder query = new StringBuilder();
       do {
         if (CHAR_BY_CHAR) {
@@ -224,9 +227,6 @@ public class FISQueryExpander {
         String cmd = query.substring(0, 2);
         if (cmd.equals("i:")) {
           mode = 0; // itemsets
-        } else if (cmd.equals("t:")) {
-          mode = 5; // terms with defaul weighting
-          termWeighting = TERM_WEIGHTIN_DEFAULT;
         } else if (cmd.equals("q:")) {
           mode = 6; // terms with query probability
           termWeighting = TermWeigting.PROB_QUERY;
@@ -237,12 +237,29 @@ public class FISQueryExpander {
           mode = 10; // results
         } else if (cmd.equals("e:")) {
           mode = 20; // expanded
+        } else if (cmd.equals("t:")) {
+          mode = 30; // set the time
         } else {
           out.println("Must prefix either\n i: for itemsets \n r: for results \n e: for expanded results \n t|d|q: for terms");
           continue;
         }
         
         query.delete(0, 2);
+        
+        if (mode == 30) {
+          try {
+            long time = Long.parseLong(query.toString().trim());
+            if (qEx != null) {
+              qEx.close();
+            }
+            qEx = new FISQueryExpander(fisIndexLocation, twtIndexLocation, time);
+            out.println("Queries will be executed as if the time is: "
+                + qEx.getTimeFormatted());
+          } catch (NumberFormatException e) {
+            System.err.println("Cannot set the time: " + e.getMessage());
+          }
+          continue;
+        }
         
         out.println();
         out.println(">" + query.toString());
@@ -303,7 +320,7 @@ public class FISQueryExpander {
           for (ScoreDoc scoreDoc : qEx.twtSearcher.search(twtQ, NUM_HITS_SHOWN_DEFAULT).scoreDocs) {
             Document hit = qEx.twtSearcher.doc(scoreDoc.doc);
             Fieldable created = hit.getFieldable(TweetField.TIMESTAMP.name);
-//            out.println();
+            // out.println();
             out.println(String.format("%4d (%.4f): %s\t%s\t%s\t%s",
                 ++t,
                 scoreDoc.score,
@@ -324,6 +341,12 @@ public class FISQueryExpander {
     }
   }
   
+  private final String timeFormatted;
+  
+  private String getTimeFormatted() {
+    return timeFormatted;
+  }
+  
   private final QueryParser fisQparser;
   private final IndexSearcher fisSearcher;
   private final IndexReader fisIxReader;
@@ -335,7 +358,7 @@ public class FISQueryExpander {
   
   private final QueryParser twtQparser;
   private final IndexSearcher twtSearcher;
-  private final IndexReader twtIxReader;
+  private final MultiReader twtIxReader;
   
   // private final int twtNumHits = NUM_HITS_DEFAULT;
   
@@ -352,7 +375,14 @@ public class FISQueryExpander {
   
   private float itemSetLenWght = ITEMSET_LEN_WEIGHT_DEFAULT;
   
-  public FISQueryExpander(File fisIndexLocation, File twtIndexLocation) throws IOException {
+  private final long queryTime;
+  
+  public FISQueryExpander(File fisIndexLocation, File twtIndexLocation, long queryTime)
+      throws IOException {
+    this.queryTime = queryTime;
+    this.timeFormatted =
+        new SimpleDateFormat("HH:mm:ss.SSS 'on' MMM dd, yyyy").format(new Date(queryTime));
+    
     Directory fisdir = new MMapDirectory(fisIndexLocation);
     fisIxReader = IndexReader.open(fisdir);
     fisSearcher = new IndexSearcher(fisIxReader);
@@ -364,8 +394,24 @@ public class FISQueryExpander {
         ANALYZER);
     fisQparser.setDefaultOperator(Operator.AND);
     
-    Directory twtdir = new MMapDirectory(twtIndexLocation);
-    twtIxReader = IndexReader.open(twtdir);
+    List<IndexReader> ixRds = Lists.newLinkedList();
+    for (File startFolder : twtIndexLocation.listFiles()) {
+      if (Long.parseLong(startFolder.getName()) > queryTime) {
+        break;
+      }
+      boolean lastOne = false;
+      for (File endFolder : startFolder.listFiles()) {
+        if (Long.parseLong(endFolder.getName()) > queryTime) {
+          lastOne = true;
+        }
+        Directory twtdir = new MMapDirectory(endFolder);
+        ixRds.add(IndexReader.open(twtdir));
+        if (lastOne) {
+          break;
+        }
+      }
+    }
+    twtIxReader = new MultiReader(ixRds.toArray(new IndexReader[0]));
     twtSearcher = new IndexSearcher(twtIxReader);
     twtSimilarity = new TwitterSimilarity();
     twtSearcher.setSimilarity(twtSimilarity);
@@ -780,7 +826,7 @@ public class FISQueryExpander {
       throws IOException {
     
     OpenObjectFloatHashMap<Set<String>> itemsets = new OpenObjectFloatHashMap<Set<String>>();
-//    OpenObjectIntHashMap<Set<String>> isToDoc = new OpenObjectIntHashMap<Set<String>>();
+    // OpenObjectIntHashMap<Set<String>> isToDoc = new OpenObjectIntHashMap<Set<String>>();
     
     IntArrayList keyList = new IntArrayList(rs.size());
     rs.keysSortedByValue(keyList);

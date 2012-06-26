@@ -110,8 +110,12 @@ public class TwitterIndexBuilder implements Callable<Void> {
     
     Path seqRoot = new Path(cmdline.getOptionValue(INPUT_OPTION));
     
-    LOG.info("Deleting {}", indexRoot);
-    FileUtils.deleteQuietly(indexRoot);
+//    LOG.info("Deleting {}", indexRoot);
+//    FileUtils.deleteQuietly(indexRoot);
+    if(indexRoot.exists()){
+      LOG.error("Output folder already exists: {}", indexRoot);
+      return;
+    }
     
     int nThreads = Integer.parseInt(cmdline.getOptionValue(THREADS_OPTION, DEFAULT_NUM_THREADS));
     
