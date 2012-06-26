@@ -5,7 +5,6 @@ import java.io.IOException;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.List;
-import java.util.PriorityQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -34,7 +33,9 @@ import org.apache.lucene.document.NumericField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.search.Similarity;
+import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.store.MMapDirectory;
 import org.apache.lucene.util.Version;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,7 +65,7 @@ public class TwitterIndexBuilder implements Callable<Void> {
   private static final String INPUT_OPTION = "input";
   private static final String INDEX_OPTION = "index";
   private static final String THREADS_OPTION = "threads";
-  private static final String DEFAULT_NUM_THREADS = "24";
+  private static final String DEFAULT_NUM_THREADS = "1";
   private static final String START_TIME_OPTION = "start";
   private static final String END_TIME_OPTION = "end";
   private static final String WINDOW_LEN_OPTION = "win";
@@ -82,6 +83,9 @@ public class TwitterIndexBuilder implements Callable<Void> {
   @SuppressWarnings("static-access")
   public static void main(String[] args) throws IOException, NoSuchAlgorithmException,
       InterruptedException, ExecutionException {
+    
+    // TODO from commandline
+    boolean incremental = true;
     
     Options options = new Options();
     options.addOption(OptionBuilder.withArgName("path").hasArg()
@@ -125,6 +129,9 @@ public class TwitterIndexBuilder implements Callable<Void> {
     }
     
     int nThreads = Integer.parseInt(cmdline.getOptionValue(THREADS_OPTION, DEFAULT_NUM_THREADS));
+    if (incremental && nThreads > 1) {
+      throw new IllegalArgumentException("incremental and numThreads > 1");
+    }
     
     ExecutorService exec = Executors.newFixedThreadPool(nThreads);
     Future<Void> lastFuture = null;
@@ -132,10 +139,10 @@ public class TwitterIndexBuilder implements Callable<Void> {
     Configuration conf = new Configuration();
     FileSystem fs = FileSystem.getLocal(conf);
     
-    List<Path> startFoldersList = Lists.<Path>newLinkedList();
+    List<Path> startFoldersList = Lists.<Path> newLinkedList();
     // would have sorted the listStati right away, but the documentation for its compareTo
     // doesn't specify how the comparison is made.. a7eeh.
-    for(FileStatus f: fs.listStatus(seqRoot)){
+    for (FileStatus f : fs.listStatus(seqRoot)) {
       startFoldersList.add(f.getPath());
     }
     Path[] startFolders = startFoldersList.toArray(new Path[0]);
@@ -151,8 +158,6 @@ public class TwitterIndexBuilder implements Callable<Void> {
     
     List<Path> tweetFiles = Lists.newArrayListWithExpectedSize((int) winLen / 300000);
     
-
-    
     long windowStart = -1;
     long folderStart = -1;
     int i = 0;
@@ -166,11 +171,12 @@ public class TwitterIndexBuilder implements Callable<Void> {
     
     windowStart = folderStart;
     
+    Directory prevIndexDir = null;
     while (i < startFolders.length) {
       
       folderStart = Long.parseLong(startFolders[i].getName());
       List<Path> endFileList = Lists.newLinkedList();
-      for(FileStatus f: fs.listStatus(startFolders[i])){
+      for (FileStatus f : fs.listStatus(startFolders[i])) {
         endFileList.add(f.getPath());
       }
       Path[] endFiles = endFileList.toArray(new Path[0]);
@@ -186,7 +192,10 @@ public class TwitterIndexBuilder implements Callable<Void> {
           
           if (tweetFiles.size() > 0) {
             lastFuture = exec.submit(new TwitterIndexBuilder(tweetFiles.toArray(new Path[0]),
-                indexFile, conf));
+                indexFile, conf, prevIndexDir));
+            if (incremental) {
+              prevIndexDir = new MMapDirectory(indexFile);
+            }
           } else {
             LOG.warn("No files for window: {} - {}", windowStart, windowStart + winLen);
           }
@@ -211,7 +220,7 @@ public class TwitterIndexBuilder implements Callable<Void> {
       File indexFile = new File(indexRoot, Long.toString(windowStart));
       indexFile = new File(indexFile, Long.toString(windowStart + winLen));
       lastFuture = exec.submit(new TwitterIndexBuilder(tweetFiles.toArray(new Path[0]),
-          indexFile, conf));
+          indexFile, conf, prevIndexDir));
     }
     
     lastFuture.get();
@@ -225,12 +234,14 @@ public class TwitterIndexBuilder implements Callable<Void> {
   private final Path[] inPaths;
   private final File indexDir;
   private final Configuration conf;
+  private final Directory prevIndexDir;
   
-  public TwitterIndexBuilder(Path[] paths, File indexDir, Configuration conf) {
+  public TwitterIndexBuilder(Path[] paths, File indexDir, Configuration conf, Directory prevIndexDir) {
     super();
     this.inPaths = paths;
     this.indexDir = indexDir;
     this.conf = conf;
+    this.prevIndexDir = prevIndexDir;
   }
   
   public Void call() throws Exception {
@@ -255,6 +266,10 @@ public class TwitterIndexBuilder implements Callable<Void> {
     
     IndexWriter writer = new IndexWriter(FSDirectory.open(indexDir), config);
     try {
+      
+      if (prevIndexDir != null) {
+        writer.addIndexes(prevIndexDir);
+      }
       
       int cnt = 0;
       while (csvReader.nextKeyValue()) {
@@ -284,9 +299,8 @@ public class TwitterIndexBuilder implements Callable<Void> {
       }
       
       LOG.info(String.format("Total of %s tweets indexed", cnt));
-      // Optimization Deprecated
-      // LOG.info("Optimizing index...");
-      // writer.optimize();
+      LOG.info("Optimizing index...");
+      writer.optimize();
       
     } catch (IOException ex) {
       LOG.error(ex.getMessage(), ex);

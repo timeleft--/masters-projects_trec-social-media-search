@@ -49,6 +49,8 @@ import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.hadoop.mapreduce.lib.input.SequenceFileInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.mapreduce.lib.output.SequenceFileOutputFormat;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.MMapDirectory;
 import org.apache.mahout.common.HadoopUtil;
 import org.apache.mahout.common.Pair;
 import org.apache.mahout.common.Parameters;
@@ -625,10 +627,9 @@ public final class PFPGrowth implements Callable<Void> {
     conf.set("io.serializations", "org.apache.hadoop.io.serializer.JavaSerialization,"
         + "org.apache.hadoop.io.serializer.WritableSerialization");
     
-    String startTime = params.get(PFPGrowth.PARAM_INTERVAL_START);
-    // Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP)); //GMT23JAN2011));
-    String endTime = params.get(PFPGrowth.PARAM_INTERVAL_END);
-    // Long.toString(Long.MAX_VALUE));
+    long startTime = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_START));
+    long endTime = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_END));
+    long windowSize = Long.parseLong(params.get(PFPGrowth.PARAM_WINDOW_SIZE));
     
     if (params.get(COUNT_IN) == null) {
       startParallelCounting(params, conf);
@@ -652,7 +653,7 @@ public final class PFPGrowth implements Callable<Void> {
         fListSize = -1;
         Path timeRoot = new Path(countIn).getParent().getParent();
         FileSystem fs = FileSystem.get(conf);
-        final long currStartTime = Long.parseLong(startTime);
+        final long currStartTime = startTime;
         for (FileStatus earlierWindow : fs.listStatus(timeRoot, new PathFilter() {
           @Override
           public boolean accept(Path p) {
@@ -695,8 +696,36 @@ public final class PFPGrowth implements Callable<Void> {
     FileUtils.deleteQuietly(indexDir);
     
     Path seqPath = new Path(params.get(OUTPUT), FREQUENT_PATTERNS);
-    
-    ItemSetIndexBuilder.buildIndex(seqPath, indexDir);
+    Directory[] earlierIndex;
+    if (FPSTREAM) {
+      Path timeRoot = new Path(params.get(OUTPUT)).getParent().getParent();
+      FileSystem fs = FileSystem.get(conf);
+      
+      long mostRecent = Long.MIN_VALUE;
+      Path mostRecentPath = null;
+      for (FileStatus earlierWindow : fs.listStatus(timeRoot)) {
+        long earlierStart = Long.parseLong(earlierWindow.getPath().getName());
+        // should have used end time, but it doesn't make a difference,
+        // AS LONG AS windows don't overlap
+        if (earlierStart < startTime && earlierStart > mostRecent) {
+          mostRecentPath = earlierWindow.getPath();
+          mostRecent = earlierStart;
+        }
+      }
+      if (mostRecentPath != null) {
+        mostRecentPath = fs.listStatus(mostRecentPath)[0].getPath();
+        mostRecentPath = new Path(mostRecentPath, "index");
+        earlierIndex = new Directory[1];
+        // FIXME: as with anything that involves lucene.. won't work except on a local machine
+        earlierIndex[0] = new MMapDirectory(FileUtils.toFile(mostRecentPath.toUri().toURL()));
+      } else {
+        earlierIndex = new Directory[0];
+      }
+    } else {
+      earlierIndex = new Directory[0];
+    }
+    ItemSetIndexBuilder.buildIndex(seqPath, indexDir,
+        startTime, Math.min(endTime, startTime + windowSize), earlierIndex);
   }
   
   /**

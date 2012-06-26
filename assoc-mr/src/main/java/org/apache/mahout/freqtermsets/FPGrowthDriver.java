@@ -201,9 +201,9 @@ public final class FPGrowthDriver extends AbstractJob {
       params.set(PFPGrowth.PARAM_WINDOW_SIZE, getOption(PFPGrowth.PARAM_WINDOW_SIZE));
     }
     
-    if (hasOption(PFPGrowth.PARAM_INTERVAL_START)) {
-      params.set(PFPGrowth.PARAM_INTERVAL_START, getOption(PFPGrowth.PARAM_INTERVAL_START));
-    }
+//    if (hasOption(PFPGrowth.PARAM_INTERVAL_START)) {
+//      params.set(PFPGrowth.PARAM_INTERVAL_START, getOption(PFPGrowth.PARAM_INTERVAL_START));
+//    }
     
 //    if (hasOption(PFPGrowth.INDEX_OUT)) {
 //      params.set(PFPGrowth.INDEX_OUT, getOption(PFPGrowth.INDEX_OUT));
@@ -229,7 +229,8 @@ public final class FPGrowthDriver extends AbstractJob {
     ExecutorService exec = Executors.newFixedThreadPool(nThreads);
     Future<Void> lastFuture = null;
     
-    String startTimeStr = params.get(PFPGrowth.PARAM_INTERVAL_START);
+    String startTimeStr = getOption(PFPGrowth.PARAM_INTERVAL_START); 
+//        params.get(PFPGrowth.PARAM_INTERVAL_START);
     if (startTimeStr == null) {
       // FIXME: Will fail if not running locally.. like many things now
 //      FileSystem fs = FileSystem.getLocal(conf);

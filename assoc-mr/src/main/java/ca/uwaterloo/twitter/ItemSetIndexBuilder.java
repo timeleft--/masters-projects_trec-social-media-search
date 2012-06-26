@@ -23,10 +23,12 @@ import org.apache.lucene.document.Field;
 import org.apache.lucene.document.Field.Index;
 import org.apache.lucene.document.Field.Store;
 import org.apache.lucene.document.Field.TermVector;
+import org.apache.lucene.document.NumericField;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.search.Similarity;
+import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.LockObtainFailedException;
 import org.apache.lucene.util.Version;
@@ -45,7 +47,9 @@ public class ItemSetIndexBuilder {
     ID("id"),
     ITEMSET("itemset"),
     RANK("rank"),
-    SUPPORT("support");
+    SUPPORT("support"),
+    WINDOW_STARTTIME("window_start_time"),
+    WINDOW_ENDTIME("window_end_time");
     
     public final String name;
     
@@ -94,10 +98,12 @@ public class ItemSetIndexBuilder {
     seqPath += File.separator + PFPGrowth.FREQUENT_PATTERNS; // "frequentpatterns";
     LOG.info("Indexing " + seqPath);
     
-    buildIndex(new Path(seqPath), indexLocation);
+    buildIndex(new Path(seqPath), indexLocation, Long.MIN_VALUE, Long.MAX_VALUE);
   }
   
-  public static void buildIndex(Path inPath, File indexDir) throws CorruptIndexException,
+  public static void buildIndex(Path inPath, File indexDir,
+      long intervalStartTime, long intervalEndTime, Directory... earlierIndexes)
+      throws CorruptIndexException,
       LockObtainFailedException, IOException, NoSuchAlgorithmException {
     
     FileSystem fs = FileSystem.get(new Configuration());
@@ -116,6 +122,9 @@ public class ItemSetIndexBuilder {
     config.setOpenMode(IndexWriterConfig.OpenMode.CREATE); // Overwrite existing.
     
     IndexWriter writer = new IndexWriter(FSDirectory.open(indexDir), config);
+    
+    writer.addIndexes(earlierIndexes);
+    
     try {
       
       Pair<Writable, TopKStringPatterns> p;
@@ -182,11 +191,17 @@ public class ItemSetIndexBuilder {
                 Index.ANALYZED,
                 TermVector.YES));
             
+            // No need to treat rankd and support as numeric fields.. will never sort or filter
             doc.add(new Field(AssocField.RANK.name, rank + "",
                 Store.YES, Index.NOT_ANALYZED_NO_NORMS));
             
             doc.add(new Field(AssocField.SUPPORT.name, pattern.getSecond() + "",
                 Store.YES, Index.NOT_ANALYZED_NO_NORMS));
+            
+            doc.add(new NumericField(AssocField.WINDOW_STARTTIME.name, Store.YES, true)
+                .setLongValue(intervalStartTime));
+            doc.add(new NumericField(AssocField.WINDOW_ENDTIME.name, Store.YES, true)
+                .setLongValue(intervalEndTime));
             
             writer.addDocument(doc);
             if (cnt % 10000 == 0) {
@@ -197,9 +212,9 @@ public class ItemSetIndexBuilder {
       }
       
       LOG.info(String.format("Total of %s itemsets indexed", cnt));
-      // Optimization Deprecated
-      // LOG.info("Optimizing index...");
-      // writer.optimize();
+      
+      LOG.info("Optimizing index...");
+      writer.optimize();
       
     } catch (IOException ex) {
       LOG.error(ex.getMessage(), ex);

@@ -17,7 +17,6 @@
 
 package org.apache.mahout.freqtermsets;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
@@ -85,7 +84,7 @@ public class ParallelFPStreamReducer extends
     private Set<Set<String>> encounteredDocs = Sets.newHashSet();
     private final TaskInputOutputContext<?, ?, ?, ?> context;
     private final TransactionTree extendedTree;
-    private long readerTime;
+//    private long readerTime;
     
     private OldPatternsCollector(
         TaskInputOutputContext<?, ?, ?, ?> context,
@@ -103,8 +102,8 @@ public class ParallelFPStreamReducer extends
     public void setNextReader(IndexReader reader, int docBase) throws IOException {
       this.docBase = docBase;
       this.reader = reader;
-      this.readerTime = Long.parseLong( 
-          ((MMapDirectory)reader.directory()).getFile().getParentFile().getParentFile().getName());
+//      this.readerTime = Long.parseLong( 
+//          ((MMapDirectory)reader.directory()).getFile().getParentFile().getParentFile().getName());
     }
     
     @Override
@@ -140,7 +139,12 @@ public class ParallelFPStreamReducer extends
       // // will be added that many times
       // patternFreq /= appearingGroups.size();
       
-      long support = Math.round(timeWeigth.apply(patternFreq, readerTime, intervalStart));
+//      long docStartTime = readerTime;
+      long docStartTime = Long.parseLong(doc
+          .getFieldable(ItemSetIndexBuilder.AssocField.WINDOW_STARTTIME.name)
+          .stringValue());
+      
+      long support = Math.round(timeWeigth.apply(patternFreq, docStartTime, intervalStart));
       
       extendedTree.addPattern(pattern, support);
     }
@@ -151,7 +155,8 @@ public class ParallelFPStreamReducer extends
     }
   }
   
-  private MultiReader fisIxMultiReader;
+  private IndexReader fisIxReader;
+//  private MultiReader fisIxMultiReader;
   private IndexSearcher fisSearcher;
   private ItemSetSimilarity fisSimilarity;
   private QueryParser fisQparser;
@@ -164,7 +169,7 @@ public class ParallelFPStreamReducer extends
   private final OpenObjectIntHashMap<String> stringIdMap = new OpenObjectIntHashMap<String>();
   
   private TimeWeightFunction timeWeigth;
-  // private long mostRecentTime;
+  private long mostRecentTime;
   
   private int maxHeapSize = 50;
   
@@ -216,7 +221,8 @@ public class ParallelFPStreamReducer extends
       }
     }
     
-    if (fisIxMultiReader != null) {
+//    if (fisIxMultiReader != null) {
+    if (fisIxReader != null) {
       BooleanQuery.setMaxClauseCount(numPatterns);
       BooleanQuery allPatternsQuery = new BooleanQuery();
       
@@ -300,37 +306,41 @@ public class ParallelFPStreamReducer extends
     long maxPatternLoadLag = Long.parseLong(params.get(PFPGrowth.PARAM_MAX_PATTERN_LOAD_LAG, 
         PFPGrowth.DEFAULT_MAX_PATTERN_LOAD_LAG)); 
         
-    
+    Path mostRecentPath = null;
     Path outPath = new Path(params.get(PFPGrowth.OUTPUT));
     Path timeRoot = outPath.getParent().getParent();
     FileSystem fs = FileSystem.get(conf);
     FileStatus[] otherWindows = fs.listStatus(timeRoot);
-    List<IndexReader> earlierIndexes = Lists
-        .<IndexReader> newArrayListWithCapacity(otherWindows.length - 1);
+//    List<IndexReader> earlierIndexes = Lists
+//        .<IndexReader> newArrayListWithCapacity(otherWindows.length - 1);
     for (int f = otherWindows.length - 1; f >= 0; --f) {
       Path p = otherWindows[f].getPath();
       long pathStartTime = Long.parseLong(p.getName());
       // should have used end time, but it doesn't make a difference,
       // AS LONG AS windows don't overlap
-      long timeDifference = intervalStart - pathStartTime;
-      if (timeDifference > 0 && timeDifference <= maxPatternLoadLag) {
+//      long timeDifference = intervalStart - pathStartTime;
+//      if (timeDifference > 0 && timeDifference <= maxPatternLoadLag) {
+      if(pathStartTime < intervalStart && pathStartTime > mostRecentTime){
         p = fs.listStatus(p)[0].getPath();
         p = new Path(p, "index");
         if (fs.exists(p)) {
-          // mostRecentTime = pathStartTime;
-          // mostRecentPath = p;
-          File indexDir = FileUtils.toFile(p.toUri().toURL());
-          // FIXME: this will work only on local filesystem.. like many other parts of the code
-          Directory fisdir = new MMapDirectory(indexDir);
-          IndexReader fisIxReader = IndexReader.open(fisdir);
-          earlierIndexes.add(fisIxReader);
+           mostRecentTime = pathStartTime;
+           mostRecentPath = p;
+//          File indexDir = FileUtils.toFile(p.toUri().toURL());
+//          // FIXME: this will work only on local filesystem.. like many other parts of the code
+//          Directory fisdir = new MMapDirectory(indexDir);
+//          IndexReader fisIxReader = IndexReader.open(fisdir);
+//          earlierIndexes.add(fisIxReader);
         }
       }
     }
-//    if (mostRecentPath != null) {
-    if(!earlierIndexes.isEmpty()) {
-      fisIxMultiReader = new MultiReader(earlierIndexes.toArray(new IndexReader[0]));
-      fisSearcher = new IndexSearcher(fisIxMultiReader);
+    if (mostRecentPath != null) {
+//    if(!earlierIndexes.isEmpty()) {
+//      fisIxMultiReader = new MultiReader(earlierIndexes.toArray(new IndexReader[0]));
+      Directory fisdir = new MMapDirectory(FileUtils.toFile(mostRecentPath.toUri().toURL()));
+      fisIxReader = IndexReader.open(fisdir);
+//      fisSearcher = new IndexSearcher(fisIxMultiReader);
+      fisSearcher = new IndexSearcher(fisIxReader);
       fisSimilarity = new ItemSetSimilarity();
       fisSearcher.setSimilarity(fisSimilarity);
       
