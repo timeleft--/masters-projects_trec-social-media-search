@@ -113,7 +113,9 @@ public final class PFPGrowth implements Callable<Void> {
   // TODO command line
   private static final boolean FPSTREAM = true;
   public static final float FPSTREAM_LINEAR_DECAY_COEFF = 0.9f;
-  private static final double AVG_TOKENS_PER_DOC = 7;
+//  private static final double AVG_TOKENS_PER_DOC = 7;
+  public static final String PARAM_MAX_PATTERN_LOAD_LAG = "maxLag";
+  public static final String DEFAULT_MAX_PATTERN_LOAD_LAG = Long.toString(24 * 3600 * 1000);
   
   // private static final long DIRICHLET_SMOOTHING_PARAM = 3579L;
   

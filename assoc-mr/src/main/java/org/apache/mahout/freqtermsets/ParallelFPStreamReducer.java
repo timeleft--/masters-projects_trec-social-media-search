@@ -296,20 +296,24 @@ public class ParallelFPStreamReducer extends
     minWordsForLangDetection = params.getInt(MIN_WORDS_FOR_LANG_ID, MIN_WORDS_FOR_LANG_ID_DEFAULT);
     repeatHashTag = Boolean.parseBoolean(params.get(TokenIterator.PARAM_REPEAT_HASHTAG, "false"));
     
+     
+    long maxPatternLoadLag = Long.parseLong(params.get(PFPGrowth.PARAM_MAX_PATTERN_LOAD_LAG, 
+        PFPGrowth.DEFAULT_MAX_PATTERN_LOAD_LAG)); 
+        
+    
     Path outPath = new Path(params.get(PFPGrowth.OUTPUT));
     Path timeRoot = outPath.getParent().getParent();
     FileSystem fs = FileSystem.get(conf);
     FileStatus[] otherWindows = fs.listStatus(timeRoot);
     List<IndexReader> earlierIndexes = Lists
         .<IndexReader> newArrayListWithCapacity(otherWindows.length - 1);
-    // mostRecentTime = Long.MIN_VALUE;
-    // Path mostRecentPath = null;
     for (int f = otherWindows.length - 1; f >= 0; --f) {
       Path p = otherWindows[f].getPath();
       long pathStartTime = Long.parseLong(p.getName());
       // should have used end time, but it doesn't make a difference,
       // AS LONG AS windows don't overlap
-      if (pathStartTime < intervalStart) {// && pathStartTime > mostRecentTime) {
+      long timeDifference = intervalStart - pathStartTime;
+      if (timeDifference > 0 && timeDifference <= maxPatternLoadLag) {
         p = fs.listStatus(p)[0].getPath();
         p = new Path(p, "index");
         if (fs.exists(p)) {
