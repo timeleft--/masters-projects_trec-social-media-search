@@ -220,7 +220,7 @@ public class ParallelFPStreamReducer extends
       BooleanQuery.setMaxClauseCount(numPatterns);
       BooleanQuery allPatternsQuery = new BooleanQuery();
       
-      Iterator<Pair<IntArrayList, Long>> cTreeIter = cTree.iterator(false);
+      Iterator<Pair<IntArrayList, Long>> cTreeIter = cTree.iterator(true);
       while (cTreeIter.hasNext()) {
         IntArrayList newPatternIds = cTreeIter.next().getFirst();
         if (newPatternIds.size() == 1) {
