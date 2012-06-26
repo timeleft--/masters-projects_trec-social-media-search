@@ -7,7 +7,6 @@ import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.io.StringReader;
 import java.util.Arrays;
-import java.util.Date;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
@@ -248,14 +247,13 @@ public class FISQueryExpander {
         
         if (mode == 30) {
           try {
-            long time = Long.parseLong(query.toString().trim());
             if (qEx != null) {
               qEx.close();
             }
-            qEx = new FISQueryExpander(fisIndexLocation, twtIndexLocation, time);
+            qEx = new FISQueryExpander(fisIndexLocation, twtIndexLocation, query.toString().trim());
             out.println("Queries will be executed as if the time is: "
                 + qEx.getTimeFormatted());
-          } catch (NumberFormatException e) {
+          } catch (java.text.ParseException e) {
             System.err.println("Cannot set the time: " + e.getMessage());
           }
           continue;
@@ -377,11 +375,20 @@ public class FISQueryExpander {
   
   private final long queryTime;
   
-  public FISQueryExpander(File fisIndexLocation, File twtIndexLocation, long queryTime)
-      throws IOException {
-    this.queryTime = queryTime;
-    this.timeFormatted =
-        new SimpleDateFormat("HH:mm:ss.SSS 'on' MMM dd, yyyy").format(new Date(queryTime));
+  /**
+   * 
+   * @param fisIndexLocation
+   * @param twtIndexLocation
+   * @param timeFormatted
+   *          example: Sun Feb 06 10:38:43 +0000 2011
+   * @throws IOException
+   * @throws java.text.ParseException 
+   */
+  public FISQueryExpander(File fisIndexLocation, File twtIndexLocation, String timeFormatted)
+      throws IOException, java.text.ParseException {
+    this.timeFormatted = timeFormatted;
+    this.queryTime = new SimpleDateFormat("EEE MMM dd HH:mm:ss ZZZZZ yyyy").parse(timeFormatted)
+        .getTime();
     
     Directory fisdir = new MMapDirectory(fisIndexLocation);
     fisIxReader = IndexReader.open(fisdir);

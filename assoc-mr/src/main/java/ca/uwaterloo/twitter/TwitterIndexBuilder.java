@@ -3,6 +3,8 @@ package ca.uwaterloo.twitter;
 import java.io.File;
 import java.io.IOException;
 import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -16,7 +18,6 @@ import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.OptionBuilder;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
-import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
@@ -37,6 +38,7 @@ import org.apache.lucene.util.Version;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.collect.Lists;
 import com.twitter.corpus.data.CSVTweetRecordReader;
 
 import edu.umd.cloud9.io.pair.PairOfLongs;
@@ -61,9 +63,11 @@ public class TwitterIndexBuilder implements Callable<Void> {
   private static final String INPUT_OPTION = "input";
   private static final String INDEX_OPTION = "index";
   private static final String THREADS_OPTION = "threads";
-  private static final String DEFAULT_NUM_THREADS = "1";
+  private static final String DEFAULT_NUM_THREADS = "24";
   private static final String START_TIME_OPTION = "start";
   private static final String END_TIME_OPTION = "end";
+  private static final String WINDOW_LEN_OPTION = "win";
+  private static final String WINDOW_LEN_DEFAULT = "3600000";
   
   private static final Analyzer ANALYZER = new TwitterAnalyzer(); // Version.LUCENE_36);
   
@@ -90,6 +94,8 @@ public class TwitterIndexBuilder implements Callable<Void> {
         .withDescription("(optional) start time").create(START_TIME_OPTION));
     options.addOption(OptionBuilder.withArgName("time").hasArg()
         .withDescription("(optional) end time").create(END_TIME_OPTION));
+    options.addOption(OptionBuilder.withArgName("length").hasArg()
+        .withDescription("(optional) index window length").create(WINDOW_LEN_OPTION));
     
     CommandLine cmdline = null;
     CommandLineParser parser = new GnuParser();
@@ -110,9 +116,9 @@ public class TwitterIndexBuilder implements Callable<Void> {
     
     Path seqRoot = new Path(cmdline.getOptionValue(INPUT_OPTION));
     
-//    LOG.info("Deleting {}", indexRoot);
-//    FileUtils.deleteQuietly(indexRoot);
-    if(indexRoot.exists()){
+    // LOG.info("Deleting {}", indexRoot);
+    // FileUtils.deleteQuietly(indexRoot);
+    if (indexRoot.exists()) {
       LOG.error("Output folder already exists: {}", indexRoot);
       return;
     }
@@ -131,23 +137,64 @@ public class TwitterIndexBuilder implements Callable<Void> {
     }
     long startTime = Long.parseLong(startTimeStr);
     long endTime = Long.parseLong(cmdline.getOptionValue(END_TIME_OPTION, "" + Long.MAX_VALUE));
+    long winLen = Long.parseLong(cmdline.getOptionValue(WINDOW_LEN_OPTION, WINDOW_LEN_DEFAULT));
     
-    for (FileStatus startFolder : fs.listStatus(seqRoot)) {
-      long windowStart = Long.parseLong(startFolder.getPath().getName());
-      if (windowStart < startTime) {
-        continue;
+    List<Path> tweetFiles = Lists.newArrayListWithExpectedSize((int) winLen / 300000);
+    
+    FileStatus[] startFolders = fs.listStatus(seqRoot);
+    long windowStart = -1;
+    long folderStart = -1;
+    int i = 0;
+    while (i < startFolders.length) {
+      folderStart = Long.parseLong(startFolders[i].getPath().getName());
+      if (folderStart >= startTime) {
+        break;
       }
-      for (FileStatus endFile : fs.listStatus(startFolder.getPath())) {
-        long windowEnd = Long.parseLong(endFile.getPath().getName());
-        if (windowEnd > endTime) {
-          return;
+      ++i;
+    }
+    
+    windowStart = folderStart;
+    
+    while (i < startFolders.length) {
+      
+      folderStart = Long.parseLong(startFolders[i].getPath().getName());
+      FileStatus[] endFiles = fs.listStatus(startFolders[i].getPath());
+      for (int j = 0; j < endFiles.length; ++j) {
+        
+        long fileEnd = Long.parseLong(endFiles[j].getPath().getName());
+        
+        if (fileEnd > windowStart + winLen) {
+          File indexFile = new File(indexRoot, Long.toString(windowStart));
+          indexFile = new File(indexFile, Long.toString(windowStart + winLen));
+          
+          if (tweetFiles.size() > 0) {
+            lastFuture = exec.submit(new TwitterIndexBuilder(tweetFiles.toArray(new Path[0]),
+                indexFile, conf));
+          } else {
+            LOG.warn("No files for window: {} - {}", windowStart, windowStart + winLen);
+          }
+          
+          tweetFiles.clear();
+          windowStart += winLen;
+          if (fileEnd >= endTime) {
+            return;
+          }
         }
         
-        File indexFile = new File(indexRoot, Long.toString(windowStart));
-        indexFile = new File(indexFile, Long.toString(windowEnd));
+        if (fileEnd <= windowStart + winLen) {
+          tweetFiles.add(endFiles[j].getPath());
+        }
         
-        lastFuture = exec.submit(new TwitterIndexBuilder(endFile.getPath(), indexFile, conf));
       }
+      
+      ++i;
+    }
+    
+    if (tweetFiles.size() > 0) {
+      File indexFile = new File(indexRoot, Long.toString(windowStart));
+      indexFile = new File(indexFile, Long.toString(windowStart + winLen));
+      lastFuture = exec.submit(new TwitterIndexBuilder(tweetFiles.toArray(new Path[0]),
+          indexFile, conf));
     }
     
     lastFuture.get();
@@ -156,33 +203,31 @@ public class TwitterIndexBuilder implements Callable<Void> {
     while (!exec.isTerminated()) {
       Thread.sleep(1000);
     }
-    
   }
   
-  private final Path inPath;
+  private final Path[] inPaths;
   private final File indexDir;
   private final Configuration conf;
   
-  public TwitterIndexBuilder(Path inPath, File indexDir, Configuration conf) {
+  public TwitterIndexBuilder(Path[] paths, File indexDir, Configuration conf) {
     super();
-    this.inPath = inPath;
+    this.inPaths = paths;
     this.indexDir = indexDir;
     this.conf = conf;
   }
   
   public Void call() throws Exception {
     
-    FileSystem fs = FileSystem.get(new Configuration());
+    LOG.info("Indexing {} to {}", Arrays.toString(inPaths), indexDir);
     
-    LOG.info("Indexing {} to {}", inPath, indexDir);
-    
-    if (!fs.exists(inPath)) {
-      LOG.error("Error: " + inPath + " does not exist!");
-      throw new IOException("Error: " + inPath + " does not exist!");
-    }
+    // FileSystem fs = FileSystem.get(new Configuration());
+    // if (!fs.exists(inPath)) {
+    // LOG.error("Error: " + inPath + " does not exist!");
+    // throw new IOException("Error: " + inPath + " does not exist!");
+    // }
     
     CSVTweetRecordReader csvReader = new CSVTweetRecordReader();
-    CombineFileSplit inputSplit = new CombineFileSplit(new Path[] { inPath }, new long[] { -1L });
+    CombineFileSplit inputSplit = new CombineFileSplit(inPaths, new long[] { -1L });
     csvReader.initialize(inputSplit, conf);
     
     Analyzer analyzer = ANALYZER;
