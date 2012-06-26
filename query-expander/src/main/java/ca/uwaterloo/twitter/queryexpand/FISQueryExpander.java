@@ -374,6 +374,9 @@ public class FISQueryExpander {
   private float itemSetLenWght = ITEMSET_LEN_WEIGHT_DEFAULT;
   
   private final long queryTime;
+
+  //TODO command line
+  private static boolean incremental = true;
   
   /**
    * 
@@ -411,8 +414,10 @@ public class FISQueryExpander {
         if (Long.parseLong(endFolder.getName()) > queryTime) {
           lastOne = true;
         }
+        if((!incremental) || (incremental && lastOne)) {
         Directory twtdir = new MMapDirectory(endFolder);
         ixRds.add(IndexReader.open(twtdir));
+        } 
         if (lastOne) {
           break;
         }

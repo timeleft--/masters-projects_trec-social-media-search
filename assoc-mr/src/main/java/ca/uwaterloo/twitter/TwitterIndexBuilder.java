@@ -152,6 +152,7 @@ public class TwitterIndexBuilder implements Callable<Void> {
     if (startTimeStr == null) {
       startTimeStr = startFolders[0].getName();
     }
+    
     long startTime = Long.parseLong(startTimeStr);
     long endTime = Long.parseLong(cmdline.getOptionValue(END_TIME_OPTION, "" + Long.MAX_VALUE));
     long winLen = Long.parseLong(cmdline.getOptionValue(WINDOW_LEN_OPTION, WINDOW_LEN_DEFAULT));
@@ -187,7 +188,12 @@ public class TwitterIndexBuilder implements Callable<Void> {
         long fileEnd = Long.parseLong(endFiles[j].getName());
         
         if (fileEnd > windowStart + winLen) {
-          File indexFile = new File(indexRoot, Long.toString(windowStart));
+          File indexFile;
+          if(incremental){
+            indexFile = new File(indexRoot,startTimeStr);
+          } else {
+            indexFile = new File(indexRoot, Long.toString(windowStart));
+          }
           indexFile = new File(indexFile, Long.toString(windowStart + winLen));
           
           if (tweetFiles.size() > 0) {
@@ -201,7 +207,10 @@ public class TwitterIndexBuilder implements Callable<Void> {
           }
           
           tweetFiles.clear();
-          windowStart += winLen;
+//          if (incremental) {
+//            winLen += winLen;
+//          } else {
+            windowStart += winLen;
           if (fileEnd >= endTime) {
             return;
           }
