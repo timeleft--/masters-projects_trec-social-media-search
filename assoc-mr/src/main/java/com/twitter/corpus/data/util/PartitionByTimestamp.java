@@ -10,6 +10,7 @@ import java.text.DateFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.GregorianCalendar;
@@ -272,6 +273,8 @@ public class PartitionByTimestamp {
       timeList = chilrdenCache.get(cacheKey);
     } else {
       File[] children = FileUtils.listFiles(parent, null, false).toArray(new File[0]); // fs.listStatus(parent);
+      //TODO: provide OS indpendent comparator
+      Arrays.sort(children);
       timeList = new ArrayList<Pair<Long, File>>(children.length);
       
       int i = (ascendingOrDescending ? 0 : children.length - 1);

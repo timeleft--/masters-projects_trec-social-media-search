@@ -22,6 +22,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
+import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
@@ -230,8 +231,10 @@ public final class FPGrowthDriver extends AbstractJob {
     
     String startTimeStr = params.get(PFPGrowth.PARAM_INTERVAL_START);
     if (startTimeStr == null) {
-      FileSystem fs = FileSystem.getLocal(conf);
-      startTimeStr = fs.listStatus(inputDir)[0].getPath().getName();
+      // FIXME: Will fail if not running locally.. like many things now
+//      FileSystem fs = FileSystem.getLocal(conf);
+//      startTimeStr = fs.listStatus(inputDir)[0].getPath().getName();
+      startTimeStr = FileUtils.toFile(inputDir.toUri().toURL()).listFiles()[0].getName();
     }
     long startTime = Long.parseLong(startTimeStr);
     // Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP)));// GMT23JAN2011)));

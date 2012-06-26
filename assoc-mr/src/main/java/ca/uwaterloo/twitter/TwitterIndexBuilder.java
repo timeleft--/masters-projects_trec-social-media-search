@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.PriorityQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -131,9 +132,18 @@ public class TwitterIndexBuilder implements Callable<Void> {
     Configuration conf = new Configuration();
     FileSystem fs = FileSystem.getLocal(conf);
     
+    List<Path> startFoldersList = Lists.<Path>newLinkedList();
+    // would have sorted the listStati right away, but the documentation for its compareTo
+    // doesn't specify how the comparison is made.. a7eeh.
+    for(FileStatus f: fs.listStatus(seqRoot)){
+      startFoldersList.add(f.getPath());
+    }
+    Path[] startFolders = startFoldersList.toArray(new Path[0]);
+    Arrays.sort(startFolders);
+    
     String startTimeStr = cmdline.getOptionValue(START_TIME_OPTION);
     if (startTimeStr == null) {
-      startTimeStr = fs.listStatus(seqRoot)[0].getPath().getName();
+      startTimeStr = startFolders[0].getName();
     }
     long startTime = Long.parseLong(startTimeStr);
     long endTime = Long.parseLong(cmdline.getOptionValue(END_TIME_OPTION, "" + Long.MAX_VALUE));
@@ -141,12 +151,13 @@ public class TwitterIndexBuilder implements Callable<Void> {
     
     List<Path> tweetFiles = Lists.newArrayListWithExpectedSize((int) winLen / 300000);
     
-    FileStatus[] startFolders = fs.listStatus(seqRoot);
+
+    
     long windowStart = -1;
     long folderStart = -1;
     int i = 0;
     while (i < startFolders.length) {
-      folderStart = Long.parseLong(startFolders[i].getPath().getName());
+      folderStart = Long.parseLong(startFolders[i].getName());
       if (folderStart >= startTime) {
         break;
       }
@@ -157,11 +168,17 @@ public class TwitterIndexBuilder implements Callable<Void> {
     
     while (i < startFolders.length) {
       
-      folderStart = Long.parseLong(startFolders[i].getPath().getName());
-      FileStatus[] endFiles = fs.listStatus(startFolders[i].getPath());
+      folderStart = Long.parseLong(startFolders[i].getName());
+      List<Path> endFileList = Lists.newLinkedList();
+      for(FileStatus f: fs.listStatus(startFolders[i])){
+        endFileList.add(f.getPath());
+      }
+      Path[] endFiles = endFileList.toArray(new Path[0]);
+      Arrays.sort(endFiles);
+      
       for (int j = 0; j < endFiles.length; ++j) {
         
-        long fileEnd = Long.parseLong(endFiles[j].getPath().getName());
+        long fileEnd = Long.parseLong(endFiles[j].getName());
         
         if (fileEnd > windowStart + winLen) {
           File indexFile = new File(indexRoot, Long.toString(windowStart));
@@ -182,7 +199,7 @@ public class TwitterIndexBuilder implements Callable<Void> {
         }
         
         if (fileEnd <= windowStart + winLen) {
-          tweetFiles.add(endFiles[j].getPath());
+          tweetFiles.add(endFiles[j]);
         }
         
       }
