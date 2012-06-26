@@ -117,7 +117,7 @@ public class ParallelFPStreamMapper extends
       int itemId = itemArr.get(j);
       // int groupID = PFPGrowth.getGroup(item, maxPerGroup);
       
-      int groupID = PFPGrowth.getGroupHash(itemId, numGroups);
+      int groupID = PFPGrowth.getGroupFromHash(itemId, numGroups);
       
       if (!groups.contains(groupID)) {
         String item = itemSet.get(itemId);

@@ -55,8 +55,8 @@ import com.google.common.collect.Maps;
  * @param <A>
  *          object type used as the cell items in a transaction list
  */
-public class FPGrowth<A extends Integer> {//Comparable<? super A>> {
-  
+public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
+
   private static final Logger log = LoggerFactory.getLogger(FPGrowth.class);
   
   public static List<Pair<String, TopKStringPatterns>> readFrequentPattern(Configuration conf,
@@ -127,8 +127,8 @@ public class FPGrowth<A extends Integer> {//Comparable<? super A>> {
    * @param output
    *          The output collector to which the the generated patterns are
    *          written
-   * @param numGroups 
-   * @param groupId 
+   * @param numGroups
+   * @param groupId
    * @throws IOException
    */
   public final void generateTopKFrequentPatterns(Iterator<Pair<List<A>, Long>> transactionStream,
@@ -137,7 +137,7 @@ public class FPGrowth<A extends Integer> {//Comparable<? super A>> {
       int k,
       Collection<A> returnableFeatures,
       OutputCollector<A, List<Pair<List<A>, Long>>> output,
-      StatusUpdater updater, int numGroups, int groupId) throws IOException {
+      StatusUpdater updater, int groupId, int numGroups) throws IOException {
     
     OpenIntObjectHashMap<A> reverseMapping = new OpenIntObjectHashMap<A>();
     OpenObjectIntHashMap<A> attributeIdMapping = new OpenObjectIntHashMap<A>();
@@ -175,18 +175,20 @@ public class FPGrowth<A extends Integer> {//Comparable<? super A>> {
       }
     } else {
       // YA: Streaming conistent group assignment
-//      if(Integer.class.isAssignableFrom(A)){
-      for (A attrib: attributeIdMapping.keys()){
-        if(PFPGrowth.isGroupMember(groupId, attrib, numGroups)){
+      // if(Integer.class.isAssignableFrom(A)){
+      for (A attrib : attributeIdMapping.keys()) {
+        if (PFPGrowth.isGroupMember(groupId, attrib, numGroups)) {
           returnFeatures.add(attributeIdMapping.get(attrib));
           log.info("Adding Pattern {}=>{}", attrib, attributeIdMapping
               .get(attrib));
         }
       }
-//      }
+      // }
     }
     
     log.info("Number of unique pruned items {}", attributeIdMapping.size());
+    log.info("Number of returnable features {} in group {}", returnFeatures.size(), groupId);
+    
     generateTopKFrequentPatterns(new TransactionIterator<A>(transactionStream,
         attributeIdMapping), attributeFrequency, minSupport, k, reverseMapping
         .size(), returnFeatures, new TopKPatternsOutputConverter<A>(output,

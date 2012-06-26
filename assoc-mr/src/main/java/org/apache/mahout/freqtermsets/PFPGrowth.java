@@ -94,7 +94,7 @@ public final class PFPGrowth implements Callable<Void> {
   public static final String FREQUENT_PATTERNS = "frequentpatterns";
   public static final String PARALLEL_COUNTING = "parallelcounting";
   
-  public static final String USE_FPG2 = "use_fpg2";
+  // public static final String USE_FPG2 = "use_fpg2";
   // YA
   public static final String PRUNE_PCTILE = "percentile";
   public static final int PRUNE_PCTILE_DEFAULT = 95;
@@ -106,7 +106,7 @@ public final class PFPGrowth implements Callable<Void> {
   public static final String GROUP_FIS_IN = "gfisIn";
   public static final String PARAM_INTERVAL_START = "startTime";
   public static final String PARAM_INTERVAL_END = "endTime";
-//  public static final String INDEX_OUT = "index";
+  // public static final String INDEX_OUT = "index";
   
   public static final String PARAM_WINDOW_SIZE = "windowSize";
   
@@ -127,40 +127,40 @@ public final class PFPGrowth implements Callable<Void> {
   // private PFPGrowth() {
   // }
   
- public static void loadEarlierFlists(JobContext context, Parameters params, long intervalStart, 
-     OpenIntObjectHashMap<String> idStringMapOut, OpenObjectIntHashMap<String> stringIdMapOut) 
-         throws IOException{
-   // I resist the urge to cache this list because I don't know what exactly would happen 
-   // when the job is run in hadoop where every job has its own JVM.. will static 
-   // fields somehow leak? Can I be sure that the static WeakHashMap used as a cache is mine?
-   // FINALLY.. the list would be loaded only twice, once for mapper, and once for reducer
-   
-   OpenObjectLongHashMap<String> prevFLists = PFPGrowth.readOlderCachedFLists(context
-       .getConfiguration(),
-       intervalStart, TimeWeightFunction.getDefault(params));
-   
-   LinkedList<String> terms = Lists.newLinkedList();
-   prevFLists.keysSortedByValue(terms);
-   Iterator<String> termsIter = terms.descendingIterator();
-   while (termsIter.hasNext()) {
-     
-     String t = termsIter.next();
-     int id = Hashing.murmur3_32().hashString(t, Charset.forName("UTF-8")).asInt();
-     int c = 0;
-     while (idStringMapOut.containsKey(id)) {
-       // Best effort
-       if (c < t.length()) {
-         id = Hashing.murmur3_32((int) t.charAt(c++)).hashString(t, Charset.forName("UTF-8"))
-             .asInt();
-       } else {
-         ++id;
-       }
-     }
-     
-     idStringMapOut.put(id, t);
-     stringIdMapOut.put(t, id);
-   }
- }
+  public static void loadEarlierFlists(JobContext context, Parameters params, long intervalStart,
+      OpenIntObjectHashMap<String> idStringMapOut, OpenObjectIntHashMap<String> stringIdMapOut)
+      throws IOException {
+    // I resist the urge to cache this list because I don't know what exactly would happen
+    // when the job is run in hadoop where every job has its own JVM.. will static
+    // fields somehow leak? Can I be sure that the static WeakHashMap used as a cache is mine?
+    // FINALLY.. the list would be loaded only twice, once for mapper, and once for reducer
+    
+    OpenObjectLongHashMap<String> prevFLists = PFPGrowth.readOlderCachedFLists(context
+        .getConfiguration(),
+        intervalStart, TimeWeightFunction.getDefault(params));
+    
+    LinkedList<String> terms = Lists.newLinkedList();
+    prevFLists.keysSortedByValue(terms);
+    Iterator<String> termsIter = terms.descendingIterator();
+    while (termsIter.hasNext()) {
+      
+      String t = termsIter.next();
+      int id = Hashing.murmur3_32().hashString(t, Charset.forName("UTF-8")).asInt();
+      int c = 0;
+      while (idStringMapOut.containsKey(id)) {
+        // Best effort
+        if (c < t.length()) {
+          id = Hashing.murmur3_32((int) t.charAt(c++)).hashString(t, Charset.forName("UTF-8"))
+              .asInt();
+        } else {
+          ++id;
+        }
+      }
+      
+      idStringMapOut.put(id, t);
+      stringIdMapOut.put(t, id);
+    }
+  }
   
   public static long readFMap(Configuration conf, OpenObjectLongHashMap<String> fMap)
       throws IOException {
@@ -462,9 +462,9 @@ public final class PFPGrowth implements Callable<Void> {
       long freq = record.getSecond().get();
       String token = record.getFirst().toString();
       
-//      char ch0 = token.charAt(0);
+      // char ch0 = token.charAt(0);
       // No special treatment for mentions: || ch0 == '@'
-      // or hashtags: (ch0 == '#') || 
+      // or hashtags: (ch0 == '#') ||
       if ((freq >= minFr)) {
         freqList.add(new Pair<String, Long>(token, freq));
         totalFreq += freq;
@@ -491,19 +491,19 @@ public final class PFPGrowth implements Callable<Void> {
     // YA: language indipendent stop words.. the 5% most frequent
     // FIXME: this will remove words from only the mostly used lang
     // i.e. cannot be used for a multilingual task
-    //Percentile: Pretty aggressive since the Zipfe distribution is very steep
-    int minIx = (int) Math.round(1.0f * (freqArr.length+1) * (100-prunePct) / 100);
+    // Percentile: Pretty aggressive since the Zipfe distribution is very steep
+    int minIx = (int) Math.round(1.0f * (freqArr.length + 1) * (100 - prunePct) / 100);
     long maxFreq = freqArr[minIx].getSecond();
-//    double maxFreq =  (1.0f * MathUtils.log(2,freqArr[0].getSecond()) * prunePct / 100);
-//    double maxFreq =  (1.0f * totalFreq * prunePct / 100);
+    // double maxFreq = (1.0f * MathUtils.log(2,freqArr[0].getSecond()) * prunePct / 100);
+    // double maxFreq = (1.0f * totalFreq * prunePct / 100);
     boolean withinUpperBound = false;
     for (int i = 0; i < freqArr.length; ++i) {
       if (!withinUpperBound) {
-//        totalFreq -= freqArr[i].getSecond();
-//        withinUpperBound = totalFreq <= maxFreq;
-//        withinUpperBound = MathUtils.log(2,freqArr[i].getSecond()) <= maxFreq;
+        // totalFreq -= freqArr[i].getSecond();
+        // withinUpperBound = totalFreq <= maxFreq;
+        // withinUpperBound = MathUtils.log(2,freqArr[i].getSecond()) <= maxFreq;
         withinUpperBound = freqArr[i].getSecond() <= maxFreq;
-        if(withinUpperBound){
+        if (withinUpperBound) {
           result = Lists.newArrayListWithCapacity(freqArr.length - i);
         }
       }
@@ -551,25 +551,39 @@ public final class PFPGrowth implements Callable<Void> {
     return ret;
   }
   
-  public static int getGroupHash(int attrHash, int numGroups) {
-    int maskLen = (int) MathUtils.log(2, numGroups) + 1;
+  public static int getGroupFromHash(int attrHash, int numGroups) {
+    int maskLen = (int) MathUtils.log(2, numGroups-1) + 1;
     int mask = (int) Math.pow(2, maskLen) - 1;
+    int result = 0;
     
-    // int attrHash = attribute.hashCode();
     int attrLSBs = 0;
     int byteMask = 255;
     int numBytes = (maskLen / 8) + 1;
-    for (int i = 0; i < numBytes; ++i) {
-      attrLSBs += attrHash & byteMask;
-      byteMask <<= 8;
+    
+    int leftShifts = 0;
+    while (leftShifts < maskLen) { // No folding.. the murmer hash seems to be a repeating: 32) {
+    
+      for (int i = 0; i < numBytes; ++i) {
+        attrLSBs += attrHash & byteMask;
+        byteMask <<= 8;
+      }
+      result ^= attrLSBs & mask;
+      
+      leftShifts += maskLen;
+      attrHash >>>= maskLen;
     }
     
-    int attrGroup = attrLSBs & mask;
-    return attrGroup;
+    return result + 1; //group numbers are not zero based
   }
   
+  // Modulo doesn't work because the hash is not necessarily positive
+  // public static int getGroupFromHash(int attrHash, int numGroups) {
+  // int result = (attrHash % numGroups) + 1;
+  // return result;
+  // }
+  
   public static boolean isGroupMember(int groupId, int attrId, int numGroups) {
-    int attrGroup = getGroupHash(attrId, numGroups);
+    int attrGroup = getGroupFromHash(attrId, numGroups);
     return groupId == attrGroup;
   }
   
@@ -666,12 +680,12 @@ public final class PFPGrowth implements Callable<Void> {
     startAggregating(params, conf);
     
     String indexDirStr;// = params.get(INDEX_OUT);
-//    if (indexDirStr == null || indexDirStr.isEmpty()) {
+    // if (indexDirStr == null || indexDirStr.isEmpty()) {
     indexDirStr = FilenameUtils.concat(params.get(OUTPUT), "index");
-//    } else {
-//      indexDirStr = FilenameUtils.concat(indexDirStr, startTime);
-//      indexDirStr = FilenameUtils.concat(indexDirStr, endTime);
-//    }
+    // } else {
+    // indexDirStr = FilenameUtils.concat(indexDirStr, startTime);
+    // indexDirStr = FilenameUtils.concat(indexDirStr, endTime);
+    // }
     File indexDir = new File(indexDirStr);
     
     // clean up
@@ -836,7 +850,7 @@ public final class PFPGrowth implements Callable<Void> {
     job.setInputFormatClass(CSVTweetInputFormat.class);
     if (FPSTREAM) {
       job.setMapperClass(ParallelFPStreamMapper.class);
-//      job.setCombinerClass(ParallelFPStreamCombiner.class);
+      // job.setCombinerClass(ParallelFPStreamCombiner.class);
       job.setCombinerClass(ParallelFPGrowthCombiner.class);
       job.setReducerClass(ParallelFPStreamReducer.class);
     } else {

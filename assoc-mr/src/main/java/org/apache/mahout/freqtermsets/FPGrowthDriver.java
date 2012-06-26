@@ -66,7 +66,7 @@ public final class FPGrowthDriver extends AbstractJob {
         "(Optional) Maximum Heap Size k, to denote the requirement to mine top K items."
             + " Default value: 50",
         "50");
-    addOption("numGroups",
+    addOption(PFPGrowth.NUM_GROUPS,
         "g",
         "(Optional) Number of groups the features should be divided in the map-reduce version."
             + " Doesn't work in sequential version Default Value:" + PFPGrowth.NUM_GROUPS_DEFAULT,
@@ -135,9 +135,9 @@ public final class FPGrowthDriver extends AbstractJob {
       String maxHeapSizeString = getOption("maxHeapSize");
       params.set("maxHeapSize", maxHeapSizeString);
     }
-    if (hasOption("numGroups")) {
-      String numGroupsString = getOption("numGroups");
-      params.set("numGroups", numGroupsString);
+    if (hasOption(PFPGrowth.NUM_GROUPS)) {
+      String numGroupsString = getOption(PFPGrowth.NUM_GROUPS);
+      params.set(PFPGrowth.NUM_GROUPS, numGroupsString);
     }
     
     if (hasOption("numTreeCacheEntries")) {

@@ -19,11 +19,9 @@ package org.apache.mahout.freqtermsets;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.Set;
@@ -41,6 +39,7 @@ import org.apache.hadoop.mapreduce.TaskInputOutputContext;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.MultiReader;
 import org.apache.lucene.queryParser.ParseException;
 import org.apache.lucene.queryParser.QueryParser;
 import org.apache.lucene.queryParser.QueryParser.Operator;
@@ -63,7 +62,6 @@ import org.apache.mahout.freqtermsets.stream.TimeWeightFunction;
 import org.apache.mahout.math.list.IntArrayList;
 import org.apache.mahout.math.map.OpenIntObjectHashMap;
 import org.apache.mahout.math.map.OpenObjectIntHashMap;
-import org.apache.mahout.math.map.OpenObjectLongHashMap;
 
 import ca.uwaterloo.twitter.ItemSetIndexBuilder;
 import ca.uwaterloo.twitter.ItemSetSimilarity;
@@ -72,7 +70,6 @@ import ca.uwaterloo.twitter.TwitterAnalyzer;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-import com.google.common.hash.Hashing;
 
 /**
  * takes each group of transactions and runs Vanilla FPGrowth on it and
@@ -88,6 +85,7 @@ public class ParallelFPStreamReducer extends
     private Set<Set<String>> encounteredDocs = Sets.newHashSet();
     private final TaskInputOutputContext<?, ?, ?, ?> context;
     private final TransactionTree extendedTree;
+    private long readerTime;
     
     private OldPatternsCollector(
         TaskInputOutputContext<?, ?, ?, ?> context,
@@ -105,11 +103,13 @@ public class ParallelFPStreamReducer extends
     public void setNextReader(IndexReader reader, int docBase) throws IOException {
       this.docBase = docBase;
       this.reader = reader;
+      this.readerTime = Long.parseLong( 
+          ((MMapDirectory)reader.directory()).getFile().getParentFile().getParentFile().getName());
     }
     
     @Override
     public void collect(int docId) throws IOException {
-      Document doc = reader.document(docId); // +docBase??
+      Document doc = reader.document(docId);// +docBase); results in a docId more than maxdoc
       String[] terms = reader.getTermFreqVector(docId,
           ItemSetIndexBuilder.AssocField.ITEMSET.name).getTerms();
       Set<String> termSet = Sets.newCopyOnWriteArraySet(Arrays.asList(terms));
@@ -139,7 +139,8 @@ public class ParallelFPStreamReducer extends
       // No need to divide because originally every transaction was added once per group
       // // will be added that many times
       // patternFreq /= appearingGroups.size();
-      long support = Math.round(timeWeigth.apply(patternFreq, mostRecentTime, intervalStart));
+      
+      long support = Math.round(timeWeigth.apply(patternFreq, readerTime, intervalStart));
       
       extendedTree.addPattern(pattern, support);
     }
@@ -150,7 +151,7 @@ public class ParallelFPStreamReducer extends
     }
   }
   
-  private IndexReader fisIxReader;
+  private MultiReader fisIxMultiReader;
   private IndexSearcher fisSearcher;
   private ItemSetSimilarity fisSimilarity;
   private QueryParser fisQparser;
@@ -163,7 +164,7 @@ public class ParallelFPStreamReducer extends
   private final OpenObjectIntHashMap<String> stringIdMap = new OpenObjectIntHashMap<String>();
   
   private TimeWeightFunction timeWeigth;
-  private long mostRecentTime;
+  // private long mostRecentTime;
   
   private int maxHeapSize = 50;
   
@@ -205,15 +206,20 @@ public class ParallelFPStreamReducer extends
   @Override
   protected void reduce(IntWritable key, Iterable<TransactionTree> values, Context context)
       throws IOException {
+    
     TransactionTree cTree = new TransactionTree();
+    int numPatterns = 0;
     for (TransactionTree tr : values) {
       for (Pair<IntArrayList, Long> p : tr) {
         cTree.addPattern(p.getFirst(), p.getSecond());
+        ++numPatterns;
       }
     }
     
-    if (fisIxReader != null) {
+    if (fisIxMultiReader != null) {
+      BooleanQuery.setMaxClauseCount(numPatterns);
       BooleanQuery allPatternsQuery = new BooleanQuery();
+      
       Iterator<Pair<IntArrayList, Long>> cTreeIter = cTree.iterator(false);
       while (cTreeIter.hasNext()) {
         IntArrayList newPatternIds = cTreeIter.next().getFirst();
@@ -294,30 +300,33 @@ public class ParallelFPStreamReducer extends
     Path timeRoot = outPath.getParent().getParent();
     FileSystem fs = FileSystem.get(conf);
     FileStatus[] otherWindows = fs.listStatus(timeRoot);
-    mostRecentTime = Long.MIN_VALUE;
-    Path mostRecentPath = null;
+    List<IndexReader> earlierIndexes = Lists
+        .<IndexReader> newArrayListWithCapacity(otherWindows.length - 1);
+    // mostRecentTime = Long.MIN_VALUE;
+    // Path mostRecentPath = null;
     for (int f = otherWindows.length - 1; f >= 0; --f) {
       Path p = otherWindows[f].getPath();
       long pathStartTime = Long.parseLong(p.getName());
       // should have used end time, but it doesn't make a difference,
       // AS LONG AS windows don't overlap
-      if (pathStartTime < intervalStart && pathStartTime > mostRecentTime) {
+      if (pathStartTime < intervalStart) {// && pathStartTime > mostRecentTime) {
         p = fs.listStatus(p)[0].getPath();
         p = new Path(p, "index");
         if (fs.exists(p)) {
-          mostRecentTime = pathStartTime;
-          mostRecentPath = p;
+          // mostRecentTime = pathStartTime;
+          // mostRecentPath = p;
+          File indexDir = FileUtils.toFile(p.toUri().toURL());
+          // FIXME: this will work only on local filesystem.. like many other parts of the code
+          Directory fisdir = new MMapDirectory(indexDir);
+          IndexReader fisIxReader = IndexReader.open(fisdir);
+          earlierIndexes.add(fisIxReader);
         }
-      } else if (mostRecentPath != null) {
-        break;
       }
     }
-    if (mostRecentPath != null) {
-      File indexDir = FileUtils.toFile(mostRecentPath.toUri().toURL());
-      // FIXME: this will work only on local filesystem.. like many other parts of the code
-      Directory fisdir = new MMapDirectory(indexDir);
-      fisIxReader = IndexReader.open(fisdir);
-      fisSearcher = new IndexSearcher(fisIxReader);
+//    if (mostRecentPath != null) {
+    if(!earlierIndexes.isEmpty()) {
+      fisIxMultiReader = new MultiReader(earlierIndexes.toArray(new IndexReader[0]));
+      fisSearcher = new IndexSearcher(fisIxMultiReader);
       fisSimilarity = new ItemSetSimilarity();
       fisSearcher.setSimilarity(fisSimilarity);
       
