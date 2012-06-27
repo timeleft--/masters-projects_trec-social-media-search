@@ -7,6 +7,7 @@ import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.io.StringReader;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
@@ -71,8 +72,9 @@ public class FISQueryExpander {
   
   private static Logger LOG = LoggerFactory.getLogger(FISQueryExpander.class);
   
-  private static final String FIS_INDEX_OPTION = "fis_index";
-  private static final String TWT_INDEX_OPTION = "twt_index";
+  private static final String FIS_INDEX_OPTION = "fis_inc_index";
+  private static final String TWT_INC_INDEX_OPTION = "twt_inc_index";
+  private static final String TWT_CHUNK_INDEX_OPTION = "twt_chunk_index";
   
   // private static final String BASE_PARAM_OPTION = "base_param";
   private static final float FIS_BASE_RANK_PARAM_DEFAULT = 60.0f;
@@ -129,15 +131,18 @@ public class FISQueryExpander {
    * @param args
    * @throws IOException
    * @throws org.apache.lucene.queryParser.ParseException
+   * @throws java.text.ParseException
    */
   @SuppressWarnings("static-access")
   public static void main(String[] args) throws IOException,
-      org.apache.lucene.queryParser.ParseException {
+      org.apache.lucene.queryParser.ParseException, java.text.ParseException {
     Options options = new Options();
     options.addOption(OptionBuilder.withArgName("path").hasArg()
         .withDescription("frequent itemsets index location").create(FIS_INDEX_OPTION));
     options.addOption(OptionBuilder.withArgName("path").hasArg()
-        .withDescription("twitter index location").create(TWT_INDEX_OPTION));
+        .withDescription("twitter incremental index location").create(TWT_INC_INDEX_OPTION));
+    options.addOption(OptionBuilder.withArgName("path").hasArg()
+        .withDescription("twitter chunked indexes root").create(TWT_CHUNK_INDEX_OPTION));
     // options.addOption(OptionBuilder.withArgName("float").hasArg()
     // .withDescription("parameter that would be used to rank top level queries and reduced in lower levels").create(BASE_PARAM_OPTION));
     options.addOption(OptionBuilder.withArgName("float").hasArg()
@@ -153,7 +158,7 @@ public class FISQueryExpander {
       System.exit(-1);
     }
     
-    if (!(cmdline.hasOption(FIS_INDEX_OPTION) && cmdline.hasOption(TWT_INDEX_OPTION))) {
+    if (!(cmdline.hasOption(FIS_INDEX_OPTION) && cmdline.hasOption(TWT_INC_INDEX_OPTION))) {
       HelpFormatter formatter = new HelpFormatter();
       formatter.printHelp(FISQueryExpander.class.getName(), options);
       System.exit(-1);
@@ -165,11 +170,20 @@ public class FISQueryExpander {
       System.exit(-1);
     }
     
-    File twtIndexLocation = new File(cmdline.getOptionValue(TWT_INDEX_OPTION));
-    if (!twtIndexLocation.exists()) {
-      System.err.println("Error: " + twtIndexLocation + " does not exist!");
+    File twtIncIxLocation = new File(cmdline.getOptionValue(TWT_INC_INDEX_OPTION));
+    if (!twtIncIxLocation.exists()) {
+      System.err.println("Error: " + twtIncIxLocation + " does not exist!");
       System.exit(-1);
     }
+    
+    File twtChnkIxRoot = new File(cmdline.getOptionValue(TWT_CHUNK_INDEX_OPTION));
+    if (!twtChnkIxRoot.exists()) {
+      System.err.println("Error: " + twtChnkIxRoot + " does not exist!");
+      System.exit(-1);
+    }
+    
+    File[] twtChnkIxLocs = twtChnkIxRoot.listFiles();
+    Arrays.sort(twtChnkIxLocs);
     
     // float baseBoost = BASE_PARAM_DEFAULT;
     // try {
@@ -202,9 +216,10 @@ public class FISQueryExpander {
     PrintStream out = new PrintStream(System.out, true, "UTF-8");
     FISQueryExpander qEx = null;
     try {
-      // qEx = new FISQueryExpander(fisIndexLocation, twtIndexLocation, System.currentTimeMillis());
+      qEx = new FISQueryExpander(fisIndexLocation, twtIncIxLocation, null, null);
       StringBuilder query = new StringBuilder();
       do {
+        out.print(">"); 
         if (CHAR_BY_CHAR) {
           int ch = System.in.read();
           if (ch == '\r' || ch == '\n') {
@@ -250,7 +265,8 @@ public class FISQueryExpander {
             if (qEx != null) {
               qEx.close();
             }
-            qEx = new FISQueryExpander(fisIndexLocation, twtIndexLocation, query.toString().trim());
+            qEx = new FISQueryExpander(fisIndexLocation, twtIncIxLocation, twtChnkIxLocs,
+                query.toString().trim());
             out.println("Queries will be executed as if the time is: "
                 + qEx.getTimeFormatted());
           } catch (java.text.ParseException e) {
@@ -260,7 +276,7 @@ public class FISQueryExpander {
         }
         
         out.println();
-        out.println(">" + query.toString());
+        out.println(query.toString());
         OpenIntFloatHashMap fisRs = null;
         if (mode != 10) {
           fisRs = qEx.relatedItemsets(query.toString(), minScore);
@@ -374,8 +390,8 @@ public class FISQueryExpander {
   private float itemSetLenWght = ITEMSET_LEN_WEIGHT_DEFAULT;
   
   private final long queryTime;
-
-  //TODO command line
+  
+  // TODO command line
   private static boolean incremental = true;
   
   /**
@@ -385,15 +401,22 @@ public class FISQueryExpander {
    * @param timeFormatted
    *          example: Sun Feb 06 10:38:43 +0000 2011
    * @throws IOException
-   * @throws java.text.ParseException 
+   * @throws java.text.ParseException
    */
-  public FISQueryExpander(File fisIndexLocation, File twtIndexLocation, String timeFormatted)
+  public FISQueryExpander(File fisIncIxLocation,
+      File twtIncIxLoc, File[] twtChunkIxLocs, String timeFormatted)
       throws IOException, java.text.ParseException {
-    this.timeFormatted = timeFormatted;
-    this.queryTime = new SimpleDateFormat("EEE MMM dd HH:mm:ss ZZZZZ yyyy").parse(timeFormatted)
-        .getTime();
+    SimpleDateFormat dFmt = new SimpleDateFormat("EEE MMM dd HH:mm:ss ZZZZZ yyyy");
+    if (timeFormatted != null) {
+      this.timeFormatted = timeFormatted;
+      this.queryTime = dFmt.parse(timeFormatted)
+          .getTime();
+    } else {
+      this.queryTime = System.currentTimeMillis();
+      this.timeFormatted = dFmt.format(new Date(queryTime));
+    }
     
-    Directory fisdir = new MMapDirectory(fisIndexLocation);
+    Directory fisdir = new MMapDirectory(fisIncIxLocation);
     fisIxReader = IndexReader.open(fisdir);
     fisSearcher = new IndexSearcher(fisIxReader);
     fisSimilarity = new ItemSetSimilarity();
@@ -405,23 +428,22 @@ public class FISQueryExpander {
     fisQparser.setDefaultOperator(Operator.AND);
     
     List<IndexReader> ixRds = Lists.newLinkedList();
-    for (File startFolder : twtIndexLocation.listFiles()) {
-      if (Long.parseLong(startFolder.getName()) > queryTime) {
-        break;
+    long incrEndTime = openTweetIndexesBeforeQueryTime(twtIncIxLoc,
+        true,
+        false,
+        Long.MIN_VALUE,
+        ixRds);
+    if (twtChunkIxLocs != null) {
+      int i = 0;
+      long prevChunkEndTime = incrEndTime;
+      while (i < twtChunkIxLocs.length - 1) {
+        prevChunkEndTime = openTweetIndexesBeforeQueryTime(twtChunkIxLocs[i++],
+            false,
+            false,
+            prevChunkEndTime,
+            ixRds);
       }
-      boolean lastOne = false;
-      for (File endFolder : startFolder.listFiles()) {
-        if (Long.parseLong(endFolder.getName()) > queryTime) {
-          lastOne = true;
-        }
-        if((!incremental) || (incremental && lastOne)) {
-        Directory twtdir = new MMapDirectory(endFolder);
-        ixRds.add(IndexReader.open(twtdir));
-        } 
-        if (lastOne) {
-          break;
-        }
-      }
+      openTweetIndexesBeforeQueryTime(twtChunkIxLocs[i], false, true, prevChunkEndTime, ixRds);
     }
     twtIxReader = new MultiReader(ixRds.toArray(new IndexReader[0]));
     twtSearcher = new IndexSearcher(twtIxReader);
@@ -432,6 +454,72 @@ public class FISQueryExpander {
     twtQparser.setDefaultOperator(Operator.AND);
     
     BooleanQuery.setMaxClauseCount(fisNumHits * fisNumHits);
+  }
+  
+  private long openTweetIndexesBeforeQueryTime(File twtIndexLocation, boolean pIncremental,
+      boolean exceedTime, long windowStart, List<IndexReader> ixReadersOut) throws IOException {
+    assert !(pIncremental && exceedTime) : "Those are mutually exclusive modes";
+    long result = -1;
+    File[] startFolders = twtIndexLocation.listFiles();
+    Arrays.sort(startFolders);
+    int minIx = -1;
+    int maxIx = -1;
+    for (int i = 0; i < startFolders.length; ++i) {
+      long folderStartTime = Long.parseLong(startFolders[i].getName());
+      if (minIx == -1 && folderStartTime >= windowStart) {
+        minIx = i;
+      }
+      if (folderStartTime < queryTime) {
+        maxIx = i;
+      } else {
+        break;
+      }
+    }
+//    if (minIx == maxIx) {
+//      startFolders = new File[] { startFolders[minIx] };
+//    } else {
+//      startFolders = Arrays.copyOfRange(startFolders, minIx, maxIx);
+//    }
+    startFolders = Arrays.copyOfRange(startFolders, minIx, maxIx+1);
+    for (File startFolder : startFolders) {
+      boolean lastOne = false;
+      File incrementalFolder = null;
+      File[] endFolderArr = startFolder.listFiles();
+      Arrays.sort(endFolderArr);
+      for (File endFolder : endFolderArr) {
+        if (Long.parseLong(endFolder.getName()) > queryTime) {
+          if (pIncremental) {
+            break;
+          } else {
+            if (exceedTime) {
+              lastOne = true;
+            } else {
+              break;
+            }
+          }
+        }
+        if (pIncremental) {
+          incrementalFolder = endFolder;
+        } else {
+          Directory twtdir = new MMapDirectory(endFolder);
+          ixReadersOut.add(IndexReader.open(twtdir));
+          result = Long.parseLong(endFolder.getName());
+        }
+        if (lastOne) {
+          assert !pIncremental;
+          break;
+        }
+      }
+      if (incrementalFolder != null) {
+        assert pIncremental;
+        assert startFolders.length == 1;
+        Directory twtdir = new MMapDirectory(incrementalFolder);
+        ixReadersOut.add(IndexReader.open(twtdir));
+        result = Long.parseLong(incrementalFolder.getName());
+        break; // shouldn't be needed
+      }
+    }
+    return result;
   }
   
   public OpenIntFloatHashMap relatedItemsets(String queryStr, float minScore)
