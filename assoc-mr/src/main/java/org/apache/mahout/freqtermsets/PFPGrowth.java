@@ -696,7 +696,7 @@ public final class PFPGrowth implements Callable<Void> {
     FileUtils.deleteQuietly(indexDir);
     
     Path seqPath = new Path(params.get(OUTPUT), FREQUENT_PATTERNS);
-    Directory[] earlierIndex;
+    Directory earlierIndex = null;
     if (FPSTREAM) {
       Path timeRoot = new Path(params.get(OUTPUT)).getParent().getParent();
       FileSystem fs = FileSystem.get(conf);
@@ -715,15 +715,11 @@ public final class PFPGrowth implements Callable<Void> {
       if (mostRecentPath != null) {
         mostRecentPath = fs.listStatus(mostRecentPath)[0].getPath();
         mostRecentPath = new Path(mostRecentPath, "index");
-        earlierIndex = new Directory[1];
+//        earlierIndex = new Directory[1];
         // FIXME: as with anything that involves lucene.. won't work except on a local machine
-        earlierIndex[0] = new MMapDirectory(FileUtils.toFile(mostRecentPath.toUri().toURL()));
-      } else {
-        earlierIndex = new Directory[0];
-      }
-    } else {
-      earlierIndex = new Directory[0];
-    }
+        earlierIndex = new MMapDirectory(FileUtils.toFile(mostRecentPath.toUri().toURL()));
+      } 
+    } 
     ItemSetIndexBuilder.buildIndex(seqPath, indexDir,
         startTime, Math.min(endTime, startTime + windowSize), earlierIndex);
   }

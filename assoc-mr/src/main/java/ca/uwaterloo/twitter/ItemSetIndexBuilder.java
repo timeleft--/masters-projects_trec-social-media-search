@@ -25,8 +25,11 @@ import org.apache.lucene.document.Field.Store;
 import org.apache.lucene.document.Field.TermVector;
 import org.apache.lucene.document.NumericField;
 import org.apache.lucene.index.CorruptIndexException;
+import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.index.TermDocs;
 import org.apache.lucene.search.Similarity;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
@@ -98,11 +101,11 @@ public class ItemSetIndexBuilder {
     seqPath += File.separator + PFPGrowth.FREQUENT_PATTERNS; // "frequentpatterns";
     LOG.info("Indexing " + seqPath);
     
-    buildIndex(new Path(seqPath), indexLocation, Long.MIN_VALUE, Long.MAX_VALUE);
+    buildIndex(new Path(seqPath), indexLocation, Long.MIN_VALUE, Long.MAX_VALUE, null);
   }
   
   public static void buildIndex(Path inPath, File indexDir,
-      long intervalStartTime, long intervalEndTime, Directory... earlierIndexes)
+      long intervalStartTime, long intervalEndTime, Directory earlierIndex)
       throws CorruptIndexException,
       LockObtainFailedException, IOException, NoSuchAlgorithmException {
     
@@ -122,9 +125,9 @@ public class ItemSetIndexBuilder {
     config.setOpenMode(IndexWriterConfig.OpenMode.CREATE); // Overwrite existing.
     
     IndexWriter writer = new IndexWriter(FSDirectory.open(indexDir), config);
-    
-    writer.addIndexes(earlierIndexes);
-    
+    if (earlierIndex != null) {
+      writer.addIndexes(earlierIndex);
+    }
     try {
       
       Pair<Writable, TopKStringPatterns> p;
@@ -180,6 +183,11 @@ public class ItemSetIndexBuilder {
               hexString.append(byteStr);
             }
             
+            if (earlierIndex != null) {
+              // delete same document from earlier.. this one will have >= support
+              writer.deleteDocuments(new Term(AssocField.ID.name, hexString + ""));
+            }
+            
             doc.add(new Field(AssocField.ID.name, hexString + "",
                 Store.YES, Index.NOT_ANALYZED_NO_NORMS));
             
@@ -227,5 +235,4 @@ public class ItemSetIndexBuilder {
       stream.close();
     }
   }
-  
 }

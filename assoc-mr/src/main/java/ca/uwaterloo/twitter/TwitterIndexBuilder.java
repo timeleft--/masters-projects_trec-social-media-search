@@ -65,7 +65,7 @@ public class TwitterIndexBuilder implements Callable<Void> {
   private static final String INPUT_OPTION = "input";
   private static final String INDEX_OPTION = "index";
   private static final String THREADS_OPTION = "threads";
-  private static final String DEFAULT_NUM_THREADS = "1";
+  private static final String DEFAULT_NUM_THREADS = "8";
   private static final String START_TIME_OPTION = "start";
   private static final String END_TIME_OPTION = "end";
   private static final String WINDOW_LEN_OPTION = "win";
@@ -85,7 +85,7 @@ public class TwitterIndexBuilder implements Callable<Void> {
       InterruptedException, ExecutionException {
     
     // TODO from commandline
-    boolean incremental = true;
+    boolean incremental = false;
     
     Options options = new Options();
     options.addOption(OptionBuilder.withArgName("path").hasArg()
@@ -189,8 +189,8 @@ public class TwitterIndexBuilder implements Callable<Void> {
         
         if (fileEnd > windowStart + winLen) {
           File indexFile;
-          if(incremental){
-            indexFile = new File(indexRoot,startTimeStr);
+          if (incremental) {
+            indexFile = new File(indexRoot, startTimeStr);
           } else {
             indexFile = new File(indexRoot, Long.toString(windowStart));
           }
@@ -207,10 +207,10 @@ public class TwitterIndexBuilder implements Callable<Void> {
           }
           
           tweetFiles.clear();
-//          if (incremental) {
-//            winLen += winLen;
-//          } else {
-            windowStart += winLen;
+          // if (incremental) {
+          // winLen += winLen;
+          // } else {
+          windowStart += winLen;
           if (fileEnd >= endTime) {
             return;
           }
@@ -226,7 +226,12 @@ public class TwitterIndexBuilder implements Callable<Void> {
     }
     
     if (tweetFiles.size() > 0) {
-      File indexFile = new File(indexRoot, Long.toString(windowStart));
+      File indexFile;
+      if (incremental) {
+        indexFile = new File(indexRoot, startTimeStr);
+      } else {
+        indexFile = new File(indexRoot, Long.toString(windowStart));
+      }
       indexFile = new File(indexFile, Long.toString(windowStart + winLen));
       lastFuture = exec.submit(new TwitterIndexBuilder(tweetFiles.toArray(new Path[0]),
           indexFile, conf, prevIndexDir));
@@ -298,8 +303,8 @@ public class TwitterIndexBuilder implements Callable<Void> {
             Store.YES, Index.NOT_ANALYZED_NO_NORMS));
         doc.add(new NumericField(TweetField.TIMESTAMP.name, Store.YES, true)
             .setLongValue(timestamp));
-        doc.add(new Field(TweetField.TEXT.name, tweet, Store.YES, Index.ANALYZED,
-            TermVector.WITH_POSITIONS_OFFSETS));
+        doc.add(new Field(TweetField.TEXT.name, tweet, Store.YES, Index.ANALYZED));
+        // Not enough disk space: TermVector.WITH_POSITIONS_OFFSETS));
         
         writer.addDocument(doc);
         if (++cnt % 10000 == 0) {
@@ -308,6 +313,7 @@ public class TwitterIndexBuilder implements Callable<Void> {
       }
       
       LOG.info(String.format("Total of %s tweets indexed", cnt));
+      
       LOG.info("Optimizing index...");
       writer.optimize();
       
