@@ -37,10 +37,12 @@ import org.apache.lucene.queryParser.QueryParser;
 import org.apache.lucene.queryParser.QueryParser.Operator;
 import org.apache.lucene.search.BooleanClause.Occur;
 import org.apache.lucene.search.BooleanQuery;
+import org.apache.lucene.search.FuzzyQuery;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.Similarity;
+import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.MMapDirectory;
@@ -219,7 +221,7 @@ public class FISQueryExpander {
       qEx = new FISQueryExpander(fisIndexLocation, twtIncIxLocation, null, null);
       StringBuilder query = new StringBuilder();
       do {
-        out.print(">"); 
+        out.print(">");
         if (CHAR_BY_CHAR) {
           int ch = System.in.read();
           if (ch == '\r' || ch == '\n') {
@@ -475,12 +477,12 @@ public class FISQueryExpander {
         break;
       }
     }
-//    if (minIx == maxIx) {
-//      startFolders = new File[] { startFolders[minIx] };
-//    } else {
-//      startFolders = Arrays.copyOfRange(startFolders, minIx, maxIx);
-//    }
-    startFolders = Arrays.copyOfRange(startFolders, minIx, maxIx+1);
+    // if (minIx == maxIx) {
+    // startFolders = new File[] { startFolders[minIx] };
+    // } else {
+    // startFolders = Arrays.copyOfRange(startFolders, minIx, maxIx);
+    // }
+    startFolders = Arrays.copyOfRange(startFolders, minIx, maxIx + 1);
     for (File startFolder : startFolders) {
       boolean lastOne = false;
       File incrementalFolder = null;
@@ -1262,6 +1264,33 @@ public class FISQueryExpander {
       }
     }
     return queryFreq;
+  }
+  
+  public BooleanQuery parseQuery(String queryStr, OpenObjectFloatHashMap<String> queryTermsOut,
+      MutableLong queryLenOut, boolean fuzzyHashTags) throws IOException {
+    
+    BooleanQuery result = new BooleanQuery();
+    
+    OpenObjectFloatHashMap<String> qTerms = queryTermFreq(queryStr, queryLenOut);
+    
+    for (String tStr : qTerms.keys()) {
+      queryTermsOut.put(tStr, qTerms.get(tStr));
+      
+      Term t = new Term(TweetField.TEXT.name, tStr);
+      Query tq;
+      if (fuzzyHashTags && tStr.charAt(0) == '#') {
+        // fuzzy matching for hashtags: #goodwoman #agoodwoman #goodwomen #goodman
+        tq = new FuzzyQuery(t, 0.85f, 1, 7);
+        tq = tq.rewrite(twtIxReader);
+      } else {
+        tq = new TermQuery(t);
+      }
+      tq.setBoost(qTerms.get(tStr));
+      
+      result.add(tq, Occur.SHOULD);
+    }
+    
+    return result;
   }
   
 }
