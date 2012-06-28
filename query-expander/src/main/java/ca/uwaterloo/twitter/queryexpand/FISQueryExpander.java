@@ -1266,7 +1266,8 @@ public class FISQueryExpander {
     return queryFreq;
   }
   
-  public BooleanQuery parseQuery(String queryStr, OpenObjectFloatHashMap<String> queryTermsOut,
+  public BooleanQuery parseQuery(String queryStr, OpenObjectFloatHashMap<String> termBoosts, 
+      OpenObjectFloatHashMap<String> queryTermsOut,
       MutableLong queryLenOut, boolean fuzzyHashTags) throws IOException {
     
     BooleanQuery result = new BooleanQuery();
@@ -1285,7 +1286,11 @@ public class FISQueryExpander {
       } else {
         tq = new TermQuery(t);
       }
-      tq.setBoost(qTerms.get(tStr));
+      float boost = qTerms.get(tStr);
+      if(termBoosts!= null){
+        boost *= termBoosts.get(tStr);
+      }
+      tq.setBoost(boost);
       
       result.add(tq, Occur.SHOULD);
     }
