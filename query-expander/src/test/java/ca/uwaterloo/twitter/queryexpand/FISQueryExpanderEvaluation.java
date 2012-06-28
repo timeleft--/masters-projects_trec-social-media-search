@@ -43,8 +43,8 @@ import com.ibm.icu.text.SimpleDateFormat;
 public class FISQueryExpanderEvaluation {
   private static final Logger LOG = LoggerFactory.getLogger(FISQueryExpanderEvaluation.class);
   
-  private static final float K1 = 2f; // default 1.2f;
-  private static final float B = 0.33f; // default 0.75
+  private static final float K1 = 100f; // default 1.2f;
+  private static final float B = 0.0f; // default 0.75
   private static final float LAVG = 7;
   
   private File fisIncIxLocation = new File(
@@ -160,12 +160,21 @@ public class FISQueryExpanderEvaluation {
         Term t = new Term(TweetField.TEXT.name, tStr);
         
         // weight of term is its IDF
-        float wt = target.twtIxReader.docFreq(t);
-        wt = target.twtIxReader.numDocs() / wt;
-        wt = (float) MathUtils.log(2, wt);
+        // Also using the IDF formula in http://nlp.uned.es/~jperezi/Lucene-BM25/ for consistency
+//        float idf = target.twtIxReader.docFreq(t);
+//        idf = target.twtIxReader.numDocs() / idf;
+//        idf = (float) MathUtils.log(2, idf);
+        float idf = target.twtIxReader.docFreq(t);
+        idf = (target.twtIxReader.numDocs() - idf  + 0.5f) / (idf + 0.5f);
+        idf = (float) MathUtils.log(2, idf);
         
-        bm25 += (queryTerms.get(tStr) * ftd  * wt) //* (K1 + 1) because I want to neglect term freq 
-            / ((K1 * ((1 - B) + (B * dl / LAVG))) + ftd);
+        //this formula is uncontrollable in the way I want, because I want to make tf negligible
+//        bm25 += (queryTerms.get(tStr) * ftd  * idf * (K1 + 1)) 
+//            / ((K1 * ((1 - B) + (B * dl / LAVG))) + ftd);
+        // The BM25F formula as per http://nlp.uned.es/~jperezi/Lucene-BM25/
+        float wt = ftd / ((1-B) + (B * dl / LAVG));
+        
+        bm25 += (wt * idf) / (K1 + wt);
       }
       
       String tweetId = doc.get(TweetField.ID.name);
@@ -245,7 +254,7 @@ public class FISQueryExpanderEvaluation {
     resultFiles = Maps.newHashMap();
     
     openWriterForTag(TAG_BASELINE);
-    // openWriterForTag(TAG_QUERY_CONDPROB);
+    openWriterForTag(TAG_QUERY_CONDPROB);
     // openWriterForTag(TAG_KL_DIVER);
     // openWriterForTag(TAG_CLUSTER);
     
