@@ -43,7 +43,7 @@ import com.ibm.icu.text.SimpleDateFormat;
 public class FISQueryExpanderEvaluation {
   private static final Logger LOG = LoggerFactory.getLogger(FISQueryExpanderEvaluation.class);
   
-  private static final float K1 = 0.77f; // default 1.2f;
+  private static final float K1 = 2f; // default 1.2f;
   private static final float B = 0.33f; // default 0.75
   private static final float LAVG = 7;
   
@@ -70,7 +70,7 @@ public class FISQueryExpanderEvaluation {
   private static final String TAG_QUERY_CONDPROB = "qCondProb";
   private static final String TAG_KL_DIVER = "klDiver";
   private static final String TAG_CLUSTER = "clusters";
-
+  
   private File[] twtChunkIxLocs;
   private Map<String, Writer> resultWriters;
   private Map<String, File> resultFiles;
@@ -164,7 +164,7 @@ public class FISQueryExpanderEvaluation {
         wt = target.twtIxReader.numDocs() / wt;
         wt = (float) MathUtils.log(2, wt);
         
-        bm25 += (queryTerms.get(tStr) * ftd * (K1 + 1) * wt)
+        bm25 += (queryTerms.get(tStr) * ftd  * wt) //* (K1 + 1) because I want to neglect term freq 
             / ((K1 * ((1 - B) + (B * dl / LAVG))) + ftd);
       }
       
@@ -282,9 +282,22 @@ public class FISQueryExpanderEvaluation {
       }
     }
     
-    if(resultFiles!=null){
-      for(File resultF: resultFiles.values()){
-        qrelUtil.findUnjedged(resultF, LOG_TOP_COUNT);
+    if (resultFiles != null) {
+      for (File resultF : resultFiles.values()) {
+        Writer unjWr = Channels.newWriter(FileUtils.openOutputStream(new File(resultF
+            .getAbsolutePath() + ".unjudged")).getChannel(),
+            "UTF-8");
+        try {
+          Map<String, List<String>> unjudged = qrelUtil.findUnjedged(resultF, LOG_TOP_COUNT);
+          for (String qid : unjudged.keySet()) {
+            unjWr.append("Qid: " + qid + "\n");
+            unjWr.append("Num. Unjudged: " + unjudged.get(qid).size() + "\n");
+            unjWr.append("Unjudged Ids: " + unjudged.get(qid) + "\n");
+          }
+        } finally {
+          unjWr.flush();
+          unjWr.close();
+        }
       }
     }
   }
