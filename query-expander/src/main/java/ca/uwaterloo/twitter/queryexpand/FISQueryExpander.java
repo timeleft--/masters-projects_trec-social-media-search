@@ -12,6 +12,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
 
@@ -37,8 +38,10 @@ import org.apache.lucene.queryParser.QueryParser;
 import org.apache.lucene.queryParser.QueryParser.Operator;
 import org.apache.lucene.search.BooleanClause.Occur;
 import org.apache.lucene.search.BooleanQuery;
+import org.apache.lucene.search.FilteredQuery;
 import org.apache.lucene.search.FuzzyQuery;
 import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.NumericRangeFilter;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.Similarity;
@@ -53,9 +56,17 @@ import org.apache.mahout.math.list.IntArrayList;
 import org.apache.mahout.math.map.OpenIntFloatHashMap;
 import org.apache.mahout.math.map.OpenObjectFloatHashMap;
 import org.apache.mahout.math.map.OpenObjectIntHashMap;
+import org.apache.mahout.math.set.OpenIntHashSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import weka.clusterers.Clusterer;
+import weka.clusterers.SimpleKMeans;
+import weka.core.Attribute;
+import weka.core.FastVector;
+import weka.core.Instance;
+import weka.core.Instances;
+import weka.core.ManhattanDistance;
 import ca.uwaterloo.twitter.ItemSetIndexBuilder;
 import ca.uwaterloo.twitter.ItemSetSimilarity;
 import ca.uwaterloo.twitter.TwitterAnalyzer;
@@ -71,6 +82,17 @@ import com.google.common.collect.Sets.SetView;
 import com.ibm.icu.text.SimpleDateFormat;
 
 public class FISQueryExpander {
+  public static enum TermWeigting {
+    PROB_QUERY("pq"),
+    KL_DIVERG("kl"),
+    CLUSTERING("clustering");
+    
+    public final String name;
+    
+    TermWeigting(String s) {
+      name = s;
+    }
+  };
   
   private static Logger LOG = LoggerFactory.getLogger(FISQueryExpander.class);
   
@@ -118,26 +140,14 @@ public class FISQueryExpander {
   
   private static final boolean QUERY_SUBSET_BOOST_IDF = false;
   
-  public static enum TermWeigting {
-    PROB_QUERY("pq"),
-    KL_DIVERG("kl");
-    
-    public final String name;
-    
-    TermWeigting(String s) {
-      name = s;
-    }
-  };
   
   /**
    * @param args
-   * @throws IOException
-   * @throws org.apache.lucene.queryParser.ParseException
    * @throws java.text.ParseException
+   * @throws Exception
    */
   @SuppressWarnings("static-access")
-  public static void main(String[] args) throws IOException,
-      org.apache.lucene.queryParser.ParseException, java.text.ParseException {
+  public static void main(String[] args) throws Exception {
     Options options = new Options();
     options.addOption(OptionBuilder.withArgName("path").hasArg()
         .withDescription("frequent itemsets index location").create(FIS_INDEX_OPTION));
@@ -243,6 +253,9 @@ public class FISQueryExpander {
         String cmd = query.substring(0, 2);
         if (cmd.equals("i:")) {
           mode = 0; // itemsets
+        } else if (cmd.equals("c:")) {
+          mode = 5; // terms with query divergence
+          termWeighting = TermWeigting.CLUSTERING;
         } else if (cmd.equals("q:")) {
           mode = 6; // terms with query probability
           termWeighting = TermWeigting.PROB_QUERY;
@@ -296,7 +309,24 @@ public class FISQueryExpander {
             ScoreIxObj<List<String>> is = itemsets.poll();
             out.println(++i + " (" + is.score + "): " + is.obj.toString());
           }
-        } else if (mode == 5 || mode == 6 || mode == 7) {
+        } else if (mode == 5) {
+          PriorityQueue<ScoreIxObj<String>>[] clusterTerms = qEx
+              .convertResultToWeightedTermsByClustering(fisRs, clusterClosedOnly);
+          
+          int i = 0;
+          OpenIntHashSet empty = new OpenIntHashSet();
+          while (empty.size() < clusterTerms.length) {
+            for (int c = 0; c < clusterTerms.length; ++c, ++i) {
+              if (clusterTerms[c].isEmpty()) {
+                empty.add(c);
+                continue;
+              }
+              ScoreIxObj<String> t = clusterTerms[c].poll();
+              out.println(c + ":" + (i / clusterTerms.length) + " (" + t.score + "): " + t.obj);
+            }
+          }
+          
+        } else if (mode == 6 || mode == 7) {
           
           PriorityQueue<ScoreIxObj<String>> weightedTerms = null;
           if (TermWeigting.PROB_QUERY.equals(termWeighting)) {
@@ -392,8 +422,11 @@ public class FISQueryExpander {
   float itemSetLenWght = ITEMSET_LEN_WEIGHT_DEFAULT;
   
   final long queryTime;
-  
+ 
   // TODO command line
+  private int clusterSize = 33;
+  private static boolean clusterClosedOnly = false;
+  
   static boolean incremental = true;
   
   /**
@@ -549,60 +582,33 @@ public class FISQueryExpander {
     }
     BooleanQuery query = new BooleanQuery(); // This adds trash: true);
     Set<String> querySet = Sets.newCopyOnWriteArraySet(queryTermWeight.keys());
-    if (querySet.size() > 2) {
-      for (Set<String> querySubSet : Sets.powerSet(querySet)) {
-        if (querySubSet.size() < 2) {
-          continue;
-        }
-        Query subQuery = fisQparser.parse(querySubSet.toString()
-            .replaceAll(COLLECTION_STRING_CLEANER, ""));
-        
-        float querySubSetW = 0;
-        for (String qTerm : querySubSet) {
-          querySubSetW += queryTermWeight.get(qTerm);
-        }
-        
-        if (QUERY_SUBSET_BOOST_IDF) {
-          subQuery.setBoost(querySubSetW / totalIDF);
-        } else {
-          subQuery.setBoost(querySubSetW / qLen.floatValue());
-        }
-        
-        query.add(subQuery, Occur.SHOULD);
+    // if (querySet.size() > 2) {
+    for (Set<String> querySubSet : Sets.powerSet(querySet)) {
+      // if (querySubSet.size() < 2) {
+      if (querySubSet.isEmpty()) {
+       continue;
+       }
+      Query subQuery = fisQparser.parse(querySubSet.toString()
+          .replaceAll(COLLECTION_STRING_CLEANER, ""));
+      
+      float querySubSetW = 0;
+      for (String qTerm : querySubSet) {
+        querySubSetW += queryTermWeight.get(qTerm);
       }
-    } else {
-      Query subQuery = fisQparser.parse(querySet.toString().replaceAll(COLLECTION_STRING_CLEANER,
-          ""));
-      subQuery.setBoost(1);
+      
+      if (QUERY_SUBSET_BOOST_IDF) {
+        subQuery.setBoost(querySubSetW / totalIDF);
+      } else {
+        subQuery.setBoost(querySubSetW / qLen.floatValue());
+      }
+      
       query.add(subQuery, Occur.SHOULD);
     }
-    
-    // Query allQuery = fisQparser.parse(queryStr);
-    // // allQuery.setBoost(baseBoost);
-    // allQuery = allQuery.rewrite(fisIxReader);
-    //
-    // Set<Term> queryTermsTemp = Sets.<Term> newHashSet();
-    // Set<String> queryTerms = Sets.<String> newHashSet();
-    // allQuery.extractTerms(queryTermsTemp);
-    // for (Term term : queryTermsTemp) {
-    // queryTerms.add(term.text());
-    // }
-    // queryTermsTemp = null;
-    //
-    // // This boost should be used only for the allQuery
-    // // query.setBoost(baseBoost);
-    // query.add(allQuery, Occur.SHOULD);
-    //
-    // if (queryTerms.size() > 2) {
-    // String[] queryArr = queryTerms.toArray(new String[0]);
-    // for (int i = 0; i < queryTerms.size() - 1; ++i) {
-    // for (int j = i + 1; j < queryTerms.size(); ++j) {
-    // Query pairQuery = fisQparser.parse(queryArr[i] + " " + queryArr[j]);
-    // pairQuery.setBoost((2.0f / queryTerms.size())); // * baseBoost);
-    // query.add(pairQuery, Occur.SHOULD);
-    // }
-    // }
-    // queryArr = null;
+    // } else {
+    // Query subQuery = fisQparser.parse(querySet.toString().replaceAll(COLLECTION_STRING_CLEANER,
+    // ""));
+    // subQuery.setBoost(1);
+    // query.add(subQuery, Occur.SHOULD);
     // }
     
     OpenIntFloatHashMap resultSet = new OpenIntFloatHashMap();
@@ -1266,11 +1272,12 @@ public class FISQueryExpander {
     return queryFreq;
   }
   
-  public BooleanQuery parseQuery(String queryStr, OpenObjectFloatHashMap<String> termBoosts, 
+  public FilteredQuery parseQuery(String queryStr, OpenObjectFloatHashMap<String> termBoosts,
       OpenObjectFloatHashMap<String> queryTermsOut,
       MutableLong queryLenOut, boolean fuzzyHashTags) throws IOException {
     
     BooleanQuery result = new BooleanQuery();
+    result.add(new TermQuery(new Term(TweetField.TEXT.name,"rt")), Occur.MUST_NOT);
     
     OpenObjectFloatHashMap<String> qTerms = queryTermFreq(queryStr, queryLenOut);
     
@@ -1287,7 +1294,7 @@ public class FISQueryExpander {
         tq = new TermQuery(t);
       }
       float boost = qTerms.get(tStr);
-      if(termBoosts!= null){
+      if (termBoosts != null) {
         boost *= termBoosts.get(tStr);
       }
       tq.setBoost(boost);
@@ -1295,7 +1302,106 @@ public class FISQueryExpander {
       result.add(tq, Occur.SHOULD);
     }
     
-    return result;
+    NumericRangeFilter<Long> timeFilter = NumericRangeFilter
+        .newLongRange(TweetField.TIMESTAMP.name,
+            Long.MIN_VALUE,
+            queryTime,
+            true,
+            true);
+    return new FilteredQuery(result, timeFilter);
   }
   
+  @SuppressWarnings("unchecked")
+  public PriorityQueue<ScoreIxObj<String>>[] convertResultToWeightedTermsByClustering(
+      OpenIntFloatHashMap rs, boolean closedOnly) throws Exception {
+    
+    PriorityQueue<ScoreIxObj<String>>[] result = null;
+    
+    OpenObjectIntHashMap<String> termIdMap = new OpenObjectIntHashMap<String>();
+    Set<Set<String>> itemsets = Sets.newLinkedHashSet();
+    Map<IntArrayList, Instance> patternInstMap = Maps.newLinkedHashMap();
+    TransactionTree patternTree = new TransactionTree();
+    FastVector attrs = new FastVector();
+    int nextId = 0;
+    
+    IntArrayList keyList = new IntArrayList(rs.size());
+    rs.keysSortedByValue(keyList);
+    for (int i = rs.size() - 1; i >= 0; --i) {
+      int hit = keyList.getQuick(i);
+      TermFreqVector terms = fisIxReader.getTermFreqVector(hit,
+          ItemSetIndexBuilder.AssocField.ITEMSET.name);
+      if (terms.size() < MIN_ITEMSET_SIZE) {
+        continue;
+      }
+      Set<String> termSet = Sets.newCopyOnWriteArraySet(Arrays.asList(terms.getTerms()));
+      
+      if (itemsets.contains(termSet)) {
+        continue;
+      }
+      
+      itemsets.add(termSet);
+      
+      IntArrayList pattern = new IntArrayList(termSet.size());
+      
+      for (String term : termSet) {
+        if (!termIdMap.containsKey(term)) {
+          termIdMap.put(term, nextId++);
+          attrs.addElement(new Attribute(term));
+        }
+        pattern.add(termIdMap.get(term));
+      }
+      
+      patternTree.addPattern(pattern, 1);
+    }
+    if (patternTree.isTreeEmpty()) {
+      return new PriorityQueue[0];
+    }
+    Instances insts = new Instances("itemsets", attrs, itemsets.size());
+    Iterator<Pair<IntArrayList, Long>> patternsIter = patternTree.iterator(closedOnly);
+    while (patternsIter.hasNext()) {
+      Instance inst = new Instance(attrs.size());
+      IntArrayList pattern = patternsIter.next().getFirst();
+      for (int i = 0; i < pattern.size(); ++i) {
+        inst.setValue(pattern.getQuick(i), 1);
+      }
+      insts.add(inst);
+      patternInstMap.put(pattern, inst);
+    }
+    
+    Clusterer clusterer = new SimpleKMeans();
+    ((SimpleKMeans) clusterer).setNumClusters(patternInstMap.size() / clusterSize);
+    ((SimpleKMeans) clusterer).setDistanceFunction(new ManhattanDistance());
+    // HierarchicalClusterer(); Same as XMeans
+    // XMeans(); One cluster full and the other is just what doesn't fit
+    // ((XMeans) clusterer).setDistanceF(new ManhattanDistance());
+    // CLOPE(); Too many clusters for egypt evactuation.. 972 items clustered into 500+ clusters
+    // EM(); Always returns one cluster
+    clusterer.buildClusterer(insts);
+    
+    LOG.info("Number of clusters: {}", clusterer.numberOfClusters());
+    
+    Iterator<Set<String>> itemsetsIter = itemsets.iterator();
+    float[][] termMembership = new float[termIdMap.size()][clusterer.numberOfClusters()];
+    for (IntArrayList pattern : patternInstMap.keySet()) {
+      Instance inst = patternInstMap.get(pattern);
+      double[] distrib = clusterer.distributionForInstance(inst);
+      Set<String> itemset = itemsetsIter.next();
+      for (String term : itemset) {
+        float[] termDistrib = termMembership[termIdMap.get(term)];
+        for (int c = 0; c < distrib.length; ++c) {
+          termDistrib[c] += distrib[c];
+        }
+      }
+    }
+    
+    result = new PriorityQueue[clusterer.numberOfClusters()];
+    for (int c = 0; c < result.length; ++c) {
+      result[c] = new PriorityQueue<ScoreIxObj<String>>();
+      for (int t = 0; t < termMembership.length; ++t) {
+        result[c].add(new ScoreIxObj<String>(((Attribute) attrs.elementAt(t)).name(),
+            termMembership[t][c]));
+      }
+    }
+    return result;
+  }
 }
