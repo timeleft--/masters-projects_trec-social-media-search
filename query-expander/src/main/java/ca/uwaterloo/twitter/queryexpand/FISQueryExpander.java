@@ -361,38 +361,38 @@ public class FISQueryExpander {
     return timeFormatted;
   }
   
-  private final QueryParser fisQparser;
-  private final IndexSearcher fisSearcher;
-  private final IndexReader fisIxReader;
+  final QueryParser fisQparser;
+  final IndexSearcher fisSearcher;
+  final IndexReader fisIxReader;
   
-  private final int fisNumHits = NUM_HITS_INTERNAL_DEFAULT;
-  private final float fisBaseRankingParam = FIS_BASE_RANK_PARAM_DEFAULT;
+  final int fisNumHits = NUM_HITS_INTERNAL_DEFAULT;
+  final float fisBaseRankingParam = FIS_BASE_RANK_PARAM_DEFAULT;
   
-  private final Similarity fisSimilarity;
+  final Similarity fisSimilarity;
   
-  private final QueryParser twtQparser;
-  private final IndexSearcher twtSearcher;
-  private final MultiReader twtIxReader;
+  final QueryParser twtQparser;
+  final IndexSearcher twtSearcher;
+  final MultiReader twtIxReader;
   
-  // private final int twtNumHits = NUM_HITS_DEFAULT;
+  // final int twtNumHits = NUM_HITS_DEFAULT;
   
-  private final Similarity twtSimilarity;
+  final Similarity twtSimilarity;
   
-  private float itemsetLenghtAvg = ITEMSET_LEN_AVG_DEFAULT;
+  float itemsetLenghtAvg = ITEMSET_LEN_AVG_DEFAULT;
   
   // As in Lambda of Jelink Mercer smoothing
-  private float itemsetCorpusModelWeight = ITEMSET_CORPUS_MODEL_WEIGHT_DEFAULT;
-  private float twitterCorpusModelWeight = TWITTER_CORPUS_MODEL_WEIGHT_DEFAULT;
+  float itemsetCorpusModelWeight = ITEMSET_CORPUS_MODEL_WEIGHT_DEFAULT;
+  float twitterCorpusModelWeight = TWITTER_CORPUS_MODEL_WEIGHT_DEFAULT;
   
   // As in Mue of Dirchilet smoothing
-  private float termWeightSmoother = TERM_WEIGHT_SMOOTHER_DEFAULT;
+  float termWeightSmoother = TERM_WEIGHT_SMOOTHER_DEFAULT;
   
-  private float itemSetLenWght = ITEMSET_LEN_WEIGHT_DEFAULT;
+  float itemSetLenWght = ITEMSET_LEN_WEIGHT_DEFAULT;
   
-  private final long queryTime;
+  final long queryTime;
   
   // TODO command line
-  private static boolean incremental = true;
+  static boolean incremental = true;
   
   /**
    * 
@@ -1239,7 +1239,7 @@ public class FISQueryExpander {
     
   }
   
-  private OpenObjectFloatHashMap<String> queryTermFreq(String query, MutableLong qLenOut)
+  OpenObjectFloatHashMap<String> queryTermFreq(String query, MutableLong qLenOut)
       throws IOException {
     OpenObjectFloatHashMap<String> queryFreq = new OpenObjectFloatHashMap<String>();
     // String[] queryTokens = query.toString().split("\\W");
