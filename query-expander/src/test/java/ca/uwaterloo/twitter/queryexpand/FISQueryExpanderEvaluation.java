@@ -1,6 +1,7 @@
 package ca.uwaterloo.twitter.queryexpand;
 
 import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.Writer;
 import java.nio.channels.Channels;
@@ -32,11 +33,11 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import ca.uwaterloo.trecutil.QRelUtil;
 import ca.uwaterloo.twitter.TwitterIndexBuilder.TweetField;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 import com.ibm.icu.text.SimpleDateFormat;
 
 public class FISQueryExpanderEvaluation {
@@ -54,6 +55,7 @@ public class FISQueryExpanderEvaluation {
   private static final String RESULT_PATH = "/u2/yaboulnaga/datasets/twitter-trec2011/waterloo.clark";
   private static final String TOPICS_XML_PATH =
       "/u2/yaboulnaga/datasets/twitter-trec2011/2011.topics.MB1-50.xml";
+  private static final String QREL_PATH = "/u2/yaboulnaga/datasets/twitter-trec2011/microblog11-qrels.txt";
   
   private int numItemsetsToConsider = 777;
   private int numTermsToAppend = 33;
@@ -62,18 +64,22 @@ public class FISQueryExpanderEvaluation {
   private boolean paramClosedOnly = true;
   private boolean paramPropagateItemSetScores = false;
   
+  private static final int LOG_TOP_COUNT = 30;
+  
   private static final String TAG_BASELINE = "baseline";
   private static final String TAG_QUERY_CONDPROB = "qCondProb";
   private static final String TAG_KL_DIVER = "klDiver";
   private static final String TAG_CLUSTER = "clusters";
-  
+
   private File[] twtChunkIxLocs;
   private Map<String, Writer> resultWriters;
+  private Map<String, File> resultFiles;
   
   static List<String> queries;
   static List<String> topicIds;
   static List<String> queryTimes;
   static List<String> maxTweetIds;
+  static QRelUtil qrelUtil;
   
   FISQueryExpander target;
   
@@ -84,7 +90,7 @@ public class FISQueryExpanderEvaluation {
    * 
    */
   public class TrecResultFileCollector extends Collector {
-    private static final int LOG_TOP_COUNT = 30;
+    
     Scorer scorer;
     IndexReader reader;
     int docBase;
@@ -93,7 +99,7 @@ public class FISQueryExpanderEvaluation {
     final String queryStr;
     final OpenObjectFloatHashMap<String> queryTerms;
     final int queryLen;
-    final TreeMap<ScoreIxObj<String>,String> resultSet;
+    final TreeMap<ScoreIxObj<String>, String> resultSet;
     int rank = 1;
     
     public TrecResultFileCollector(String pTopicId, String pRunTag,
@@ -115,7 +121,7 @@ public class FISQueryExpanderEvaluation {
       queryTerms = pQueryTerms;
       queryLen = pQueryLen;
       
-      resultSet = Maps.<ScoreIxObj<String>,String> newTreeMap();
+      resultSet = Maps.<ScoreIxObj<String>, String> newTreeMap();
       LOG.info("RunTag: {} - Query: {}", runTag, queryStr);
     }
     
@@ -164,10 +170,10 @@ public class FISQueryExpanderEvaluation {
       
       String tweetId = doc.get(TweetField.ID.name);
       String text = null;
-      if(LOG.isDebugEnabled()){
-        text = doc.get(TweetField.TEXT.name); 
+      if (LOG.isDebugEnabled()) {
+        text = doc.get(TweetField.TEXT.name);
       }
-      resultSet.put(new ScoreIxObj<String>(tweetId, bm25),text);
+      resultSet.put(new ScoreIxObj<String>(tweetId, bm25), text);
       
     }
     
@@ -196,7 +202,7 @@ public class FISQueryExpanderEvaluation {
             .append(runTag).append('\n');
         
         if (rank <= LOG_TOP_COUNT && LOG.isDebugEnabled()) {
-          LOG.debug(rank + "\t" + resultSet.get(tweet) + "\t" + score);
+          LOG.debug(rank + "\t" + resultSet.get(tweet) + "\t" + tweet.score + "\t" + tweet.obj);
         }
         ++rank;
       }
@@ -225,6 +231,8 @@ public class FISQueryExpanderEvaluation {
       queryTimes.add(topic.getChildText("querytime"));
       maxTweetIds.add(topic.getChildText("querytweettime"));
     }
+    
+    qrelUtil = new QRelUtil(new File(QREL_PATH));
   }
   
   @AfterClass
@@ -234,18 +242,19 @@ public class FISQueryExpanderEvaluation {
   @Before
   public void setUp() throws Exception {
     resultWriters = Maps.newHashMap();
+    resultFiles = Maps.newHashMap();
     
-     resultWriters.put(TAG_BASELINE, openWriterForTag(TAG_BASELINE));
-//    resultWriters.put(TAG_QUERY_CONDPROB, openWriterForTag(TAG_QUERY_CONDPROB));
-    // resultWriters.put(TAG_KL_DIVER, openWriterForTag(TAG_KL_DIVER));
-    // resultWriters.put(TAG_CLUSTER, openWriterForTag(TAG_CLUSTER));
+    openWriterForTag(TAG_BASELINE);
+    // openWriterForTag(TAG_QUERY_CONDPROB);
+    // openWriterForTag(TAG_KL_DIVER);
+    // openWriterForTag(TAG_CLUSTER);
     
     twtChunkIxLocs = new File(TWT_CHUNKS_ROOT).listFiles();
     Arrays.sort(twtChunkIxLocs);
     
   }
   
-  private Writer openWriterForTag(String runTag) throws IOException {
+  private void openWriterForTag(String runTag) throws IOException {
     File resultFile = new File(RESULT_PATH + "_i" + numItemsetsToConsider + "_t" + numTermsToAppend
         + "_" + runTag + ".txt");
     if (resultFile.exists()) {
@@ -255,7 +264,9 @@ public class FISQueryExpanderEvaluation {
               new File(resultFile.getAbsolutePath() + ".bak"
                   + new SimpleDateFormat("yyyMMddHHmmss").format(new Date())));
     }
-    return Channels.newWriter(FileUtils.openOutputStream(resultFile).getChannel(), "UTF-8");
+    resultWriters.put(runTag,
+        Channels.newWriter(FileUtils.openOutputStream(resultFile).getChannel(), "UTF-8"));
+    resultFiles.put(runTag, resultFile);
   }
   
   @After
@@ -268,6 +279,12 @@ public class FISQueryExpanderEvaluation {
       for (Writer resultWr : resultWriters.values()) {
         resultWr.flush();
         resultWr.close();
+      }
+    }
+    
+    if(resultFiles!=null){
+      for(File resultF: resultFiles.values()){
+        qrelUtil.findUnjedged(resultF, LOG_TOP_COUNT);
       }
     }
   }
