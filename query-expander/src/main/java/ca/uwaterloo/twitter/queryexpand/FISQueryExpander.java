@@ -140,7 +140,6 @@ public class FISQueryExpander {
   
   private static final boolean QUERY_SUBSET_BOOST_IDF = false;
   
-  
   /**
    * @param args
    * @throws java.text.ParseException
@@ -422,7 +421,7 @@ public class FISQueryExpander {
   float itemSetLenWght = ITEMSET_LEN_WEIGHT_DEFAULT;
   
   final long queryTime;
- 
+  
   // TODO command line
   private int clusterSize = 33;
   private static boolean clusterClosedOnly = false;
@@ -568,54 +567,14 @@ public class FISQueryExpander {
     // }
     
     MutableLong qLen = new MutableLong(0);
-    OpenObjectFloatHashMap<String> queryTermWeight = queryTermFreq(queryStr, qLen);
-    
-    float totalIDF = 0;
-    if (QUERY_SUBSET_BOOST_IDF) {
-      for (String qt : queryTermWeight.keys()) {
-        float idf = twtSimilarity.idf(twtIxReader.docFreq(new Term(TweetField.TEXT.name, qt)),
-            twtIxReader.numDocs());
-        idf *= queryTermWeight.get(qt);
-        totalIDF += idf;
-        queryTermWeight.put(qt, idf);
-      }
-    }
-    BooleanQuery query = new BooleanQuery(); // This adds trash: true);
-    Set<String> querySet = Sets.newCopyOnWriteArraySet(queryTermWeight.keys());
-    // if (querySet.size() > 2) {
-    for (Set<String> querySubSet : Sets.powerSet(querySet)) {
-      // if (querySubSet.size() < 2) {
-      if (querySubSet.isEmpty()) {
-       continue;
-       }
-      Query subQuery = fisQparser.parse(querySubSet.toString()
-          .replaceAll(COLLECTION_STRING_CLEANER, ""));
-      
-      float querySubSetW = 0;
-      for (String qTerm : querySubSet) {
-        querySubSetW += queryTermWeight.get(qTerm);
-      }
-      
-      if (QUERY_SUBSET_BOOST_IDF) {
-        subQuery.setBoost(querySubSetW / totalIDF);
-      } else {
-        subQuery.setBoost(querySubSetW / qLen.floatValue());
-      }
-      
-      query.add(subQuery, Occur.SHOULD);
-    }
-    // } else {
-    // Query subQuery = fisQparser.parse(querySet.toString().replaceAll(COLLECTION_STRING_CLEANER,
-    // ""));
-    // subQuery.setBoost(1);
-    // query.add(subQuery, Occur.SHOULD);
-    // }
+    OpenObjectFloatHashMap<String> queryTermWeight = new OpenObjectFloatHashMap<String>();
+    BooleanQuery query = parseQuery(queryStr, queryTermWeight, qLen, fisQparser);
     
     OpenIntFloatHashMap resultSet = new OpenIntFloatHashMap();
     TopDocs rs = fisSearcher.search(query, fisNumHits);
     
     Set<ScoreIxObj<String>> extraTerms = Sets.<ScoreIxObj<String>> newHashSet();
-    
+    Set<String> querySet = Sets.newCopyOnWriteArraySet(queryTermWeight.keys());
     int levelHits = addQualifiedResults(rs,
         resultSet,
         querySet,
@@ -1252,7 +1211,7 @@ public class FISQueryExpander {
     OpenObjectFloatHashMap<String> queryFreq = new OpenObjectFloatHashMap<String>();
     // String[] queryTokens = query.toString().split("\\W");
     TokenStream queryTokens = ANALYZER.tokenStream(TweetField.TEXT.name,
-        new StringReader(query.toString()));
+        new StringReader(query.toString().trim()));
     queryTokens.reset();
     
     // Set<Term> queryTerms = Sets.newHashSet();
@@ -1272,14 +1231,80 @@ public class FISQueryExpander {
     return queryFreq;
   }
   
-  public FilteredQuery parseQuery(String queryStr, OpenObjectFloatHashMap<String> termBoosts,
+  public BooleanQuery parseQuery(String queryStr,
+      OpenObjectFloatHashMap<String> queryTermsOut,// = queryTermFreq(queryStr, qLen);
+      MutableLong qLenOut, // = new MutableLong(0);
+      QueryParser targetParser)
+      throws IOException, org.apache.lucene.queryParser.ParseException {
+    
+    OpenObjectFloatHashMap<String> queryTermWeights = queryTermFreq(queryStr, qLenOut);
+    
+    float qLen = qLenOut.floatValue();
+    
+    float totalIDF = 0;
+    if (QUERY_SUBSET_BOOST_IDF) {
+      for (String qt : queryTermWeights.keys()) {
+        float idf = twtSimilarity.idf(twtIxReader.docFreq(new Term(TweetField.TEXT.name, qt)),
+            twtIxReader.numDocs());
+        idf *= queryTermWeights.get(qt);
+        totalIDF += idf;
+        queryTermWeights.put(qt, idf);
+      }
+    }
+    
+    BooleanQuery query = new BooleanQuery(); // This adds trash: true);
+    Set<String> querySet = Sets.newCopyOnWriteArraySet(queryTermWeights.keys());
+    // if (querySet.size() > 2) {
+    for (Set<String> querySubSet : Sets.powerSet(querySet)) {
+      // if (querySubSet.size() < 2) {
+      if (querySubSet.isEmpty()) {
+        continue;
+      }
+      Query subQuery = targetParser.parse(querySubSet.toString()
+          .replaceAll(COLLECTION_STRING_CLEANER, ""));
+      
+      float querySubSetW = 0;
+      for (String qTerm : querySubSet) {
+        querySubSetW += queryTermWeights.get(qTerm);
+      }
+      
+      if (QUERY_SUBSET_BOOST_IDF) {
+        subQuery.setBoost(querySubSetW / totalIDF);
+      } else {
+        subQuery.setBoost(querySubSetW / qLen);
+      }
+      
+      query.add(subQuery, Occur.SHOULD);
+    }
+    // } else {
+    // Query subQuery = fisQparser.parse(querySet.toString().replaceAll(COLLECTION_STRING_CLEANER,
+    // ""));
+    // subQuery.setBoost(1);
+    // query.add(subQuery, Occur.SHOULD);
+    // }
+    
+    LOG.debug("Parsed \"{}\" into {}", queryStr, query);
+    
+    for (String key : queryTermWeights.keys())
+      queryTermsOut.put(key, queryTermWeights.get(key));
+    
+    return query;
+  }
+  
+  public FilteredQuery expandAndFilterQuery(BooleanQuery origQuery,
+      int origQueryLen,// = new MutableLong(0);
+      OpenObjectFloatHashMap<String> queryTerm,
+      PriorityQueue<String>[] extraTerms,
       OpenObjectFloatHashMap<String> queryTermsOut,
-      MutableLong queryLenOut, boolean fuzzyHashTags) throws IOException {
+      MutableLong queryLenOut,
+      int numTermsToAppend,
+      boolean fuzzyHashTags) throws IOException {
     
     BooleanQuery result = new BooleanQuery();
-    result.add(new TermQuery(new Term(TweetField.TEXT.name,"rt")), Occur.MUST_NOT);
     
-    OpenObjectFloatHashMap<String> qTerms = queryTermFreq(queryStr, queryLenOut);
+    result.add(origQuery, Occur.MUST);
+    
+    OpenObjectFloatHashMap<String> qTerms = queryTerm;// queryTermFreq(queryStr, queryLenOut);
     
     for (String tStr : qTerms.keys()) {
       queryTermsOut.put(tStr, qTerms.get(tStr));
@@ -1294,21 +1319,29 @@ public class FISQueryExpander {
         tq = new TermQuery(t);
       }
       float boost = qTerms.get(tStr);
-      if (termBoosts != null) {
-        boost *= termBoosts.get(tStr);
+      if (extraTerms != null) {
+        boost *= extraTerms[0].poll().length();
       }
       tq.setBoost(boost);
       
       result.add(tq, Occur.SHOULD);
     }
+    return filterQuery(result);
+  }
+  
+  public FilteredQuery filterQuery(BooleanQuery q) {
+    // No retweets
+    q.add(new TermQuery(new Term(TweetField.TEXT.name, "rt")), Occur.MUST_NOT);
     
+    // Time filter
     NumericRangeFilter<Long> timeFilter = NumericRangeFilter
         .newLongRange(TweetField.TIMESTAMP.name,
             Long.MIN_VALUE,
             queryTime,
             true,
             true);
-    return new FilteredQuery(result, timeFilter);
+    
+    return new FilteredQuery(q, timeFilter);
   }
   
   @SuppressWarnings("unchecked")

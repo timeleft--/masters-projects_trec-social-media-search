@@ -13,6 +13,7 @@ import java.util.PriorityQueue;
 import java.util.TreeMap;
 
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.lang.mutable.MutableLong;
 import org.apache.commons.math.util.MathUtils;
 import org.apache.lucene.document.Document;
@@ -43,8 +44,8 @@ import com.ibm.icu.text.SimpleDateFormat;
 public class FISQueryExpanderEvaluation {
   private static final Logger LOG = LoggerFactory.getLogger(FISQueryExpanderEvaluation.class);
   
-  private static final float K1 = 100f; // default 1.2f;
-  private static final float B = 0.0f; // default 0.75
+  private static final float K1 = 0.07f; // default 1.2f;
+  private static final float B = 0.33f; // default 0.75
   private static final float LAVG = 7;
   
   private File fisIncIxLocation = new File(
@@ -52,13 +53,13 @@ public class FISQueryExpanderEvaluation {
   private File twtIncIxLoc = new File(
       "/u2/yaboulnaga/datasets/twitter-trec2011/index-tweets_8hr-increments");
   private static final String TWT_CHUNKS_ROOT = "/u2/yaboulnaga/datasets/twitter-trec2011/index-tweets_chunks";
-  private static final String RESULT_PATH = "/u2/yaboulnaga/datasets/twitter-trec2011/waterloo.clark";
+  private static final String RESULT_PATH = "/u2/yaboulnaga/datasets/twitter-trec2011/runs";
   private static final String TOPICS_XML_PATH =
       "/u2/yaboulnaga/datasets/twitter-trec2011/2011.topics.MB1-50.xml";
   private static final String QREL_PATH = "/u2/yaboulnaga/datasets/twitter-trec2011/microblog11-qrels.txt";
   
-  private int numItemsetsToConsider = 777;
-  private int numTermsToAppend = 33;
+  private int numItemsetsToConsider = 100;
+  private int numTermsToAppend = 10;
   private final boolean trecEvalFormat = true;
   private boolean paramNormalize = true;
   private boolean paramClosedOnly = true;
@@ -101,6 +102,8 @@ public class FISQueryExpanderEvaluation {
     final int queryLen;
     final TreeMap<ScoreIxObj<String>, String> resultSet;
     int rank = 1;
+    float maxScore = Float.MIN_VALUE;
+    float minScore = Float.MAX_VALUE;
     
     public TrecResultFileCollector(String pTopicId, String pRunTag,
         String pQueryStr, OpenObjectFloatHashMap<String> pQueryTerms, int pQueryLen)
@@ -132,7 +135,7 @@ public class FISQueryExpanderEvaluation {
     
     @Override
     public void collect(int docId) throws IOException {
-      // float luceneScore = scorer.score();
+//       float score = scorer.score();
       
       Document doc = reader.document(docId);
       
@@ -151,7 +154,8 @@ public class FISQueryExpanderEvaluation {
       OpenObjectFloatHashMap<String> docTerms = target.queryTermFreq(tweet, docLen);
       float dl = docLen.floatValue();
       
-      float bm25 = 0;
+      // BM25
+      float score = 0;
       for (String tStr : queryTerms.keys()) {
         float ftd = docTerms.get(tStr);
         if (ftd == 0) {
@@ -160,21 +164,24 @@ public class FISQueryExpanderEvaluation {
         Term t = new Term(TweetField.TEXT.name, tStr);
         
         // weight of term is its IDF
-        // Also using the IDF formula in http://nlp.uned.es/~jperezi/Lucene-BM25/ for consistency
+        // The consistency formula is just so bad!
+//        // Also using the IDF formula in http://nlp.uned.es/~jperezi/Lucene-BM25/ for consistency
 //        float idf = target.twtIxReader.docFreq(t);
-//        idf = target.twtIxReader.numDocs() / idf;
+//        idf = (target.twtIxReader.numDocs() - idf  + 0.5f) / (idf + 0.5f);
 //        idf = (float) MathUtils.log(2, idf);
         float idf = target.twtIxReader.docFreq(t);
-        idf = (target.twtIxReader.numDocs() - idf  + 0.5f) / (idf + 0.5f);
+        idf = target.twtIxReader.numDocs() / idf;
         idf = (float) MathUtils.log(2, idf);
         
-        //this formula is uncontrollable in the way I want, because I want to make tf negligible
-//        bm25 += (queryTerms.get(tStr) * ftd  * idf * (K1 + 1)) 
-//            / ((K1 * ((1 - B) + (B * dl / LAVG))) + ftd);
-        // The BM25F formula as per http://nlp.uned.es/~jperezi/Lucene-BM25/
-        float wt = ftd / ((1-B) + (B * dl / LAVG));
+        //Mutiplying this formula by  makes it controllable in the way I want, 
+        // because I want to make tf negligible, and it saturates to (k+1)*idf as tf -> INF
+        score += (queryTerms.get(tStr) * ftd * (K1 + 1) * idf) 
+            / ((K1 * ((1 - B) + (B * dl / LAVG))) + ftd);
         
-        bm25 += (wt * idf) / (K1 + wt);
+//        But we have not fields
+////         The BM25F formula as per http://nlp.uned.es/~jperezi/Lucene-BM25/
+//        float wt = ftd / ((1-B) + (B * dl / LAVG));
+//        bm25 += queryTerms.get(tStr) * (wt * idf) / (K1 + wt);
       }
       
       String tweetId = doc.get(TweetField.ID.name);
@@ -182,8 +189,16 @@ public class FISQueryExpanderEvaluation {
       if (LOG.isDebugEnabled()) {
         text = doc.get(TweetField.TEXT.name);
       }
-      resultSet.put(new ScoreIxObj<String>(tweetId, bm25), text);
       
+      if(score > maxScore){
+        maxScore = score;
+      }
+      
+      if(score < minScore){
+        minScore = score;
+      }
+      
+      resultSet.put(new ScoreIxObj<String>(tweetId, score), text);
     }
     
     @Override
@@ -199,10 +214,9 @@ public class FISQueryExpanderEvaluation {
     
     public void writeResults() throws IOException {
       int r = 1;
-      float maxScore = resultSet.keySet().iterator().next().score;
       Writer wr = resultWriters.get(runTag);
       for (ScoreIxObj<String> tweet : resultSet.keySet()) {
-        float score = (paramNormalize ? (tweet.score / maxScore) : tweet.score);
+        float score = (paramNormalize ? ((tweet.score -minScore)/ (maxScore-minScore)) : tweet.score);
         wr.append(topicId).append(' ')
             .append(trecEvalFormat ? "0 " : "")
             .append(tweet.obj).append(' ')
@@ -254,7 +268,7 @@ public class FISQueryExpanderEvaluation {
     resultFiles = Maps.newHashMap();
     
     openWriterForTag(TAG_BASELINE);
-    openWriterForTag(TAG_QUERY_CONDPROB);
+//    openWriterForTag(TAG_QUERY_CONDPROB);
     // openWriterForTag(TAG_KL_DIVER);
     // openWriterForTag(TAG_CLUSTER);
     
@@ -264,15 +278,16 @@ public class FISQueryExpanderEvaluation {
   }
   
   private void openWriterForTag(String runTag) throws IOException {
-    File resultFile = new File(RESULT_PATH + "_i" + numItemsetsToConsider + "_t" + numTermsToAppend
-        + "_" + runTag + ".txt");
+    File resultFile = new File(RESULT_PATH, runTag + "_bm25-b" + B + "-k" + K1 + "-lavg" + LAVG +"_i" + numItemsetsToConsider + "-t" + numTermsToAppend
+        + "_closed" + paramClosedOnly + "-prop" + paramPropagateItemSetScores);
     if (resultFile.exists()) {
       // throw new IllegalArgumentException("The result file already exists.. won't overwrite");
       FileUtils
-          .moveFile(resultFile,
-              new File(resultFile.getAbsolutePath() + ".bak"
-                  + new SimpleDateFormat("yyyMMddHHmmss").format(new Date())));
+          .moveDirectory(resultFile,
+              new File(resultFile.getAbsolutePath() + "_bak-before-"
+                  + new SimpleDateFormat("MMddHHmmss").format(new Date())));
     }
+    resultFile = new File(resultFile, new SimpleDateFormat("MMddHHmmss").format(new Date()) + ".txt");
     resultWriters.put(runTag,
         Channels.newWriter(FileUtils.openOutputStream(resultFile).getChannel(), "UTF-8"));
     resultFiles.put(runTag, resultFile);
@@ -326,13 +341,13 @@ public class FISQueryExpanderEvaluation {
       
       OpenObjectFloatHashMap<String> queryTerms;
       MutableLong queryLen;
-      FilteredQuery timedQuery;
+      FilteredQuery timedQuery = null;
       TrecResultFileCollector collector;
       
       if (resultWriters.containsKey(TAG_BASELINE)) {
         queryTerms = new OpenObjectFloatHashMap<String>();
         queryLen = new MutableLong();
-        timedQuery = target.parseQuery(queryStr, null, queryTerms, queryLen, false);
+        timedQuery = target.filterQuery(target.parseQuery(queryStr, queryTerms, queryLen, target.twtQparser));
         
         collector = new TrecResultFileCollector(topicIds.get(i),
             TAG_BASELINE, queryStr, queryTerms, queryLen.intValue());
@@ -365,11 +380,11 @@ public class FISQueryExpanderEvaluation {
         
         queryTerms = new OpenObjectFloatHashMap<String>();
         queryLen = new MutableLong();
-        timedQuery = target.parseQuery(expanedQueryStr.toString(),
-            null,
-            queryTerms,
-            queryLen,
-            false);
+//        timedQuery = target.parseQuery(expanedQueryStr.toString(),
+//            null,
+//            queryTerms,
+//            queryLen,
+//            false);
         
         collector = new TrecResultFileCollector(topicIds.get(i),
             TAG_QUERY_CONDPROB, expanedQueryStr.toString(), queryTerms, queryLen.intValue());
@@ -395,11 +410,11 @@ public class FISQueryExpanderEvaluation {
         
         queryTerms = new OpenObjectFloatHashMap<String>();
         queryLen = new MutableLong();
-        timedQuery = target.parseQuery(expanedQueryStr.toString(),
-            null,
-            queryTerms,
-            queryLen,
-            false);
+//        timedQuery = target.parseQuery(expanedQueryStr.toString(),
+//            null,
+//            queryTerms,
+//            queryLen,
+//            false);
         
         collector = new TrecResultFileCollector(topicIds.get(i),
             TAG_KL_DIVER, expanedQueryStr.toString(), queryTerms, queryLen.intValue());
@@ -427,11 +442,11 @@ public class FISQueryExpanderEvaluation {
         
         queryTerms = new OpenObjectFloatHashMap<String>();
         queryLen = new MutableLong();
-        timedQuery = target.parseQuery(expanedQueryStr.toString(),
-            null,
-            queryTerms,
-            queryLen,
-            false);
+//        timedQuery = target.parseQuery(expanedQueryStr.toString(),
+//            null,
+//            queryTerms,
+//            queryLen,
+//            false);
         
         collector = new TrecResultFileCollector(topicIds.get(i),
             TAG_CLUSTER, expanedQueryStr.toString(), queryTerms, queryLen.intValue());
