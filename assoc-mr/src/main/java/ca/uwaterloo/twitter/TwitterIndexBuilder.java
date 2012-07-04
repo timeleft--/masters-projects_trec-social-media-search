@@ -24,6 +24,8 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.mapreduce.lib.input.CombineFileSplit;
 import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.PerFieldAnalyzerWrapper;
+import org.apache.lucene.analysis.TwitterEnglishAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.Field.Index;
@@ -40,6 +42,7 @@ import org.apache.lucene.util.Version;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.twitter.corpus.data.CSVTweetRecordReader;
 
@@ -53,7 +56,8 @@ public class TwitterIndexBuilder implements Callable<Void> {
     ID("id"),
     SCREEN_NAME("screen_name"),
     TIMESTAMP("timestamp"),
-    TEXT("text");
+    TEXT("text"),
+    STEMMED_EN("stemmed_en");
     
     public final String name;
     
@@ -71,7 +75,10 @@ public class TwitterIndexBuilder implements Callable<Void> {
   private static final String WINDOW_LEN_OPTION = "win";
   private static final String WINDOW_LEN_DEFAULT = "3600000";
   
-  private static final Analyzer ANALYZER = new TwitterAnalyzer(); // Version.LUCENE_36);
+  private static final Analyzer PLAIN_ANALYZER = new TwitterAnalyzer(); // Version.LUCENE_36);
+  private static final Analyzer ENGLISH_ANALYZER = new TwitterEnglishAnalyzer();
+  private static final Analyzer ANALYZER = new PerFieldAnalyzerWrapper(PLAIN_ANALYZER,
+      ImmutableMap.<String, Analyzer> of(TweetField.STEMMED_EN.name, ENGLISH_ANALYZER));
   
   /**
    * @param args
@@ -303,8 +310,10 @@ public class TwitterIndexBuilder implements Callable<Void> {
             Store.YES, Index.NOT_ANALYZED_NO_NORMS));
         doc.add(new NumericField(TweetField.TIMESTAMP.name, Store.YES, true)
             .setLongValue(timestamp));
-        doc.add(new Field(TweetField.TEXT.name, tweet, Store.YES, Index.ANALYZED));
-        // Not enough disk space: TermVector.WITH_POSITIONS_OFFSETS));
+        doc.add(new Field(TweetField.TEXT.name, tweet, Store.YES,
+            Index.ANALYZED, TermVector.WITH_POSITIONS_OFFSETS));
+        doc.add(new Field(TweetField.STEMMED_EN.name, tweet, Store.NO,
+            Index.ANALYZED, TermVector.NO));
         
         writer.addDocument(doc);
         if (++cnt % 10000 == 0) {

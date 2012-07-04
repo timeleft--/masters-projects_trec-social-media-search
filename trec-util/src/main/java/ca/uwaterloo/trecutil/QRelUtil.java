@@ -4,20 +4,25 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
-import java.io.PrintStream;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.commons.lang.mutable.MutableFloat;
+
 public class QRelUtil {
   final LinkedHashMap<String, LinkedHashMap<String,Float>> qRel;
   final HashSet<String> allRel;
+  final LinkedHashMap<String, MutableFloat> sizeOfNonRelevant;
+  
   public QRelUtil(File qRelFile) throws IOException {
     qRel = new LinkedHashMap<String, LinkedHashMap<String,Float>>();
+    sizeOfNonRelevant = new LinkedHashMap<String, MutableFloat>();
     BufferedReader rd = new BufferedReader(new FileReader(qRelFile));
+    MutableFloat currQNonRelevantCount = null;
+    
     String line;
     String currQid = null;
     LinkedHashMap<String, Float> currRel =null;
@@ -28,8 +33,14 @@ public class QRelUtil {
         currQid = fields[0];
         currRel = new LinkedHashMap<String, Float>();
         qRel.put(currQid, currRel);
+        currQNonRelevantCount = new MutableFloat(0);
+        sizeOfNonRelevant.put(currQid, currQNonRelevantCount);
       }
-      currRel.put(fields[2], Float.valueOf(fields[3]));
+      float rel = Float.valueOf(fields[3]);
+      currRel.put(fields[2], rel);
+      if(rel == 0){
+        currQNonRelevantCount.add(1);
+      }
     }
     allRel = new HashSet<String>();
     for(Map<String,Float> rel: qRel.values()){
@@ -66,17 +77,5 @@ public class QRelUtil {
     return result;
   }
   
-  public static void main(String[] args) throws IOException {
-    QRelUtil app =  new QRelUtil(new File(args[0]));
-    Map<String, List<String>> unjudged = app.findUnjedged(new File(args[1]),30);
-    PrintStream out = System.out;
-    if(args.length == 3){
-      out = new PrintStream(new File(args[2]));
-    }
-    for(String qid: unjudged.keySet()){
-      out.println("Qid: " + qid);
-      out.println("Num. Unjudged: " + unjudged.get(qid).size());
-      out.println("Unjudged Ids: " + unjudged.get(qid));
-    }
-  }
+ 
 }

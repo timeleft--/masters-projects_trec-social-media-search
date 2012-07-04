@@ -23,6 +23,7 @@ import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.OptionBuilder;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
+import org.apache.commons.lang.mutable.MutableFloat;
 import org.apache.commons.lang.mutable.MutableLong;
 import org.apache.commons.math.util.MathUtils;
 import org.apache.lucene.analysis.Analyzer;
@@ -68,6 +69,7 @@ import weka.core.Instance;
 import weka.core.Instances;
 import weka.core.ManhattanDistance;
 import ca.uwaterloo.twitter.ItemSetIndexBuilder;
+import ca.uwaterloo.twitter.ItemSetIndexBuilder.AssocField;
 import ca.uwaterloo.twitter.ItemSetSimilarity;
 import ca.uwaterloo.twitter.TwitterAnalyzer;
 import ca.uwaterloo.twitter.TwitterIndexBuilder.TweetField;
@@ -138,7 +140,11 @@ public class FISQueryExpander {
   
   private static final String COLLECTION_STRING_CLEANER = "[\\,\\[\\]]";
   
-  private static final boolean QUERY_SUBSET_BOOST_IDF = false;
+  private static final boolean QUERY_SUBSET_BOOST_IDF_DEFAULT = false;
+  
+  private static final boolean QUERY_SUBSET_BOOST_YESNO_DEFAULT = true;
+  
+  private static final boolean QUERY_PARSE_INTO_TERMS_DEFAULT = false;
   
   /**
    * @param args
@@ -310,7 +316,7 @@ public class FISQueryExpander {
           }
         } else if (mode == 5) {
           PriorityQueue<ScoreIxObj<String>>[] clusterTerms = qEx
-              .convertResultToWeightedTermsByClustering(fisRs, clusterClosedOnly);
+              .convertResultToWeightedTermsByClustering(fisRs, clusterClosedOnly, null, null, null);
           
           int i = 0;
           OpenIntHashSet empty = new OpenIntHashSet();
@@ -332,12 +338,12 @@ public class FISQueryExpander {
             weightedTerms = qEx
                 .convertResultToWeightedTermsConditionalProb(fisRs,
                     query.toString(),
-                    -1, propagateISWeights);
+                    -1, propagateISWeights, null, null, null);
           } else if (TermWeigting.KL_DIVERG.equals(termWeighting)) {
             weightedTerms = qEx
                 .convertResultToWeightedTermsKLDivergence(fisRs,
                     query.toString(),
-                    -1, propagateISWeights);
+                    -1, propagateISWeights, null, null, null);
           }
           
           int i = 0;
@@ -424,6 +430,74 @@ public class FISQueryExpander {
   
   // TODO command line
   private int clusterSize = 33;
+  
+  private boolean fuzzyHashtag = false;
+  
+  private float minXTermScore;
+  
+  private float maxXTermScore;
+  
+  private boolean boostQuerySubsetByIdf = QUERY_SUBSET_BOOST_IDF_DEFAULT;
+  
+//  private boolean boostQuerySubsets = QUERY_SUBSET_BOOST_YESNO_DEFAULT;
+//  public boolean isBoostQuerySubsets() {
+//    return boostQuerySubsets;
+//  }
+//  
+//  public void setBoostQuerySubsets(boolean boostQuerySubsets) {
+//    this.boostQuerySubsets = boostQuerySubsets;
+//  }
+  
+  public boolean isParseToTermQueries() {
+    return parseToTermQueries;
+  }
+  
+  public void setParseToTermQueries(boolean parseToTermQueries) {
+    this.parseToTermQueries = parseToTermQueries;
+  }
+  
+  private boolean parseToTermQueries = QUERY_PARSE_INTO_TERMS_DEFAULT;
+  
+  public float getTwitterCorpusModelWeight() {
+    return twitterCorpusModelWeight;
+  }
+  
+  public void setTwitterCorpusModelWeight(float twitterCorpusModelWeight) {
+    this.twitterCorpusModelWeight = twitterCorpusModelWeight;
+  }
+  
+  public float getTermWeightSmoother() {
+    return termWeightSmoother;
+  }
+  
+  public void setTermWeightSmoother(float termWeightSmoother) {
+    this.termWeightSmoother = termWeightSmoother;
+  }
+  
+  public int getClusterSize() {
+    return clusterSize;
+  }
+  
+  public void setClusterSize(int clusterSize) {
+    this.clusterSize = clusterSize;
+  }
+  
+  public boolean isFuzzyHashtag() {
+    return fuzzyHashtag;
+  }
+  
+  public void setFuzzyHashtag(boolean fuzzyHashtag) {
+    this.fuzzyHashtag = fuzzyHashtag;
+  }
+  
+  public boolean isBoostQuerySubsetByIdf() {
+    return boostQuerySubsetByIdf;
+  }
+  
+  public void setBoostQuerySubsetByIdf(boolean boostQuerySubsetByIdf) {
+    this.boostQuerySubsetByIdf = boostQuerySubsetByIdf;
+  }
+  
   private static boolean clusterClosedOnly = false;
   
   static boolean incremental = true;
@@ -568,7 +642,11 @@ public class FISQueryExpander {
     
     MutableLong qLen = new MutableLong(0);
     OpenObjectFloatHashMap<String> queryTermWeight = new OpenObjectFloatHashMap<String>();
-    BooleanQuery query = parseQuery(queryStr, queryTermWeight, qLen, fisQparser);
+    Query query = parseQuery(queryStr,
+        queryTermWeight,
+        qLen,
+        fisQparser,
+        QueryParseMode.POWERSET,QUERY_SUBSET_BOOST_YESNO_DEFAULT);
     
     OpenIntFloatHashMap resultSet = new OpenIntFloatHashMap();
     TopDocs rs = fisSearcher.search(query, fisNumHits);
@@ -608,7 +686,13 @@ public class FISQueryExpander {
   
   public PriorityQueue<ScoreIxObj<String>> convertResultToWeightedTermsKLDivergence(
       OpenIntFloatHashMap rs,
-      String query, int numItemsetsToConsider, boolean propagateISWeight) throws IOException {
+      String query, int numItemsetsToConsider, boolean propagateISWeight,
+      MutableFloat minXTermScoreOut,
+      MutableFloat maxXTermScoreOut, MutableFloat totalTermScoreOut) throws IOException {
+    
+    minXTermScoreOut.setValue(Float.MAX_VALUE);
+    maxXTermScoreOut.setValue(Float.MIN_VALUE);
+    
     PriorityQueue<ScoreIxObj<String>> result = new PriorityQueue<ScoreIxObj<String>>();
     
     OpenObjectIntHashMap<String> termIds = new OpenObjectIntHashMap<String>();
@@ -637,6 +721,14 @@ public class FISQueryExpander {
           / SCORE_PRECISION_MULTIPLIER) :
           1;
       totalW += w;
+      
+      if (minXTermScoreOut != null && w < minXTermScoreOut.floatValue()) {
+        minXTermScoreOut.setValue(w);
+      }
+      
+      if (maxXTermScoreOut != null && w > maxXTermScoreOut.floatValue()) {
+        maxXTermScoreOut.setValue(w);
+      }
       
       IntArrayList pattern = patternPair.getFirst();
       int pSize = pattern.size();
@@ -668,12 +760,21 @@ public class FISQueryExpander {
       result.add(new ScoreIxObj<String>(t, score));
     }
     
+    if (totalTermScoreOut != null) {
+      totalTermScoreOut.setValue(totalW);
+    }
+    
     return result;
   }
   
   public PriorityQueue<ScoreIxObj<String>> convertResultToWeightedTermsConditionalProb(
       OpenIntFloatHashMap rs,
-      String query, int numItemsetsToConsider, boolean propagateISWeight) throws IOException {
+      String query, int numItemsetsToConsider, boolean propagateISWeight,
+      MutableFloat minXTermScoreOut,
+      MutableFloat maxXTermScoreOut, MutableFloat totalTermScoreOut) throws IOException {
+    
+    minXTermScoreOut.setValue(Float.MAX_VALUE);
+    maxXTermScoreOut.setValue(Float.MIN_VALUE);
     
     PriorityQueue<ScoreIxObj<String>> result = new PriorityQueue<ScoreIxObj<String>>();
     
@@ -710,6 +811,14 @@ public class FISQueryExpander {
           / SCORE_PRECISION_MULTIPLIER) :
           1;
       totalW += w;
+      
+      if (minXTermScoreOut != null && w < minXTermScoreOut.floatValue()) {
+        minXTermScoreOut.setValue(w);
+      }
+      
+      if (maxXTermScoreOut != null && w > maxXTermScoreOut.floatValue()) {
+        maxXTermScoreOut.setValue(w);
+      }
       
       IntArrayList pattern = patternPair.getFirst();
       int pSize = pattern.size();
@@ -814,6 +923,9 @@ public class FISQueryExpander {
       result.add(new ScoreIxObj<String>(t, score));
     }
     
+    if (totalTermScoreOut != null) {
+      totalTermScoreOut.setValue(totalW);
+    }
     return result;
     
   }
@@ -1035,6 +1147,8 @@ public class FISQueryExpander {
       throws IOException {
     int levelHits = 0;
     int rank = 0;
+    minXTermScore = Float.MAX_VALUE;
+    minXTermScore = Float.MIN_VALUE;
     for (ScoreDoc scoreDoc : rs.scoreDocs) {
       if (scoreDoc.score < minScore) {
         LOG.debug("Because of low score, pruning after result number {} out of {}",
@@ -1051,6 +1165,14 @@ public class FISQueryExpander {
       float fusion = result.get(scoreDoc.doc);
       fusion += 1.0f / (fusionK + rank);
       result.put(scoreDoc.doc, fusion);
+      
+      if (fusion < minXTermScore) {
+        minXTermScore = fusion;
+      }
+      
+      if (fusion > maxXTermScore) {
+        maxXTermScore = fusion;
+      }
       
       TermFreqVector termVector = fisIxReader.getTermFreqVector(scoreDoc.doc,
           ItemSetIndexBuilder.AssocField.ITEMSET.name);
@@ -1145,27 +1267,56 @@ public class FISQueryExpander {
     
     // Only one query (a long one), of pairs of query and extra
     // Seems to be getting high precision pairs, and performs best
+    // BooleanQuery query = new BooleanQuery(); // This adds trash: true);
+    // for (String qterm : queryTermWeight.keys()) {
+    // for (ScoreIxObj<String> xterm : extraTerms) {
+    // assert !doneTerms.contains(xterm);
+    //
+    // float xtermWeight;
+    // if (QUERY_SUBSET_BOOST_IDF) {
+    // xtermWeight = twtSimilarity.idf(twtIxReader.docFreq(new Term(TweetField.TEXT.name,
+    // xterm.obj)), twtIxReader.numDocs());
+    // } else {
+    // xtermWeight = xterm.score;
+    // }
+    //
+    // Query xtermQuery = fisQparser.parse(qterm + "^" + queryTermWeight.get(qterm) + " "
+    // + xterm.obj);
+    // xtermQuery.setBoost(xtermWeight);
+    // // Scoring the term not the query "+ xterm.toString()" causes an early topic drift
+    //
+    // query.add(xtermQuery, Occur.SHOULD);
+    // }
+    // }
+    
+    // Same as above technique but different coding.. should be faster
+    // Only one query (a long one), of pairs of query and extra
+    // Seems to be getting high precision pairs, and performs best
     BooleanQuery query = new BooleanQuery(); // This adds trash: true);
-    for (String qterm : queryTermWeight.keys()) {
-      for (ScoreIxObj<String> xterm : extraTerms) {
-        assert !doneTerms.contains(xterm);
+    for (ScoreIxObj<String> xterm : extraTerms) {
+      assert !doneTerms.contains(xterm);
+      ScoreIxObj<Query> xtermQuery = createTermQuery(xterm,
+          AssocField.ITEMSET.name,
+          fisIxReader,
+          minXTermScore,
+          maxXTermScore);
+      xtermQuery.obj.setBoost(xtermQuery.score);
+      
+      for (String qterm : queryTermWeight.keys()) {
         
-        float xtermWeight;
-        if (QUERY_SUBSET_BOOST_IDF) {
-          xtermWeight = twtSimilarity.idf(twtIxReader.docFreq(new Term(TweetField.TEXT.name,
-              xterm.obj)), twtIxReader.numDocs());
-        } else {
-          xtermWeight = xterm.score;
-        }
+        BooleanQuery qxQuery = new BooleanQuery();
+        TermQuery qTermQuery = new TermQuery(new Term(AssocField.ITEMSET.name, qterm));
+        qTermQuery.setBoost(queryTermWeight.get(qterm));
         
-        Query xtermQuery = fisQparser.parse(qterm + "^" + queryTermWeight.get(qterm) + " "
-            + xterm.obj);
-        xtermQuery.setBoost(xtermWeight);
-        // Scoring the term not the query "+ xterm.toString()" causes an early topic drift
+        qxQuery.add(qTermQuery, Occur.MUST);
+        qxQuery.add(xtermQuery.obj, Occur.MUST);
         
-        query.add(xtermQuery, Occur.SHOULD);
+        // qxQuery.setBoost(queryTermWeight.get(qterm) * xtermQuery.score);
+        
+        query.add(qxQuery, Occur.SHOULD);
       }
     }
+    
     // // Does this have any effect at all?
     // query.setBoost(boost);
     
@@ -1231,31 +1382,123 @@ public class FISQueryExpander {
     return queryFreq;
   }
   
-  public BooleanQuery parseQuery(String queryStr,
+  public enum QueryParseMode {
+    CONJUNGTIVE("AND"),
+    DISJUNCTIVE("OR"),
+    POWERSET("powerset"), // All non-empty susbsets
+    BIGRAMS("bigrams"); // TODO
+    
+    String name;
+    
+    private QueryParseMode(String pName) {
+      name = pName;
+    }
+    
+    @Override
+    public String toString() {
+      return name;
+    }
+  }
+  
+  /**
+   * 
+   * @param queryStr
+   * @param queryTermsOut
+   * @param qLenOut
+   * @param targetParser
+   * @param mode
+   *          0 = powerset, 1 = disjunctive (OR), 2 = conjungtive (AND)
+   * @param boostQuerySubset 
+   * @return
+   * @throws IOException
+   * @throws org.apache.lucene.queryParser.ParseException
+   */
+  public Query parseQuery(String queryStr,
       OpenObjectFloatHashMap<String> queryTermsOut,// = queryTermFreq(queryStr, qLen);
       MutableLong qLenOut, // = new MutableLong(0);
-      QueryParser targetParser)
+      QueryParser targetParser,
+      QueryParseMode mode, boolean boostQuerySubset)
       throws IOException, org.apache.lucene.queryParser.ParseException {
     
     OpenObjectFloatHashMap<String> queryTermWeights = queryTermFreq(queryStr, qLenOut);
     
-    float qLen = qLenOut.floatValue();
-    
-    float totalIDF = 0;
-    if (QUERY_SUBSET_BOOST_IDF) {
-      for (String qt : queryTermWeights.keys()) {
-        float idf = twtSimilarity.idf(twtIxReader.docFreq(new Term(TweetField.TEXT.name, qt)),
-            twtIxReader.numDocs());
-        idf *= queryTermWeights.get(qt);
-        totalIDF += idf;
-        queryTermWeights.put(qt, idf);
-      }
+    Query result;
+    if (parseToTermQueries) {
+      result = parseQueryIntoTerms(queryTermWeights, qLenOut.floatValue(), targetParser, mode, boostQuerySubset);
+    } else {
+      result = parseQueryIntoPhrase(queryStr, targetParser, mode);
     }
     
+    LOG.debug("Parsed \"{}\" into {}", queryStr, result);
+    
+    for (String key : queryTermWeights.keys())
+      queryTermsOut.put(key, queryTermWeights.get(key));
+    
+    return result;
+  }
+  
+  Query parseQueryIntoPhrase(String queryStr, QueryParser targetParser,
+      QueryParseMode mode) throws org.apache.lucene.queryParser.ParseException {
+    Operator op;
+    switch (mode) {
+    case CONJUNGTIVE:
+      op = Operator.AND;
+      break;
+    case DISJUNCTIVE:
+      op = Operator.OR;
+      break;
+    default:
+      throw new IllegalArgumentException();
+    }
+    Operator origOp = targetParser.getDefaultOperator();
+    targetParser.setDefaultOperator(op);
+    Query result;
+    try{
+    result = targetParser.parse(queryStr);
+    } finally {
+      targetParser.setDefaultOperator(origOp);
+    }
+    return result;
+  }
+  
+  BooleanQuery parseQueryIntoTerms(OpenObjectFloatHashMap<String> queryTermWeights,
+      float qLen,
+      QueryParser targetParser,
+      QueryParseMode mode, boolean boostQuerySubsets)
+      throws IOException, org.apache.lucene.queryParser.ParseException {
+    float totalIDF = 0;
+    if (boostQuerySubsets)
+      if (boostQuerySubsetByIdf) {
+        for (String qt : queryTermWeights.keys()) {
+          float idf = twtSimilarity.idf(twtIxReader.docFreq(new Term(TweetField.TEXT.name, qt)),
+              twtIxReader.numDocs());
+          idf *= queryTermWeights.get(qt);
+          totalIDF += idf;
+          queryTermWeights.put(qt, idf);
+        }
+      }
+    
     BooleanQuery query = new BooleanQuery(); // This adds trash: true);
-    Set<String> querySet = Sets.newCopyOnWriteArraySet(queryTermWeights.keys());
+    Set<String>[] querySets = null;
+    switch (mode) {
+    case CONJUNGTIVE:
+      querySets = new Set[] { Sets.newCopyOnWriteArraySet(queryTermWeights.keys()) };
+      break;
+    case DISJUNCTIVE:
+      querySets = new Set[queryTermWeights.keys().size()];
+      int s = 0;
+      for (String qt : queryTermWeights.keys()) {
+        querySets[s++] = ImmutableSet.of(qt);
+      }
+      break;
+    case POWERSET:
+      querySets = Sets.powerSet(Sets.newCopyOnWriteArraySet(queryTermWeights.keys()))
+          .toArray(new Set[0]);
+      break;
+    }
+    
     // if (querySet.size() > 2) {
-    for (Set<String> querySubSet : Sets.powerSet(querySet)) {
+    for (Set<String> querySubSet : querySets) {
       // if (querySubSet.size() < 2) {
       if (querySubSet.isEmpty()) {
         continue;
@@ -1268,11 +1511,12 @@ public class FISQueryExpander {
         querySubSetW += queryTermWeights.get(qTerm);
       }
       
-      if (QUERY_SUBSET_BOOST_IDF) {
-        subQuery.setBoost(querySubSetW / totalIDF);
-      } else {
-        subQuery.setBoost(querySubSetW / qLen);
-      }
+      if (boostQuerySubsets)
+        if (boostQuerySubsetByIdf) {
+          subQuery.setBoost(querySubSetW / totalIDF);
+        } else {
+          subQuery.setBoost(querySubSetW / qLen);
+        }
       
       query.add(subQuery, Occur.SHOULD);
     }
@@ -1283,55 +1527,92 @@ public class FISQueryExpander {
     // query.add(subQuery, Occur.SHOULD);
     // }
     
-    LOG.debug("Parsed \"{}\" into {}", queryStr, query);
-    
-    for (String key : queryTermWeights.keys())
-      queryTermsOut.put(key, queryTermWeights.get(key));
-    
     return query;
   }
   
-  public FilteredQuery expandAndFilterQuery(BooleanQuery origQuery,
-      int origQueryLen,// = new MutableLong(0);
-      OpenObjectFloatHashMap<String> queryTerm,
-      PriorityQueue<String>[] extraTerms,
-      OpenObjectFloatHashMap<String> queryTermsOut,
-      MutableLong queryLenOut,
-      int numTermsToAppend,
-      boolean fuzzyHashTags) throws IOException {
+  public FilteredQuery expandAndFilterQuery(OpenObjectFloatHashMap<String> origQueryTerms,
+      int origQueryLen,
+      PriorityQueue<ScoreIxObj<String>>[] extraTerms,
+      int[] minXTermScore, int[] maxXTermScore,
+      int numTermsToAppend) throws IOException,
+      org.apache.lucene.queryParser.ParseException {
     
     BooleanQuery result = new BooleanQuery();
     
-    result.add(origQuery, Occur.MUST);
+    // this will make the expansion act like a filter
+    // result.add(origQuery, Occur.MUST);
     
-    OpenObjectFloatHashMap<String> qTerms = queryTerm;// queryTermFreq(queryStr, queryLenOut);
-    
-    for (String tStr : qTerms.keys()) {
-      queryTermsOut.put(tStr, qTerms.get(tStr));
-      
-      Term t = new Term(TweetField.TEXT.name, tStr);
-      Query tq;
-      if (fuzzyHashTags && tStr.charAt(0) == '#') {
-        // fuzzy matching for hashtags: #goodwoman #agoodwoman #goodwomen #goodman
-        tq = new FuzzyQuery(t, 0.85f, 1, 7);
-        tq = tq.rewrite(twtIxReader);
-      } else {
-        tq = new TermQuery(t);
+    // int numAppendPerQueue = numTermsToAppend / extraTerms.length;
+    // for (int c = 0; c < extraTerms.length; ++c) {
+    // for (int x = 0; x < numAppendPerQueue; ++x) {
+    int t = 0;
+    OpenIntHashSet emptyQueues = new OpenIntHashSet(extraTerms.length);
+    while (t < numTermsToAppend) {
+      for (int c = 0; c < extraTerms.length; ++c) {
+        if (extraTerms[c].isEmpty()) {
+          if (emptyQueues.contains(c)) {
+            continue;
+          } else {
+            emptyQueues.add(c);
+            if (emptyQueues.size() == extraTerms.length) {
+              break;
+            }
+          }
+        }
+        ++t;
+        
+        ScoreIxObj<String> xterm = extraTerms[c].poll();
+        ScoreIxObj<Query> xtermQuery = createTermQuery(xterm,
+            TweetField.TEXT.name,
+            twtIxReader,
+            minXTermScore[c],
+            maxXTermScore[c]);
+        
+        for (String qterm : origQueryTerms.keys()) {
+          
+          BooleanQuery qxQuery = new BooleanQuery();
+          
+          qxQuery.add(new TermQuery(new Term(TweetField.TEXT.name, qterm)), Occur.MUST);
+          qxQuery.add(xtermQuery.obj, Occur.MUST);
+          
+          qxQuery.setBoost(origQueryTerms.get(qterm) * xtermQuery.score);
+          
+          result.add(qxQuery, Occur.SHOULD);
+        }
       }
-      float boost = qTerms.get(tStr);
-      if (extraTerms != null) {
-        boost *= extraTerms[0].poll().length();
-      }
-      tq.setBoost(boost);
-      
-      result.add(tq, Occur.SHOULD);
     }
+    
+    LOG.debug("Expanded by {} terms. Query: {}", t, result);
+    
     return filterQuery(result);
   }
   
-  public FilteredQuery filterQuery(BooleanQuery q) {
+  ScoreIxObj<Query> createTermQuery(ScoreIxObj<String> xterm, String field,
+      IndexReader targetReader, float minXTermScore, float maxXTermScore) throws IOException {
+    float xtermWeight;
+    // if (QUERY_SUBSET_BOOST_IDF) {
+    // xtermWeight = twtSimilarity.idf(twtIxReader.docFreq(new Term(TweetField.TEXT.name,
+    // xterm.obj)), twtIxReader.numDocs());
+    // } else {
+    xtermWeight = (xterm.score - minXTermScore) / (maxXTermScore - minXTermScore);
+    // }
+    Term t = new Term(field, xterm.obj);
+    Query result;
+    if (fuzzyHashtag && xterm.obj.charAt(0) == '#') {
+      // fuzzy matching for hashtags: #goodwoman #agoodwoman #goodwomen #goodman
+      result = new FuzzyQuery(t, 0.85f, 1, 7);
+      result = result.rewrite(targetReader);
+    } else {
+      result = new TermQuery(t);
+    }
+    return new ScoreIxObj<Query>(result, xtermWeight);
+  }
+  
+  public FilteredQuery filterQuery(Query q) {
     // No retweets
-    q.add(new TermQuery(new Term(TweetField.TEXT.name, "rt")), Occur.MUST_NOT);
+    BooleanQuery result = new BooleanQuery();
+    result.add(q, Occur.MUST);
+    result.add(new TermQuery(new Term(TweetField.TEXT.name, "rt")), Occur.MUST_NOT);
     
     // Time filter
     NumericRangeFilter<Long> timeFilter = NumericRangeFilter
@@ -1341,12 +1622,16 @@ public class FISQueryExpander {
             true,
             true);
     
-    return new FilteredQuery(q, timeFilter);
+    return new FilteredQuery(result, timeFilter);
   }
   
   @SuppressWarnings("unchecked")
   public PriorityQueue<ScoreIxObj<String>>[] convertResultToWeightedTermsByClustering(
-      OpenIntFloatHashMap rs, boolean closedOnly) throws Exception {
+      OpenIntFloatHashMap rs, boolean closedOnly,
+      List<MutableFloat> minXTermScores, List<MutableFloat> maxXTermScores,
+      List<MutableFloat> totalXTermScores) throws Exception {
+    
+    // TODO: keep track of min and max scores
     
     PriorityQueue<ScoreIxObj<String>>[] result = null;
     
@@ -1437,4 +1722,13 @@ public class FISQueryExpander {
     }
     return result;
   }
+  
+  public FilteredQuery expandAndFilterQuery(OpenObjectFloatHashMap<String> queryTerms,
+      int intValue, PriorityQueue<ScoreIxObj<String>>[] clustersTerms,
+      MutableFloat[] minXTermScores,
+      MutableFloat[] maxXTermScores, int numTermsToAppend) {
+    // TODO convert mutables to floats and call
+    return null;
+  }
+  
 }
