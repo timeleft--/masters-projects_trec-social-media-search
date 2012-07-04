@@ -8,11 +8,11 @@ import java.io.PrintStream;
 import java.io.StringReader;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.Enumeration;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
 
@@ -62,12 +62,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import weka.clusterers.Clusterer;
-import weka.clusterers.SimpleKMeans;
+import weka.clusterers.XMeans;
 import weka.core.Attribute;
 import weka.core.FastVector;
 import weka.core.Instance;
 import weka.core.Instances;
-import weka.core.ManhattanDistance;
 import ca.uwaterloo.twitter.ItemSetIndexBuilder;
 import ca.uwaterloo.twitter.ItemSetIndexBuilder.AssocField;
 import ca.uwaterloo.twitter.ItemSetSimilarity;
@@ -95,6 +94,24 @@ public class FISQueryExpander {
       name = s;
     }
   };
+  
+  public enum QueryParseMode {
+    CONJUNGTIVE("AND"),
+    DISJUNCTIVE("OR"),
+    POWERSET("powerset"), // All non-empty susbsets
+    BIGRAMS("bigrams"); // TODO
+    
+    String name;
+    
+    private QueryParseMode(String pName) {
+      name = pName;
+    }
+    
+    @Override
+    public String toString() {
+      return name;
+    }
+  }
   
   private static Logger LOG = LoggerFactory.getLogger(FISQueryExpander.class);
   
@@ -136,7 +153,7 @@ public class FISQueryExpander {
   private static final float SCORE_PRECISION_MULTIPLIER = 100000.0f;
   
   private static final TermWeigting TERM_WEIGHTIN_DEFAULT = TermWeigting.PROB_QUERY;
-  public static final boolean PROPAGATE_IS_WEIGHTS_DEFAULT = true;
+  public static final boolean PROPAGATE_IS_WEIGHTS_DEFAULT = false;
   
   private static final String COLLECTION_STRING_CLEANER = "[\\,\\[\\]]";
   
@@ -144,7 +161,11 @@ public class FISQueryExpander {
   
   private static final boolean QUERY_SUBSET_BOOST_YESNO_DEFAULT = true;
   
-  private static final boolean QUERY_PARSE_INTO_TERMS_DEFAULT = false;
+  private static final boolean QUERY_PARSE_INTO_TERMS_DEFAULT = true;
+  
+  private static final int ENGLISH_STOPWORDS_COUNT = 5;
+  
+  private static boolean paramClusteringWeightIDF = false;
   
   /**
    * @param args
@@ -316,19 +337,29 @@ public class FISQueryExpander {
           }
         } else if (mode == 5) {
           PriorityQueue<ScoreIxObj<String>>[] clusterTerms = qEx
-              .convertResultToWeightedTermsByClustering(fisRs, clusterClosedOnly, null, null, null);
+              .convertResultToWeightedTermsByClustering(fisRs,
+                  query.toString(),
+                  clusterClosedOnly,
+                  null,
+                  null,
+                  null,
+                  paramClusteringWeightIDF);
           
           int i = 0;
           OpenIntHashSet empty = new OpenIntHashSet();
           while (empty.size() < clusterTerms.length) {
             for (int c = 0; c < clusterTerms.length; ++c, ++i) {
+              if (c > 0) {
+                out.print("\t");
+              }
               if (clusterTerms[c].isEmpty()) {
                 empty.add(c);
                 continue;
               }
               ScoreIxObj<String> t = clusterTerms[c].poll();
-              out.println(c + ":" + (i / clusterTerms.length) + " (" + t.score + "): " + t.obj);
+              out.print(c + ":" + (i / clusterTerms.length) + " (" + t.score + "): " + t.obj);
             }
+            out.print("\n");
           }
           
         } else if (mode == 6 || mode == 7) {
@@ -353,23 +384,42 @@ public class FISQueryExpander {
           }
           
         } else {
-          BooleanQuery twtQ = new BooleanQuery();
-          twtQ.add(qEx.twtQparser.parse(RETWEET_QUERY).rewrite(qEx.twtIxReader), Occur.MUST_NOT);
+          FilteredQuery twtQ = null;
+          // = new BooleanQuery();
+          // twtQ.add(qEx.twtQparser.parse(RETWEET_QUERY).rewrite(qEx.twtIxReader), Occur.MUST_NOT);
           
           if (mode == 10) {
-            twtQ.add(parsedQuery, Occur.MUST);
+            twtQ = qEx.filterQuery(parsedQuery);
           } else if (mode == 20) {
-            twtQ.add(qEx.convertResultToBooleanQuery(fisRs,
-                query.toString(),
-                NUM_HITS_INTERNAL_DEFAULT),
-                Occur.SHOULD);
-            twtQ.setMinimumNumberShouldMatch(1);
+            // twtQ.add(qEx.convertResultToBooleanQuery(fisRs,
+            // query.toString(),
+            // NUM_HITS_INTERNAL_DEFAULT),
+            // Occur.SHOULD);
+            // twtQ.setMinimumNumberShouldMatch(1);
+            
+            List<MutableFloat> minXTermScores = Lists.newArrayList();
+            List<MutableFloat> maxXTermScores = Lists.newArrayList();
+            List<MutableFloat> totalXTermScores = Lists.newArrayList();
+            
+            PriorityQueue<ScoreIxObj<String>>[] clustersTerms = qEx
+                .convertResultToWeightedTermsByClustering(fisRs, query.toString(), true,
+                    minXTermScores, maxXTermScores, totalXTermScores, paramClusteringWeightIDF);
+            
+            MutableLong queryLen = new MutableLong();
+            OpenObjectFloatHashMap<String> queryTerms = qEx.queryTermFreq(query.toString(),
+                queryLen);
+            twtQ = qEx.expandAndFilterQuery(queryTerms,
+                queryLen.intValue(),
+                clustersTerms,
+                minXTermScores.toArray(new MutableFloat[0]),
+                maxXTermScores.toArray(new MutableFloat[0]),
+                clustersTerms.length * 7);
           }
           
           LOG.debug("Querying Twitter by: " + twtQ.toString());
           int t = 0;
           for (ScoreDoc scoreDoc : qEx.twtSearcher.search(twtQ, NUM_HITS_SHOWN_DEFAULT).scoreDocs) {
-            Document hit = qEx.twtSearcher.doc(scoreDoc.doc);
+            Document hit = qEx.twtIxReader.document(scoreDoc.doc);
             Fieldable created = hit.getFieldable(TweetField.TIMESTAMP.name);
             // out.println();
             out.println(String.format("%4d (%.4f): %s\t%s\t%s\t%s",
@@ -429,7 +479,7 @@ public class FISQueryExpander {
   final long queryTime;
   
   // TODO command line
-  private int clusterSize = 33;
+  // private float clusterSize = 33;
   
   private boolean fuzzyHashtag = false;
   
@@ -439,14 +489,14 @@ public class FISQueryExpander {
   
   private boolean boostQuerySubsetByIdf = QUERY_SUBSET_BOOST_IDF_DEFAULT;
   
-//  private boolean boostQuerySubsets = QUERY_SUBSET_BOOST_YESNO_DEFAULT;
-//  public boolean isBoostQuerySubsets() {
-//    return boostQuerySubsets;
-//  }
-//  
-//  public void setBoostQuerySubsets(boolean boostQuerySubsets) {
-//    this.boostQuerySubsets = boostQuerySubsets;
-//  }
+  // private boolean boostQuerySubsets = QUERY_SUBSET_BOOST_YESNO_DEFAULT;
+  // public boolean isBoostQuerySubsets() {
+  // return boostQuerySubsets;
+  // }
+  //
+  // public void setBoostQuerySubsets(boolean boostQuerySubsets) {
+  // this.boostQuerySubsets = boostQuerySubsets;
+  // }
   
   public boolean isParseToTermQueries() {
     return parseToTermQueries;
@@ -474,13 +524,13 @@ public class FISQueryExpander {
     this.termWeightSmoother = termWeightSmoother;
   }
   
-  public int getClusterSize() {
-    return clusterSize;
-  }
-  
-  public void setClusterSize(int clusterSize) {
-    this.clusterSize = clusterSize;
-  }
+  // public int getClusterSize() {
+  // return clusterSize;
+  // }
+  //
+  // public void setClusterSize(int clusterSize) {
+  // this.clusterSize = clusterSize;
+  // }
   
   public boolean isFuzzyHashtag() {
     return fuzzyHashtag;
@@ -641,12 +691,12 @@ public class FISQueryExpander {
     // }
     
     MutableLong qLen = new MutableLong(0);
-    OpenObjectFloatHashMap<String> queryTermWeight = new OpenObjectFloatHashMap<String>();
-    Query query = parseQuery(queryStr,
+    OpenObjectFloatHashMap<String> queryTermWeight = queryTermFreq(queryStr, qLen);
+    Query query = parseQueryIntoTerms(
         queryTermWeight,
-        qLen,
+        qLen.floatValue(),
         fisQparser,
-        QueryParseMode.POWERSET,QUERY_SUBSET_BOOST_YESNO_DEFAULT);
+        QueryParseMode.POWERSET, QUERY_SUBSET_BOOST_YESNO_DEFAULT, 0);
     
     OpenIntFloatHashMap resultSet = new OpenIntFloatHashMap();
     TopDocs rs = fisSearcher.search(query, fisNumHits);
@@ -690,8 +740,10 @@ public class FISQueryExpander {
       MutableFloat minXTermScoreOut,
       MutableFloat maxXTermScoreOut, MutableFloat totalTermScoreOut) throws IOException {
     
-    minXTermScoreOut.setValue(Float.MAX_VALUE);
-    maxXTermScoreOut.setValue(Float.MIN_VALUE);
+    if (minXTermScoreOut != null)
+      minXTermScoreOut.setValue(Float.MAX_VALUE);
+    if (maxXTermScoreOut != null)
+      maxXTermScoreOut.setValue(Float.MIN_VALUE);
     
     PriorityQueue<ScoreIxObj<String>> result = new PriorityQueue<ScoreIxObj<String>>();
     
@@ -773,8 +825,11 @@ public class FISQueryExpander {
       MutableFloat minXTermScoreOut,
       MutableFloat maxXTermScoreOut, MutableFloat totalTermScoreOut) throws IOException {
     
-    minXTermScoreOut.setValue(Float.MAX_VALUE);
-    maxXTermScoreOut.setValue(Float.MIN_VALUE);
+    if (minXTermScoreOut != null)
+      minXTermScoreOut.setValue(Float.MAX_VALUE);
+    
+    if (maxXTermScoreOut != null)
+      maxXTermScoreOut.setValue(Float.MIN_VALUE);
     
     PriorityQueue<ScoreIxObj<String>> result = new PriorityQueue<ScoreIxObj<String>>();
     
@@ -1156,6 +1211,12 @@ public class FISQueryExpander {
             rs.scoreDocs.length);
         break;
       }
+      
+      TermFreqVector termVector = fisIxReader.getTermFreqVector(scoreDoc.doc,
+          ItemSetIndexBuilder.AssocField.ITEMSET.name);
+      // TODO if(termVector.getTerms() not majority English or Proper names!!!!)
+      // continue;
+      
       ++rank;
       
       if (!result.containsKey(scoreDoc.doc)) {
@@ -1174,8 +1235,6 @@ public class FISQueryExpander {
         maxXTermScore = fusion;
       }
       
-      TermFreqVector termVector = fisIxReader.getTermFreqVector(scoreDoc.doc,
-          ItemSetIndexBuilder.AssocField.ITEMSET.name);
       for (String term : termVector.getTerms()) {
         if (queryTerms.contains(term)) {
           continue;
@@ -1267,55 +1326,57 @@ public class FISQueryExpander {
     
     // Only one query (a long one), of pairs of query and extra
     // Seems to be getting high precision pairs, and performs best
-    // BooleanQuery query = new BooleanQuery(); // This adds trash: true);
-    // for (String qterm : queryTermWeight.keys()) {
-    // for (ScoreIxObj<String> xterm : extraTerms) {
-    // assert !doneTerms.contains(xterm);
-    //
-    // float xtermWeight;
-    // if (QUERY_SUBSET_BOOST_IDF) {
-    // xtermWeight = twtSimilarity.idf(twtIxReader.docFreq(new Term(TweetField.TEXT.name,
-    // xterm.obj)), twtIxReader.numDocs());
-    // } else {
-    // xtermWeight = xterm.score;
-    // }
-    //
-    // Query xtermQuery = fisQparser.parse(qterm + "^" + queryTermWeight.get(qterm) + " "
-    // + xterm.obj);
-    // xtermQuery.setBoost(xtermWeight);
-    // // Scoring the term not the query "+ xterm.toString()" causes an early topic drift
-    //
-    // query.add(xtermQuery, Occur.SHOULD);
-    // }
-    // }
-    
-    // Same as above technique but different coding.. should be faster
-    // Only one query (a long one), of pairs of query and extra
-    // Seems to be getting high precision pairs, and performs best
     BooleanQuery query = new BooleanQuery(); // This adds trash: true);
-    for (ScoreIxObj<String> xterm : extraTerms) {
-      assert !doneTerms.contains(xterm);
-      ScoreIxObj<Query> xtermQuery = createTermQuery(xterm,
-          AssocField.ITEMSET.name,
-          fisIxReader,
-          minXTermScore,
-          maxXTermScore);
-      xtermQuery.obj.setBoost(xtermQuery.score);
-      
-      for (String qterm : queryTermWeight.keys()) {
+    for (String qterm : queryTermWeight.keys()) {
+      for (ScoreIxObj<String> xterm : extraTerms) {
+        assert !doneTerms.contains(xterm);
         
-        BooleanQuery qxQuery = new BooleanQuery();
-        TermQuery qTermQuery = new TermQuery(new Term(AssocField.ITEMSET.name, qterm));
-        qTermQuery.setBoost(queryTermWeight.get(qterm));
+        float xtermWeight;
+        if (boostQuerySubsetByIdf) {
+          xtermWeight = twtSimilarity.idf(twtIxReader.docFreq(new Term(TweetField.TEXT.name,
+              xterm.obj)), twtIxReader.numDocs());
+        } else {
+          xtermWeight = xterm.score;
+        }
         
-        qxQuery.add(qTermQuery, Occur.MUST);
-        qxQuery.add(xtermQuery.obj, Occur.MUST);
+        Query xtermQuery = fisQparser.parse(qterm + "^" + queryTermWeight.get(qterm) + " "
+            + xterm.obj);
+        xtermQuery.setBoost(xtermWeight);
+        // Scoring the term not the query "+ xterm.toString()" causes an early topic drift
         
-        // qxQuery.setBoost(queryTermWeight.get(qterm) * xtermQuery.score);
-        
-        query.add(qxQuery, Occur.SHOULD);
+        query.add(xtermQuery, Occur.SHOULD);
       }
     }
+    
+    // // Same as above technique but different coding.. should be faster
+    // // Only one query (a long one), of pairs of query and extra
+    // // Seems to be getting high precision pairs, and performs best
+    // BooleanQuery query = new BooleanQuery(); // This adds trash: true);
+    // for (ScoreIxObj<String> xterm : extraTerms) {
+    // assert !doneTerms.contains(xterm);
+    // ScoreIxObj<Query> xtermQuery = createTermQuery(xterm,
+    // AssocField.ITEMSET.name,
+    // fisIxReader,
+    // minXTermScore,
+    // maxXTermScore);
+    // // xtermQuery.obj.setBoost(xtermQuery.score);
+    //
+    // for (String qterm : queryTermWeight.keys()) {
+    //
+    // BooleanQuery qxQuery = new BooleanQuery();
+    // TermQuery qTermQuery = new TermQuery(new Term(AssocField.ITEMSET.name, qterm));
+    // qTermQuery.setBoost(queryTermWeight.get(qterm));
+    //
+    // qxQuery.add(qTermQuery, Occur.MUST);
+    // qxQuery.add(xtermQuery.obj, Occur.MUST);
+    //
+    // // qxQuery.setBoost(queryTermWeight.get(qterm) * xtermQuery.score);
+    //
+    // qxQuery.setBoost(xtermQuery.score);
+    //
+    // query.add(qxQuery, Occur.SHOULD);
+    // }
+    // }
     
     // // Does this have any effect at all?
     // query.setBoost(boost);
@@ -1382,24 +1443,6 @@ public class FISQueryExpander {
     return queryFreq;
   }
   
-  public enum QueryParseMode {
-    CONJUNGTIVE("AND"),
-    DISJUNCTIVE("OR"),
-    POWERSET("powerset"), // All non-empty susbsets
-    BIGRAMS("bigrams"); // TODO
-    
-    String name;
-    
-    private QueryParseMode(String pName) {
-      name = pName;
-    }
-    
-    @Override
-    public String toString() {
-      return name;
-    }
-  }
-  
   /**
    * 
    * @param queryStr
@@ -1408,7 +1451,8 @@ public class FISQueryExpander {
    * @param targetParser
    * @param mode
    *          0 = powerset, 1 = disjunctive (OR), 2 = conjungtive (AND)
-   * @param boostQuerySubset 
+   * @param boostQuerySubset
+   * @param addNEnglishStopWords
    * @return
    * @throws IOException
    * @throws org.apache.lucene.queryParser.ParseException
@@ -1417,15 +1461,23 @@ public class FISQueryExpander {
       OpenObjectFloatHashMap<String> queryTermsOut,// = queryTermFreq(queryStr, qLen);
       MutableLong qLenOut, // = new MutableLong(0);
       QueryParser targetParser,
-      QueryParseMode mode, boolean boostQuerySubset)
+      QueryParseMode mode, boolean boostQuerySubset, int addNEnglishStopWords)
       throws IOException, org.apache.lucene.queryParser.ParseException {
     
     OpenObjectFloatHashMap<String> queryTermWeights = queryTermFreq(queryStr, qLenOut);
     
     Query result;
     if (parseToTermQueries) {
-      result = parseQueryIntoTerms(queryTermWeights, qLenOut.floatValue(), targetParser, mode, boostQuerySubset);
+      result = parseQueryIntoTerms(queryTermWeights,
+          qLenOut.floatValue(),
+          targetParser,
+          mode,
+          boostQuerySubset, addNEnglishStopWords);
     } else {
+      LOG.warn("Parsing to phrase Query is not thoroughly tested.. adding English stop words is not tested at all!");
+      for (int s = 0; s < addNEnglishStopWords; ++s) {
+        queryStr += " " + stopWordsEN[s];
+      }
       result = parseQueryIntoPhrase(queryStr, targetParser, mode);
     }
     
@@ -1453,8 +1505,8 @@ public class FISQueryExpander {
     Operator origOp = targetParser.getDefaultOperator();
     targetParser.setDefaultOperator(op);
     Query result;
-    try{
-    result = targetParser.parse(queryStr);
+    try {
+      result = targetParser.parse(queryStr);
     } finally {
       targetParser.setDefaultOperator(origOp);
     }
@@ -1464,7 +1516,7 @@ public class FISQueryExpander {
   BooleanQuery parseQueryIntoTerms(OpenObjectFloatHashMap<String> queryTermWeights,
       float qLen,
       QueryParser targetParser,
-      QueryParseMode mode, boolean boostQuerySubsets)
+      QueryParseMode mode, boolean boostQuerySubsets, int addNEnglishStopWords)
       throws IOException, org.apache.lucene.queryParser.ParseException {
     float totalIDF = 0;
     if (boostQuerySubsets)
@@ -1497,17 +1549,30 @@ public class FISQueryExpander {
       break;
     }
     
-    // if (querySet.size() > 2) {
+    Set<String> stopWords = Sets.newCopyOnWriteArraySet(Arrays.asList(Arrays
+        .copyOfRange(stopWordsEN, 0, addNEnglishStopWords)));
+    for (int s = 0; s < addNEnglishStopWords; ++s) {
+      queryTermWeights.put(stopWordsEN[s], 1);
+    }
+    
+    Set<List<String>> augQuerySubSet = Sets.newHashSet();
     for (Set<String> querySubSet : querySets) {
+      augQuerySubSet.add(Lists.newCopyOnWriteArrayList(Arrays.asList(querySubSet
+          .toArray(new String[0]))));
+      augQuerySubSet.addAll(Sets.cartesianProduct(querySubSet, stopWords));
+    }
+    // if (querySet.size() > 2) {
+    for (List<String> querySubList : augQuerySubSet) {
       // if (querySubSet.size() < 2) {
-      if (querySubSet.isEmpty()) {
+      if (querySubList.isEmpty()) {
         continue;
       }
-      Query subQuery = targetParser.parse(querySubSet.toString()
+      
+      Query subQuery = targetParser.parse(querySubList.toString()
           .replaceAll(COLLECTION_STRING_CLEANER, ""));
       
       float querySubSetW = 0;
-      for (String qTerm : querySubSet) {
+      for (String qTerm : querySubList) {
         querySubSetW += queryTermWeights.get(qTerm);
       }
       
@@ -1533,7 +1598,7 @@ public class FISQueryExpander {
   public FilteredQuery expandAndFilterQuery(OpenObjectFloatHashMap<String> origQueryTerms,
       int origQueryLen,
       PriorityQueue<ScoreIxObj<String>>[] extraTerms,
-      int[] minXTermScore, int[] maxXTermScore,
+      float[] minXTermScoreFloats, float[] maxXTermScoreFloats,
       int numTermsToAppend) throws IOException,
       org.apache.lucene.queryParser.ParseException {
     
@@ -1554,6 +1619,7 @@ public class FISQueryExpander {
             continue;
           } else {
             emptyQueues.add(c);
+            t += (numTermsToAppend - t) / extraTerms.length;
             if (emptyQueues.size() == extraTerms.length) {
               break;
             }
@@ -1565,17 +1631,20 @@ public class FISQueryExpander {
         ScoreIxObj<Query> xtermQuery = createTermQuery(xterm,
             TweetField.TEXT.name,
             twtIxReader,
-            minXTermScore[c],
-            maxXTermScore[c]);
+            minXTermScoreFloats[c],
+            maxXTermScoreFloats[c]);
         
         for (String qterm : origQueryTerms.keys()) {
           
           BooleanQuery qxQuery = new BooleanQuery();
+          Query qQuery = new TermQuery(new Term(TweetField.TEXT.name, qterm));
+          qQuery.setBoost(origQueryTerms.get(qterm));
           
-          qxQuery.add(new TermQuery(new Term(TweetField.TEXT.name, qterm)), Occur.MUST);
+          qxQuery.add(qQuery, Occur.MUST);
           qxQuery.add(xtermQuery.obj, Occur.MUST);
           
-          qxQuery.setBoost(origQueryTerms.get(qterm) * xtermQuery.score);
+          // qxQuery.setBoost(origQueryTerms.get(qterm) * xtermQuery.score);
+          qxQuery.setBoost(xtermQuery.score);
           
           result.add(qxQuery, Occur.SHOULD);
         }
@@ -1627,9 +1696,9 @@ public class FISQueryExpander {
   
   @SuppressWarnings("unchecked")
   public PriorityQueue<ScoreIxObj<String>>[] convertResultToWeightedTermsByClustering(
-      OpenIntFloatHashMap rs, boolean closedOnly,
+      OpenIntFloatHashMap rs, String query, boolean closedOnly,
       List<MutableFloat> minXTermScores, List<MutableFloat> maxXTermScores,
-      List<MutableFloat> totalXTermScores) throws Exception {
+      List<MutableFloat> totalXTermScores, boolean weightIDF) throws Exception {
     
     // TODO: keep track of min and max scores
     
@@ -1637,7 +1706,7 @@ public class FISQueryExpander {
     
     OpenObjectIntHashMap<String> termIdMap = new OpenObjectIntHashMap<String>();
     Set<Set<String>> itemsets = Sets.newLinkedHashSet();
-    Map<IntArrayList, Instance> patternInstMap = Maps.newLinkedHashMap();
+    // Map<IntArrayList, Instance> patternInstMap = Maps.newLinkedHashMap();
     TransactionTree patternTree = new TransactionTree();
     FastVector attrs = new FastVector();
     int nextId = 0;
@@ -1674,61 +1743,194 @@ public class FISQueryExpander {
     if (patternTree.isTreeEmpty()) {
       return new PriorityQueue[0];
     }
-    Instances insts = new Instances("itemsets", attrs, itemsets.size());
-    Iterator<Pair<IntArrayList, Long>> patternsIter = patternTree.iterator(closedOnly);
-    while (patternsIter.hasNext()) {
-      Instance inst = new Instance(attrs.size());
-      IntArrayList pattern = patternsIter.next().getFirst();
-      for (int i = 0; i < pattern.size(); ++i) {
-        inst.setValue(pattern.getQuick(i), 1);
+    
+    Instances insts = new Instances("term-term", attrs, attrs.size());// itemsets.size());
+    
+    Enumeration attrsEnum = attrs.elements();
+    while (attrsEnum.hasMoreElements()) {
+      Attribute termAttr = (Attribute) attrsEnum.nextElement();
+      Term termT = new Term(TweetField.TEXT.name, termAttr.name());
+      
+      double weight = 1;
+      if (weightIDF) {
+        twtSimilarity.idf(twtIxReader.docFreq(termT),
+            twtIxReader.numDocs());
       }
-      insts.add(inst);
-      patternInstMap.put(pattern, inst);
+      Instance termInst = new Instance(weight, new double[attrs.size()]);
+      
+      termInst.setDataset(insts);
+      insts.add(termInst);
     }
     
-    Clusterer clusterer = new SimpleKMeans();
-    ((SimpleKMeans) clusterer).setNumClusters(patternInstMap.size() / clusterSize);
-    ((SimpleKMeans) clusterer).setDistanceFunction(new ManhattanDistance());
+    Iterator<Pair<IntArrayList, Long>> patternsIter = patternTree.iterator(closedOnly);
+    while (patternsIter.hasNext()) {
+      // Instance inst = new Instance(attrs.size());
+      IntArrayList pattern = patternsIter.next().getFirst();
+      for (int i = 0; i < pattern.size(); ++i) {
+        Instance inst = insts.instance(pattern.getQuick(i));
+        for (int j = 0; j < pattern.size(); ++j) {
+          int cooccurId = pattern.getQuick(j);
+          if (i == cooccurId) {
+            inst.setMissing(cooccurId);
+          } else {
+            inst.setValue(cooccurId, inst.value(cooccurId) + 1);
+          }
+        }
+      }
+      // insts.add(inst);
+      // patternInstMap.put(pattern, inst);
+    }
+    
+    Clusterer clusterer = new XMeans(); // One cluster full and the other is just what doesn't fit
+    ((XMeans) clusterer).setDistanceF(new CosineDistance());
+    // new SimpleKMeans();
+    // ((SimpleKMeans) clusterer).setNumClusters(patternInstMap.size() / clusterSize);
+    // ((SimpleKMeans) clusterer).setDistanceFunction(new ManhattanDistance());
     // HierarchicalClusterer(); Same as XMeans
-    // XMeans(); One cluster full and the other is just what doesn't fit
-    // ((XMeans) clusterer).setDistanceF(new ManhattanDistance());
+    //
     // CLOPE(); Too many clusters for egypt evactuation.. 972 items clustered into 500+ clusters
     // EM(); Always returns one cluster
     clusterer.buildClusterer(insts);
     
     LOG.info("Number of clusters: {}", clusterer.numberOfClusters());
     
-    Iterator<Set<String>> itemsetsIter = itemsets.iterator();
+    // if (minXTermScores != null && maxXTermScores != null)
+    // for (int i = 0; i < clusterer.numberOfClusters(); ++i) {
+    // minXTermScores.add(new MutableFloat(Float.MAX_VALUE));
+    // maxXTermScores.add(new MutableFloat(Float.MIN_VALUE));
+    // }
+    
     float[][] termMembership = new float[termIdMap.size()][clusterer.numberOfClusters()];
-    for (IntArrayList pattern : patternInstMap.keySet()) {
-      Instance inst = patternInstMap.get(pattern);
+    
+    // Iterator<Set<String>> itemsetsIter = itemsets.iterator();
+    // for (IntArrayList pattern : patternInstMap.keySet()) {
+    // Instance inst = patternInstMap.get(pattern);
+    
+    // Enumeration instsEnum = insts.enumerateInstances();
+    // while(instsEnum.hasMoreElements()){
+    // Instance inst = (Instance)instsEnum.nextElement();
+    
+    for (String term : termIdMap.keys()) {
+      int termId = termIdMap.get(term);
+      Instance inst = insts.instance(termId);
       double[] distrib = clusterer.distributionForInstance(inst);
-      Set<String> itemset = itemsetsIter.next();
-      for (String term : itemset) {
-        float[] termDistrib = termMembership[termIdMap.get(term)];
-        for (int c = 0; c < distrib.length; ++c) {
-          termDistrib[c] += distrib[c];
-        }
+      // Set<String> itemset = itemsetsIter.next();
+      // for (String term : itemset) {
+      float[] termDistrib = termMembership[termId];
+      for (int c = 0; c < distrib.length; ++c) {
+        termDistrib[c] += distrib[c];
+        
+        // This is meaningless.. will use a meaningful score measure (IDF, Mutual info with query..
+        // etc)
+        // if (minXTermScores != null)
+        // if (termDistrib[c] < minXTermScores.get(c).floatValue()) {
+        // minXTermScores.get(c).setValue(termDistrib[c]);
+        // }
+        //
+        // if (maxXTermScores != null)
+        // if (termDistrib[c] > maxXTermScores.get(c).floatValue()) {
+        // maxXTermScores.get(c).setValue(termDistrib[c]);
+        // }
       }
     }
+    
+    MutableFloat minScore = new MutableFloat(0);
+    MutableFloat maxScore = new MutableFloat(0);
+    MutableFloat totalScore = new MutableFloat(0);
+    PriorityQueue<ScoreIxObj<String>> termScores = convertResultToWeightedTermsConditionalProb(rs,
+        query,
+        -1,
+        false,
+        minScore,
+        maxScore,
+        totalScore);
     
     result = new PriorityQueue[clusterer.numberOfClusters()];
     for (int c = 0; c < result.length; ++c) {
       result[c] = new PriorityQueue<ScoreIxObj<String>>();
-      for (int t = 0; t < termMembership.length; ++t) {
-        result[c].add(new ScoreIxObj<String>(((Attribute) attrs.elementAt(t)).name(),
-            termMembership[t][c]));
+      // for (int t = 0; t < termMembership.length; ++t) {
+      // ((Attribute) attrs.elementAt(t))
+      
+      // attrsEnum = attrs.elements();
+      // while (attrsEnum.hasMoreElements()) {
+      // Attribute termAttr = (Attribute) attrsEnum.nextElement();
+      
+      // MutableFloat clusterMinScore = null;
+      // if (minXTermScores != null) {
+      // clusterMinScore = new MutableFloat(Float.MAX_VALUE);
+      // minXTermScores.add(clusterMinScore);
+      // }
+      //
+      // MutableFloat clusterMaxScore = null;
+      // if (maxXTermScores != null) {
+      // clusterMaxScore = new MutableFloat(Float.MIN_VALUE);
+      // maxXTermScores.add(clusterMaxScore);
+      // }
+      if (minXTermScores != null) {
+        minXTermScores.add(minScore);
       }
+      
+      if (maxXTermScores != null) {
+        maxXTermScores.add(maxScore);
+      }
+      
+      if (totalXTermScores != null) {
+        totalXTermScores.add(totalScore);
+      }
+      
+      PriorityQueue<ScoreIxObj<String>> termScoresClone = new PriorityQueue<ScoreIxObj<String>>();
+      while (!termScores.isEmpty()) {
+        ScoreIxObj<String> scoredTerm = termScores.poll();
+        termScoresClone.add(scoredTerm);
+        int termId = termIdMap.get(scoredTerm.obj);
+        if (termMembership[termId][c] > 0) {
+          result[c].add(scoredTerm);
+        }
+      }
+      termScores = termScoresClone;
+      
+      // for (String term : termIdMap.keys()) {
+      // int termId = termIdMap.get(term);
+      // if (termMembership[termId][c] > 0) {
+      //
+      // result[c].add(new ScoreIxObj<String>(term,
+      // termScore));
+      //
+      // if (minXTermScores != null)
+      // if (termScore < clusterMinScore.floatValue()) {
+      // clusterMinScore.setValue(termScore);
+      // }
+      //
+      // if (maxXTermScores != null)
+      // if (termScore > clusterMaxScore.floatValue()) {
+      // clusterMaxScore.setValue(termScore);
+      // }
+      // }
+      // }
     }
     return result;
   }
   
   public FilteredQuery expandAndFilterQuery(OpenObjectFloatHashMap<String> queryTerms,
-      int intValue, PriorityQueue<ScoreIxObj<String>>[] clustersTerms,
+      int queryLen, PriorityQueue<ScoreIxObj<String>>[] clustersTerms,
       MutableFloat[] minXTermScores,
-      MutableFloat[] maxXTermScores, int numTermsToAppend) {
-    // TODO convert mutables to floats and call
-    return null;
+      MutableFloat[] maxXTermScores, int numTermsToAppend) throws IOException,
+      org.apache.lucene.queryParser.ParseException {
+    // convert mutables to floats and call
+    float[] minXTermScoreFloats = new float[minXTermScores.length];
+    float[] maxXTermScoreFloats = new float[maxXTermScores.length];
+    for (int c = 0; c < minXTermScores.length; ++c) {
+      minXTermScoreFloats[c] = minXTermScores[c].floatValue();
+      maxXTermScoreFloats[c] = maxXTermScores[c].floatValue();
+    }
+    return expandAndFilterQuery(queryTerms,
+        queryLen,
+        clustersTerms,
+        minXTermScoreFloats,
+        maxXTermScoreFloats,
+        numTermsToAppend);
   }
   
+  static final String[] stopWordsEN =
+  { "the", "of", "to", "and", "a", "in", "is", "it", "you", "that", "he", "was", "for", "on", "are" };
 }
