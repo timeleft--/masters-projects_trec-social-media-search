@@ -53,8 +53,8 @@ import com.ibm.icu.text.SimpleDateFormat;
 public class FISQueryExpanderEvaluation implements Callable<Void> {
   private static final Logger LOG = LoggerFactory.getLogger(FISQueryExpanderEvaluation.class);
   
-  private float K1 = 0.25f; // default 1.2f;
-  private float B = 0.33f; // default 0.75
+  private float K1 = 1.2f; // default 1.2f;
+  private float B = 0.0f; // default 0.75
   private static final float LAVG = 9.63676320707029f; // really!
   
   private File fisIncIxLocation = new File(

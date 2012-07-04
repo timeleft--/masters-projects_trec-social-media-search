@@ -21,7 +21,6 @@ import org.apache.commons.math3.util.Pair;
 import com.google.common.collect.Lists;
 
 public class FindTopKRuns {
-  private static final Float ZERO = new Float(0);
   
   /**
    * @param args
@@ -50,7 +49,7 @@ public class FindTopKRuns {
       for (File resF : resultFiles) {
         wr.append("===============================================").append('\n')
             .append(resF.getAbsolutePath()).append('\n');
-            
+        
         Map<String, List<Pair<Float, Float>>> resMap = new TreeMap<String, List<Pair<Float, Float>>>();
         BufferedReader rd = new BufferedReader(new FileReader(resF));
         String line;
@@ -78,12 +77,12 @@ public class FindTopKRuns {
           boolean resi = false;
           if (currRank < numRes) {
             Float reli = currRel.get(fields[2]);
-            if (ZERO.equals(reli)) {
+            if (reli != null && reli <= 0) {
               ++currNonRelevant;
             } else if (reli != null) {
               resi = true;
             } else {
-              wr.append("Unjudged at " + currRank + ": " + fields[2]);
+              wr.append("Qid:" + currQid + " - Unjudged at " + currRank + ": " + fields[2] + "\n");
             }
             relevantiNonRelevantTilli
                 .add(new Pair<Float, Float>((resi ? 1f : 0f), currNonRelevant));
@@ -93,7 +92,9 @@ public class FindTopKRuns {
         
         SummaryStatistics rankEffStats = new SummaryStatistics();
         SummaryStatistics avgPrecStats = new SummaryStatistics();
-        wr.append("qid").append("\t").append("rankEff").append("\t").append("MAP").append("\t").append("P@30").append('\n');
+        SummaryStatistics pAt30Stats = new SummaryStatistics();
+        wr.append("qid").append("\t").append("numResults").append("\t").append("rankEff")
+            .append("\t").append("MAP").append("\t").append("P@30").append('\n');
         for (String qid : resMap.keySet()) {
           float sizeOfNonRel = -1;
           if (qRelUtil.sizeOfNonRelevant.containsKey(qid)) {
@@ -106,34 +107,40 @@ public class FindTopKRuns {
           float pAtK = 0;
           float pAt30 = -1;
           relevantiNonRelevantTilli = resMap.get(qid);
-          int i = 1;
+          int i = 0;
           for (Pair<Float, Float> atI : relevantiNonRelevantTilli) {
+            ++i;
             rankEff += atI.getKey() * (1 - (atI.getValue() / sizeOfNonRel));
             pAtK += atI.getKey();
             avgPrec += atI.getKey() * pAtK;
             if (i == 30) {
               pAt30 = pAtK;
             }
-            ++i;
           }
           float sizeOfRel = (qRelUtil.qRel.get(qid).size() - sizeOfNonRel);
           rankEff = rankEff / sizeOfRel; // size of judged rel
           avgPrec = avgPrec / sizeOfRel;
-          wr.append(qid).append("\t").append(rankEff + "").append("\t").append(avgPrec + "")
+          if (i < 30) {
+            pAt30 = pAtK;
+          }
+          wr.append(qid).append("\t").append(i + "").append("\t").append(rankEff + "").append("\t")
+              .append(avgPrec + "")
               .append("\t").append(pAt30 + "").append('\n');
           rankEffStats.addValue(rankEff);
           avgPrecStats.addValue(avgPrec);
+          pAt30Stats.addValue(pAt30);
         }
         wr.append("rankEff stats").append("\n").append(rankEffStats.toString()).append('\n');
         wr.append("avg prec stats").append("\n").append(avgPrecStats.toString()).append('\n');
         // topKRes.put(stats.getMean(), resF.getAbsolutePath());
-        topKRes.add(new Pair<String, Double>(resF.getAbsolutePath(), avgPrecStats.getMean()));
+        topKRes.add(new Pair<String, Double>(resF.getAbsolutePath(),pAt30Stats.getMean())); 
+            //avgPrecStats.getMean()));
         // rankEffStats.getMean()));
       }
       wr.append("========================= TOP K ============================\n");
       int k = 1;
       while (!topKRes.isEmpty()) {
-        if (k > 10) {
+        if (k > 100) {
           break;
         }
         Pair<String, Double> res = topKRes.poll();

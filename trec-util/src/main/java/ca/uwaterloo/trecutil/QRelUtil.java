@@ -38,7 +38,7 @@ public class QRelUtil {
       }
       float rel = Float.valueOf(fields[3]);
       currRel.put(fields[2], rel);
-      if(rel == 0){
+      if(rel <= 0){
         currQNonRelevantCount.add(1);
       }
     }
