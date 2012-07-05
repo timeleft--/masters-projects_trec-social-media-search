@@ -7,10 +7,14 @@ import java.io.IOException;
 import java.io.Writer;
 import java.nio.channels.Channels;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
 import org.apache.commons.io.FileUtils;
+import org.apache.mahout.math.map.OpenObjectFloatHashMap;
+
+import com.google.common.collect.Lists;
 
 public class DiffResults {
   
@@ -20,8 +24,8 @@ public class DiffResults {
    * @throws NumberFormatException
    */
   public static void main(String[] args) throws NumberFormatException, IOException {
-    LinkedHashMap<String, Map<String, Float>> baseRes = readResult(new File(args[0]));
-    LinkedHashMap<String, Map<String, Float>> otherRes = readResult(new File(args[1]));
+    LinkedHashMap<String, Map<String, Float>> baseRes = readSortedResult(new File(args[0]));
+    LinkedHashMap<String, Map<String, Float>> otherRes = readSortedResult(new File(args[1]));
     QRelUtil qRelUtil = new QRelUtil(new File(args[2]));
     Writer wr = Channels.newWriter(FileUtils.openOutputStream(new File(args[3])).getChannel(),
         "UTF-8");
@@ -75,13 +79,13 @@ public class DiffResults {
     return result;
   }
   
-  public static LinkedHashMap<String, Map<String, Float>> readResult(File resultsFile)
+  public static LinkedHashMap<String, Map<String, Float>> readSortedResult(File resultsFile)
       throws NumberFormatException, IOException {
     LinkedHashMap<String, Map<String, Float>> result = new LinkedHashMap<String, Map<String, Float>>();
     BufferedReader rd = new BufferedReader(new FileReader(resultsFile));
     String line;
     String currQid = null;
-    TreeMap<String, Float> currResult = null;
+    OpenObjectFloatHashMap<String> currResult = null;
     // HashMap<String, Float> currRel =null;
     while ((line = rd.readLine()) != null) {
       // query_id, iter, docno, rank, sim, run_id
@@ -89,8 +93,16 @@ public class DiffResults {
       if (!fields[0].equals(currQid)) {
         currQid = fields[0];
         // currRel = qRel.get(currQid);
-        currResult = new TreeMap<String, Float>();
-        result.put(currQid, currResult);
+        if(currResult!=null){
+          LinkedHashMap<String, Float> sortedRes = new LinkedHashMap<String, Float>();
+          List<String> keyList = Lists.newArrayListWithCapacity(currResult.size());
+          currResult.keysSortedByValue(keyList);
+          for(String key: keyList){
+            sortedRes.put(key, currResult.get(key));
+          }
+          result.put(currQid, sortedRes);
+        }
+        currResult = new OpenObjectFloatHashMap<String>();
       }
       currResult.put(fields[2], Float.parseFloat(fields[3]));
     }
