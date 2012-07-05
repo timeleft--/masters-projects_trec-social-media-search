@@ -220,7 +220,7 @@ public class FISQueryExpander {
   private static final float ITEMSET_LEN_WEIGHT_DEFAULT = 0.33f;
   
   private static final float ITEMSET_CORPUS_MODEL_WEIGHT_DEFAULT = 0.77f;
-  private static final float TWITTER_CORPUS_MODEL_WEIGHT_DEFAULT = 0.33f;
+  private static final float TWITTER_CORPUS_MODEL_WEIGHT_DEFAULT = 0; // 0.33f;
   
   private static final float TERM_WEIGHT_SMOOTHER_DEFAULT = 10000.0f;
   
@@ -1003,21 +1003,25 @@ public class FISQueryExpander {
       if (queryFreq.containsKey(t)) {
         continue;
       }
-      // Collection metric
-      Term tTerm = new Term(TweetField.TEXT.name, t);
-      float docFreqC = twtIxReader.docFreq(tTerm);
-      if (docFreqC == 0) {
-        continue;
+      
+      float termCorpusQuality = 0;
+      if (twitterCorpusModelWeight > 0) {
+        // Collection metric
+        Term tTerm = new Term(TweetField.TEXT.name, t);
+        float docFreqC = twtIxReader.docFreq(tTerm);
+        if (docFreqC == 0) {
+          continue;
+        }
+        
+        // odds of the term (not log odds)
+        termCorpusQuality = (termWeightSmoother + docFreqC) / twtIxReader.numDocs();
+        termCorpusQuality = termCorpusQuality / (1 - termCorpusQuality);
+        termCorpusQuality = (float) Math.log(termCorpusQuality);
+        
+        // IDF is has very large scale compared to probabilities
+        // float termCorpusQuality = (float) (Math.log(twtIxReader.numDocs() / (float) (docFreqC +
+        // 1)) + 1.0);
       }
-      
-      // odds of the term (not log odds)
-      float termCorpusQuality = (termWeightSmoother + docFreqC) / twtIxReader.numDocs();
-      termCorpusQuality = termCorpusQuality / (1 - termCorpusQuality);
-      termCorpusQuality = (float) Math.log(termCorpusQuality);
-      
-      // IDF is has very large scale compared to probabilities
-      // float termCorpusQuality = (float) (Math.log(twtIxReader.numDocs() / (float) (docFreqC +
-      // 1)) + 1.0);
       
       // Query metric
       Set<String> tAsSet = ImmutableSet.<String> of(t);
@@ -1926,13 +1930,20 @@ public class FISQueryExpander {
     MutableFloat minScore = new MutableFloat(0);
     MutableFloat maxScore = new MutableFloat(0);
     MutableFloat totalScore = new MutableFloat(0);
-    PriorityQueue<ScoreIxObj<String>> termScores = convertResultToWeightedTermsConditionalProb(rs,
+    PriorityQueue<ScoreIxObj<String>> termScores = convertResultToWeightedTermsKLDivergence(rs,
         query,
         -1,
         false,
         minScore,
         maxScore,
         totalScore);
+    // convertResultToWeightedTermsConditionalProb(rs,
+    // query,
+    // -1,
+    // false,
+    // minScore,
+    // maxScore,
+    // totalScore);
     
     result = new PriorityQueue[clusterer.numberOfClusters()];
     for (int c = 0; c < result.length; ++c) {
