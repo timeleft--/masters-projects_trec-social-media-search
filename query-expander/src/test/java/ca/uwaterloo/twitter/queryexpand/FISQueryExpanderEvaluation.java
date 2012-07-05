@@ -3,6 +3,7 @@ package ca.uwaterloo.twitter.queryexpand;
 import java.io.File;
 import java.io.IOException;
 import java.io.Writer;
+import java.lang.reflect.InvocationTargetException;
 import java.nio.channels.Channels;
 import java.text.ParseException;
 import java.util.Arrays;
@@ -55,6 +56,7 @@ import com.ibm.icu.text.SimpleDateFormat;
 public class FISQueryExpanderEvaluation implements Callable<Void> {
   private static final Logger LOG = LoggerFactory.getLogger(FISQueryExpanderEvaluation.class);
   
+  public  static final int MAX_RESULTS = 10000;
   private File fisIncIxLocation = new File(
       "/u2/yaboulnaga/datasets/twitter-trec2011/assoc-mr_0608-0530/index");
   private File twtIncIxLoc = new File(
@@ -79,7 +81,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   private QueryParseMode paramQueryParseMode = QueryParseMode.DISJUNCTIVE;
   private boolean paramParseToTermQueries = true;
   private boolean paramClusteringWeightIDF = false;
-  private int paramNumEnglishStopWords = 3;
+  private int paramNumEnglishStopWords = 0;
   
   private static final int LOG_TOP_COUNT = 30;
   
@@ -110,15 +112,15 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
    * @author yaboulna
    * 
    */
-  public class TrecResultFileCollector extends BM25Collector {
+  public class TrecResultFileCollector extends BM25Collector<String,String> {
     
     final String runTag;
     final String topicId;
     
-    public TrecResultFileCollector(String pTopicId, String pRunTag,
+    public TrecResultFileCollector(FISQueryExpander pTarget, String pTopicId, String pRunTag,
         String pQueryStr, OpenObjectFloatHashMap<String> pQueryTerms, int pQueryLen)
-        throws IOException {
-      super(target, pQueryStr, pQueryTerms, pQueryLen, paramNumEnglishStopWords);
+        throws IOException, IllegalArgumentException, SecurityException, InstantiationException, IllegalAccessException, InvocationTargetException {
+      super(pTarget,TweetField.TEXT.name, pQueryStr, pQueryTerms, pQueryLen, paramNumEnglishStopWords,MAX_RESULTS);
       runTag = pRunTag;
       
       if (trecEvalFormat) {
@@ -149,6 +151,21 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
         }
         ++rank;
       }
+    }
+
+    @Override
+    protected String getResultKey(int docId, Document doc) {
+      String tweetId = doc.get(TweetField.ID.name);
+      return tweetId;
+    }
+
+    @Override
+    protected String getResultValue(int docId, Document doc) {
+      String text = null;
+      if (LOG.isDebugEnabled()) {
+        text = doc.get(TweetField.TEXT.name);
+      }
+      return text;
     }
   }
   
@@ -316,7 +333,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
             paramQueryParseMode, paramsBoostSubsets);
         timedQuery = target.filterQuery(untimedQuery);
         
-        collector = new TrecResultFileCollector(topicIds.get(i),
+        collector = new TrecResultFileCollector(target, topicIds.get(i),
             TAG_BASELINE, queryStr, queryTerms, queryLen.intValue());
         target.twtSearcher.search(timedQuery, collector);
         
@@ -346,7 +363,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
             new float[] { maxXTermScore.intValue() },
             numTermsToAppend);
         
-        collector = new TrecResultFileCollector(topicIds.get(i),
+        collector = new TrecResultFileCollector(target, topicIds.get(i),
             TAG_QUERY_CONDPROB, queryStr, queryTerms, queryLen.intValue());
         target.twtSearcher.search(timedQuery, collector);
         collector.writeResults();
@@ -371,7 +388,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
             new float[] { maxXTermScore.intValue() },
             numTermsToAppend);
         
-        collector = new TrecResultFileCollector(topicIds.get(i),
+        collector = new TrecResultFileCollector(target, topicIds.get(i),
             TAG_QUERY_CONDPROB, queryStr, queryTerms, queryLen.intValue());
         target.twtSearcher.search(timedQuery, collector);
         collector.writeResults();
@@ -394,7 +411,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
             maxXTermScores.toArray(new MutableFloat[0]),
             numTermsToAppend);
         
-        collector = new TrecResultFileCollector(topicIds.get(i),
+        collector = new TrecResultFileCollector(target, topicIds.get(i),
             TAG_CLUSTER, queryStr, queryTerms, queryLen.intValue());
         target.twtSearcher.search(timedQuery, collector);
         collector.writeResults();
@@ -409,10 +426,10 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     final private float myK1;
     final private String writerKey;
     
-    public GridSearchCollector(String pTopicId, String pRunTag, String pQueryStr,
+    public GridSearchCollector(FISQueryExpander ptarget, String pTopicId, String pRunTag, String pQueryStr,
         OpenObjectFloatHashMap<String> pQueryTerms, int pQueryLen, float pB, float pK1)
-        throws IOException {
-      super(pTopicId, pRunTag, pQueryStr, pQueryTerms, pQueryLen);
+        throws IOException, IllegalArgumentException, SecurityException, InstantiationException, IllegalAccessException, InvocationTargetException {
+      super(ptarget, pTopicId, pRunTag, pQueryStr, pQueryTerms, pQueryLen);
       myB = pB;
       myK1 = pK1;
       writerKey = "b" + myB + "k" + myK1;
@@ -441,17 +458,17 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     }
     
     @Override
-    float getB() {
+    protected float getB() {
       return myB;
     }
     
     @Override
-    float getK1() {
+    protected float getK1() {
       return myK1;
     }
     
     @Override
-    float getLAVG() {
+    protected float getLAVG() {
       return super.getLAVG();
     }
     
@@ -540,7 +557,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
       for (float k : Arrays.asList(0.0f, 1000f, 0.25f, 0.75f, 1.20f, 2.0f, 7f, 33f, 99f)) {
         // = 0.0f; k < 3; k += 0.05) {
         
-        collector = new GridSearchCollector(topicIds.get(topicIx),
+        collector = new GridSearchCollector(target, topicIds.get(topicIx),
             "grid-search", queryStr, queryTerms, queryLen.intValue(), b, k);
         target.twtSearcher.search(timedQuery, collector);
         
