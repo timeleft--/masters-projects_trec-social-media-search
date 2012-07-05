@@ -60,11 +60,18 @@ public class DiffResults {
         qid = Integer.parseInt(qid.substring(2)) + "";
       }
       Map<String, Float> otherQRes = other.get(qid);
-      if (otherQRes == null) {
+      if (otherQRes == null ||
+          otherQRes.isEmpty() || baseQRes.isEmpty()) {
         continue;
         // otherQRes = new HashMap<String, Float>();
       }
-      TreeMap<String, Float> rankDiffMap = new TreeMap<String, Float>();
+      
+      float rankStartOffset = 
+          baseQRes.get(baseQRes.keySet().iterator().next()) - 
+          otherQRes.get(otherQRes.keySet().iterator().next());
+        
+      
+      LinkedHashMap<String, Float> rankDiffMap = new LinkedHashMap<String, Float>();
       result.put(qid, rankDiffMap);
       for (String docId : baseQRes.keySet()) {
         Float baseRank = baseQRes.get(docId);
@@ -72,7 +79,7 @@ public class DiffResults {
         if (otherRank == null) {
           otherRank = Float.POSITIVE_INFINITY;
         }
-        rankDiffMap.put(docId, otherRank - baseRank);
+        rankDiffMap.put(docId, (otherRank + rankStartOffset) - baseRank);
       }
     }
     
@@ -91,8 +98,6 @@ public class DiffResults {
       // query_id, iter, docno, rank, sim, run_id
       String[] fields = line.split("\\s");
       if (!fields[0].equals(currQid)) {
-        currQid = fields[0];
-        // currRel = qRel.get(currQid);
         if(currResult!=null){
           LinkedHashMap<String, Float> sortedRes = new LinkedHashMap<String, Float>();
           List<String> keyList = Lists.newArrayListWithCapacity(currResult.size());
@@ -103,6 +108,7 @@ public class DiffResults {
           result.put(currQid, sortedRes);
         }
         currResult = new OpenObjectFloatHashMap<String>();
+        currQid = fields[0];
       }
       currResult.put(fields[2], Float.parseFloat(fields[3]));
     }
