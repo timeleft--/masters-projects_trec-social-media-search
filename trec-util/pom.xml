@@ -29,5 +29,10 @@
   		<artifactId>mahout-math</artifactId>
   		<version>0.7</version>
   	</dependency>
+  	<dependency>
+  		<groupId>org.apache.lucene</groupId>
+  		<artifactId>lucene-core</artifactId>
+  		<version>3.6.0</version>
+  	</dependency>
   </dependencies>
 </project>
