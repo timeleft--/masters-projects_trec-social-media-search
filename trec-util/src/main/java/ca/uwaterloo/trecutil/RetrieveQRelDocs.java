@@ -26,6 +26,10 @@ public class RetrieveQRelDocs {
     Directory ixDir = MMapDirectory.open(new File(args[1]));
     IndexReader ixReader = IndexReader.open(ixDir);
     IndexSearcher ixSearcher = new IndexSearcher(ixReader);
+    int topk = Integer.MAX_VALUE;
+    if(args.length > 3){
+      topk = Integer.parseInt(args[3]);
+    }
     try {
       for (String qid : qRelUtil.qRel.keySet()) {
         Writer wr = Channels.newWriter(FileUtils.openOutputStream(new File(args[2], qid + ".csv"))
@@ -33,7 +37,11 @@ public class RetrieveQRelDocs {
             "UTF-8");
         try {
           LinkedHashMap<String, Float> qRel = qRelUtil.qRel.get(qid);
+          int rank = 0;
           for (String docId : qRel.keySet()) {
+            if(++rank > topk){
+              break;
+            }
             TermQuery docQuery = new TermQuery(new Term("id", docId));
             TopDocs rs = ixSearcher.search(docQuery, 100);
             
