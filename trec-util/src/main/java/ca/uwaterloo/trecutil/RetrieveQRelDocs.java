@@ -26,27 +26,31 @@ public class RetrieveQRelDocs {
     Directory ixDir = MMapDirectory.open(new File(args[1]));
     IndexReader ixReader = IndexReader.open(ixDir);
     IndexSearcher ixSearcher = new IndexSearcher(ixReader);
-    Writer wr = Channels.newWriter(FileUtils.openOutputStream(new File(args[2])).getChannel(),
-        "UTF-8");
     try {
       for (String qid : qRelUtil.qRel.keySet()) {
-        LinkedHashMap<String, Float> qRel = qRelUtil.qRel.get(qid);
-        for (String docId : qRel.keySet()) {
-          TermQuery docQuery = new TermQuery(new Term("id", docId));
-          TopDocs rs = ixSearcher.search(docQuery, 100);
-          
-          if (rs.totalHits < 1) {
-            continue; // might be a deleted tweet
-          } else if (rs.totalHits > 1) {
-            throw new IllegalStateException();
+        Writer wr = Channels.newWriter(FileUtils.openOutputStream(new File(args[2], qid + ".csv"))
+            .getChannel(),
+            "UTF-8");
+        try {
+          LinkedHashMap<String, Float> qRel = qRelUtil.qRel.get(qid);
+          for (String docId : qRel.keySet()) {
+            TermQuery docQuery = new TermQuery(new Term("id", docId));
+            TopDocs rs = ixSearcher.search(docQuery, 100);
+            
+            if (rs.totalHits < 1) {
+              continue; // might be a deleted tweet
+            } else if (rs.totalHits > 1) {
+              throw new IllegalStateException();
+            }
+            String tweet = ixReader.document(rs.scoreDocs[0].doc).get("text");
+            wr.append(qid + "\t" + docId + "\t" + qRel.get(docId) + "\t" + tweet + "\n");
           }
-          String tweet = ixReader.document(rs.scoreDocs[0].doc).get("text");
-          wr.append(qid + "\t" + docId + "\t" + qRel.get(docId) + "\t" + tweet + "\n");
+        } finally {
+          wr.flush();
+          wr.close();
         }
       }
     } finally {
-      wr.flush();
-      wr.close();
       ixReader.close();
     }
   }
