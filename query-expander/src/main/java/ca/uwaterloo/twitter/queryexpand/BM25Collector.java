@@ -54,11 +54,15 @@ public class BM25Collector extends Collector {
   
   
   public BM25Collector(FISQueryExpander pTarget,
-      String pQueryStr, OpenObjectFloatHashMap<String> pQueryTerms, int pQueryLen)
+      String pQueryStr, OpenObjectFloatHashMap<String> pQueryTerms, int pQueryLen, 
+      int addNEnglishStopWordsToQueryTerms)
       throws IOException {
     target = pTarget;
     queryStr = pQueryStr;
-    queryTerms = pQueryTerms;
+    queryTerms = (OpenObjectFloatHashMap<String>) pQueryTerms.clone();
+    for(int s = 0; s< addNEnglishStopWordsToQueryTerms; ++s){
+      queryTerms.put(stopWordsEN[s], 1);
+    }
     queryLen = pQueryLen;
     resultSet = new TreeMap<ScoreIxObj<String>, String>(new ScoreThenTimeComparator());
   }
@@ -174,4 +178,7 @@ public class BM25Collector extends Collector {
   public boolean acceptsDocsOutOfOrder() {
     return false;
   }
+  
+  static final String[] stopWordsEN =
+    { "the", "of", "to", "and", "a", "in", "is", "it", "you", "that", "he", "was", "for", "on", "are" };
 }

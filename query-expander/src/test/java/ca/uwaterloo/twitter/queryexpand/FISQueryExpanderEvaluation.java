@@ -118,7 +118,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     public TrecResultFileCollector(String pTopicId, String pRunTag,
         String pQueryStr, OpenObjectFloatHashMap<String> pQueryTerms, int pQueryLen)
         throws IOException {
-      super(target, pQueryStr, pQueryTerms, pQueryLen);
+      super(target, pQueryStr, pQueryTerms, pQueryLen, paramNumEnglishStopWords);
       runTag = pRunTag;
       
       if (trecEvalFormat) {
@@ -313,7 +313,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
             queryTerms,
             queryLen,
             target.twtQparser,
-            paramQueryParseMode, paramsBoostSubsets,paramNumEnglishStopWords);
+            paramQueryParseMode, paramsBoostSubsets);
         timedQuery = target.filterQuery(untimedQuery);
         
         collector = new TrecResultFileCollector(topicIds.get(i),
@@ -324,9 +324,6 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
       } else {
         queryLen = new MutableLong();
         queryTerms = target.queryTermFreq(queryStr, queryLen);
-        for(int s=0; s<paramNumEnglishStopWords; ++s){
-          queryTerms.put(target.stopWordsEN[s],1);
-        }
       }
       // ////////////////////////////////////////
       
@@ -536,7 +533,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     timedQuery = target.filterQuery(target.parseQuery(queryStr,
         queryTerms,
         queryLen,
-        target.twtQparser, paramQueryParseMode, paramsBoostSubsets,paramNumEnglishStopWords));
+        target.twtQparser, paramQueryParseMode, paramsBoostSubsets));
     
     for (float b : Arrays.asList(0.0f, 1.0f, 0.5f, 0.3f, 0.7f, 0.2f, 0.6f, 0.1f, 0.8f, 0.9f)) {
       // = 0.0f; b < 3; b += 0.05) {

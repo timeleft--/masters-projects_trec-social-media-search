@@ -696,7 +696,7 @@ public class FISQueryExpander {
         queryTermWeight,
         qLen.floatValue(),
         fisQparser,
-        QueryParseMode.POWERSET, QUERY_SUBSET_BOOST_YESNO_DEFAULT, 0);
+        QueryParseMode.POWERSET, QUERY_SUBSET_BOOST_YESNO_DEFAULT);
     
     OpenIntFloatHashMap resultSet = new OpenIntFloatHashMap();
     TopDocs rs = fisSearcher.search(query, fisNumHits);
@@ -1461,7 +1461,7 @@ public class FISQueryExpander {
       OpenObjectFloatHashMap<String> queryTermsOut,// = queryTermFreq(queryStr, qLen);
       MutableLong qLenOut, // = new MutableLong(0);
       QueryParser targetParser,
-      QueryParseMode mode, boolean boostQuerySubset, int addNEnglishStopWords)
+      QueryParseMode mode, boolean boostQuerySubset)
       throws IOException, org.apache.lucene.queryParser.ParseException {
     
     OpenObjectFloatHashMap<String> queryTermWeights = queryTermFreq(queryStr, qLenOut);
@@ -1472,12 +1472,9 @@ public class FISQueryExpander {
           qLenOut.floatValue(),
           targetParser,
           mode,
-          boostQuerySubset, addNEnglishStopWords);
+          boostQuerySubset);
     } else {
-      LOG.warn("Parsing to phrase Query is not thoroughly tested.. adding English stop words is not tested at all!");
-      for (int s = 0; s < addNEnglishStopWords; ++s) {
-        queryStr += " " + stopWordsEN[s];
-      }
+      LOG.warn("Parsing to phrase Query is not thoroughly tested!");
       result = parseQueryIntoPhrase(queryStr, targetParser, mode);
     }
     
@@ -1516,7 +1513,7 @@ public class FISQueryExpander {
   BooleanQuery parseQueryIntoTerms(OpenObjectFloatHashMap<String> queryTermWeights,
       float qLen,
       QueryParser targetParser,
-      QueryParseMode mode, boolean boostQuerySubsets, int addNEnglishStopWords)
+      QueryParseMode mode, boolean boostQuerySubsets)
       throws IOException, org.apache.lucene.queryParser.ParseException {
     float totalIDF = 0;
     if (boostQuerySubsets)
@@ -1549,30 +1546,18 @@ public class FISQueryExpander {
       break;
     }
     
-    Set<String> stopWords = Sets.newCopyOnWriteArraySet(Arrays.asList(Arrays
-        .copyOfRange(stopWordsEN, 0, addNEnglishStopWords)));
-    for (int s = 0; s < addNEnglishStopWords; ++s) {
-      queryTermWeights.put(stopWordsEN[s], 1);
-    }
-    
-    Set<List<String>> augQuerySubSet = Sets.newHashSet();
-    for (Set<String> querySubSet : querySets) {
-      augQuerySubSet.add(Lists.newCopyOnWriteArrayList(Arrays.asList(querySubSet
-          .toArray(new String[0]))));
-      augQuerySubSet.addAll(Sets.cartesianProduct(querySubSet, stopWords));
-    }
     // if (querySet.size() > 2) {
-    for (List<String> querySubList : augQuerySubSet) {
+    for (Set<String> querySubSet : querySets) {
       // if (querySubSet.size() < 2) {
-      if (querySubList.isEmpty()) {
+      if (querySubSet.isEmpty()) {
         continue;
       }
       
-      Query subQuery = targetParser.parse(querySubList.toString()
+      Query subQuery = targetParser.parse(querySubSet.toString()
           .replaceAll(COLLECTION_STRING_CLEANER, ""));
       
       float querySubSetW = 0;
-      for (String qTerm : querySubList) {
+      for (String qTerm : querySubSet) {
         querySubSetW += queryTermWeights.get(qTerm);
       }
       
@@ -1931,6 +1916,5 @@ public class FISQueryExpander {
         numTermsToAppend);
   }
   
-  static final String[] stopWordsEN =
-  { "the", "of", "to", "and", "a", "in", "is", "it", "you", "that", "he", "was", "for", "on", "are" };
+ 
 }
