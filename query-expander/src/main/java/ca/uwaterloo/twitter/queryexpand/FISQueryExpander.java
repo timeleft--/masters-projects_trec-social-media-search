@@ -42,7 +42,6 @@ import org.apache.lucene.index.Term;
 import org.apache.lucene.index.TermFreqVector;
 import org.apache.lucene.queryParser.QueryParser;
 import org.apache.lucene.queryParser.QueryParser.Operator;
-import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanClause.Occur;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.FilteredQuery;
@@ -63,15 +62,21 @@ import org.apache.mahout.math.map.OpenIntFloatHashMap;
 import org.apache.mahout.math.map.OpenObjectFloatHashMap;
 import org.apache.mahout.math.map.OpenObjectIntHashMap;
 import org.apache.mahout.math.set.OpenIntHashSet;
+import org.junit.internal.requests.IgnoredClassRunner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import weka.clusterers.Clusterer;
+import weka.attributeSelection.LatentSemanticAnalysis;
 import weka.clusterers.XMeans;
 import weka.core.Attribute;
 import weka.core.FastVector;
 import weka.core.Instance;
 import weka.core.Instances;
+import weka.core.WekaException;
+import weka.core.matrix.Matrix;
+import weka.core.matrix.SingularValueDecomposition;
+import weka.filters.Filter;
+import weka.filters.unsupervised.attribute.ReplaceMissingValues;
 import ca.uwaterloo.twitter.ItemSetIndexBuilder;
 import ca.uwaterloo.twitter.ItemSetIndexBuilder.AssocField;
 import ca.uwaterloo.twitter.ItemSetSimilarity;
@@ -164,7 +169,8 @@ public class FISQueryExpander {
   public static enum TermWeigting {
     PROB_QUERY("pq"),
     KL_DIVERG("kl"),
-    CLUSTERING("clustering");
+    CLUSTERING("clustering"),
+    SVD("svd");
     
     public final String name;
     
@@ -361,6 +367,9 @@ public class FISQueryExpander {
           mode = 0; // itemsets
         } else if (cmd.equals("l:")) {
           mode = 1; // close itemsets
+        } else if (cmd.equals("v:")) {
+          mode = 4; // terms with query divergence
+          termWeighting = TermWeigting.SVD;
         } else if (cmd.equals("c:")) {
           mode = 5; // terms with query divergence
           termWeighting = TermWeigting.CLUSTERING;
@@ -454,7 +463,7 @@ public class FISQueryExpander {
             out.print("\n");
           }
           
-        } else if (mode == 6 || mode == 7) {
+        } else if (mode == 6 || mode == 7 || mode == 4) {
           
           PriorityQueue<ScoreIxObj<String>> weightedTerms = null;
           if (TermWeigting.PROB_QUERY.equals(termWeighting)) {
@@ -467,6 +476,11 @@ public class FISQueryExpander {
                 .convertResultToWeightedTermsKLDivergence(fisRs,
                     query.toString(),
                     -1, propagateISWeights, null, null, null);
+          } else if (TermWeigting.SVD.equals(termWeighting)) {
+            weightedTerms = qEx
+                .convertResultToWeightedTermsBySVDOfPatternsMatrix(fisRs,
+                    true,
+                    paramClusteringWeightInsts);
           }
           
           int i = 0;
@@ -1993,19 +2007,14 @@ public class FISQueryExpander {
   }
   
   // ////////////////////// PATTERN-TO-TERM ///////////////////////////////
-  @SuppressWarnings("unchecked")
-  public PriorityQueue<ScoreIxObj<String>>[] convertResultToWeightedTermsByClusteringPatterns(
-      OpenIntFloatHashMap rs, String query, boolean closedOnly,
-      List<MutableFloat> minXTermScoresOut, List<MutableFloat> maxXTermScoresOut,
-      List<MutableFloat> totalXTermScoresOut, boolean weightInsts) throws Exception {
-    
-    PriorityQueue<ScoreIxObj<String>>[] result = null;
+  protected Instances createPatternTermMatrix(OpenIntFloatHashMap rs, boolean weightInsts,
+      FastVector attrsOut, Map<IntArrayList, Instance> patternInstMapOut, boolean closedOnly,
+      Set<Set<String>> itemsetsOut) throws Exception {
     
     OpenObjectIntHashMap<String> termIdMap = new OpenObjectIntHashMap<String>();
-    Set<Set<String>> itemsets = Sets.newLinkedHashSet();
-    Map<IntArrayList, Instance> patternInstMap = Maps.newLinkedHashMap();
+    
     TransactionTree patternTree = new TransactionTree();
-    FastVector attrs = new FastVector();
+    
     int nextId = 0;
     
     IntArrayList keyList = new IntArrayList(rs.size());
@@ -2019,34 +2028,34 @@ public class FISQueryExpander {
       }
       Set<String> termSet = Sets.newCopyOnWriteArraySet(Arrays.asList(terms.getTerms()));
       
-      if (itemsets.contains(termSet)) {
+      if (itemsetsOut.contains(termSet)) {
         continue;
       }
       
-      itemsets.add(termSet);
+      itemsetsOut.add(termSet);
       
       IntArrayList pattern = new IntArrayList(termSet.size());
       
       for (String term : termSet) {
         if (!termIdMap.containsKey(term)) {
           termIdMap.put(term, nextId++);
-          attrs.addElement(new Attribute(term));
+          attrsOut.addElement(new Attribute(term));
         }
         pattern.add(termIdMap.get(term));
       }
       
-      patternTree.addPattern(pattern, 1);
+      patternTree.addPattern(pattern, 1); // TODO: use pattern support????????
     }
     if (patternTree.isTreeEmpty()) {
-      return new PriorityQueue[0];
+      return null;
     }
     
-    Instances insts = new Instances("pattern-term", attrs, itemsets.size());
+    Instances insts = new Instances("pattern-term", attrsOut, itemsetsOut.size());
     
     Iterator<Pair<IntArrayList, Long>> patternsIter = patternTree.iterator(closedOnly);
     while (patternsIter.hasNext()) {
       Pair<IntArrayList, Long> pattern = patternsIter.next();
-      Instance inst = new Instance(attrs.size());
+      Instance inst = new Instance(attrsOut.size());
       
       if (weightInsts) {
         inst.setWeight(pattern.getSecond());
@@ -2058,11 +2067,35 @@ public class FISQueryExpander {
       }
       
       insts.add(inst);
-      patternInstMap.put(patternItems, insts.instance(insts.numInstances() - 1));
+      patternInstMapOut.put(patternItems, inst);// do I need the actual???
+                                                // insts.instance(insts.numInstances() - 1));
     }
     
-    XMeans clusterer = new XMeans(); // One cluster full and the other is just what doesn't fit
-    ((XMeans) clusterer).setDistanceF(new CosineDistance());
+    ReplaceMissingValues replaceMissingFilter = new ReplaceMissingValues();
+    replaceMissingFilter.setInputFormat(insts);
+    insts = Filter.useFilter(insts, replaceMissingFilter);
+    return insts;
+  }
+  
+  @SuppressWarnings("unchecked")
+  public PriorityQueue<ScoreIxObj<String>>[] convertResultToWeightedTermsByClusteringPatterns(
+      OpenIntFloatHashMap rs, String query, boolean closedOnly,
+      List<MutableFloat> minXTermScoresOut, List<MutableFloat> maxXTermScoresOut,
+      List<MutableFloat> totalXTermScoresOut, boolean weightInsts) throws Exception {
+    
+    PriorityQueue<ScoreIxObj<String>>[] result = null;
+    Map<IntArrayList, Instance> patternInstMap = Maps.newLinkedHashMap();
+    Set<Set<String>> itemsets = Sets.newLinkedHashSet();
+    FastVector attrs = new FastVector();
+    Instances insts = createPatternTermMatrix(rs,
+        weightInsts,
+        attrs,
+        patternInstMap,
+        closedOnly,
+        itemsets);
+    
+    XMeans clusterer = new XMeans();
+    clusterer.setDistanceF(new CosineDistance());
     clusterer.buildClusterer(insts);
     
     LOG.info("Number of clusters: {}", clusterer.numberOfClusters());
@@ -2085,8 +2118,6 @@ public class FISQueryExpander {
         }
       }
       
-      
-      Iterator<Set<String>> itemsetsIter = itemsets.iterator();
       for (IntArrayList patternItems : patternInstMap.keySet()) {
         Instance inst = patternInstMap.get(patternItems);
         for (int i = 0; i < patternItems.size(); ++i) {
@@ -2132,11 +2163,62 @@ public class FISQueryExpander {
     for (int c = 0; c < clusterer.numberOfClusters(); ++c) {
       result[c] = new PriorityQueue<ScoreIxObj<String>>();
       for (String term : termWeights[c].keys()) {
-        if(queryTerms.containsKey(term)){
+        if (queryTerms.containsKey(term)) {
           continue;
         }
         result[c].add(new ScoreIxObj<String>(term, termWeights[c].get(term)));
       }
+    }
+    return result;
+  }
+  
+  public PriorityQueue<ScoreIxObj<String>> convertResultToWeightedTermsBySVDOfPatternsMatrix(
+      OpenIntFloatHashMap rs, boolean closedOnly, boolean weightInsts) throws Exception {
+    PriorityQueue<ScoreIxObj<String>> result = new PriorityQueue<ScoreIxObj<String>>();
+    
+    Map<IntArrayList, Instance> patternInstMap = Maps.newLinkedHashMap();
+    Set<Set<String>> itemsets = Sets.newLinkedHashSet();
+    FastVector attrs = new FastVector();
+    Instances insts = createPatternTermMatrix(rs,
+        weightInsts,
+        attrs,
+        patternInstMap,
+        closedOnly,
+        itemsets);
+    if (insts != null) {
+      // Removes attributes with only one distinct values (all of them), and so fails
+//      try {
+//        LatentSemanticAnalysis lsa = new LatentSemanticAnalysis();
+//        lsa.buildEvaluator(insts);
+        
+        // create matrix of attribute values and compute singular value decomposition
+        double [][] trainValues = new double[attrs.size()][insts.numInstances()];
+        for (int i = 0; i < attrs.size(); i++) {
+          trainValues[i] = insts.attributeToDoubleArray(i);
+        }
+        Matrix trainMatrix = new Matrix(trainValues);
+        // svd requires rows >= columns, so transpose data if necessary
+        if (attrs.size() < insts.numInstances()) {
+          trainMatrix = trainMatrix.transpose();
+        }
+        SingularValueDecomposition trainSVD = trainMatrix.svd();
+        Matrix s = trainSVD.getS(); // singular values
+        
+        
+        // SingularValueDecomposition svd = new SingularValueDecomposition(insts);
+        Enumeration attrsEnum = attrs.elements();
+        int i = 0;
+        while (attrsEnum.hasMoreElements()) {
+          Attribute attr = (Attribute) attrsEnum.nextElement();
+          
+//          float score = (float) lsa.evaluateAttribute(i);
+          float score = (float)s.get(i, i);
+          result.add(new ScoreIxObj<String>(attr.name(), score));
+          i++;
+        }
+//      } catch (WekaException ingored) {
+//        LOG.error(ingored.getMessage(), ingored);
+//      }
     }
     return result;
   }
