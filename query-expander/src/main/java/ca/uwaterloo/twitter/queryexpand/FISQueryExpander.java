@@ -121,13 +121,14 @@ public class FISQueryExpander {
         return result;
       }
     }
+
     
     public FISCollector(FISQueryExpander pTarget, String pQueryStr,
         OpenObjectFloatHashMap<String> pQueryTerms, float pQueryLen,
         int pMaxResults) throws IOException, IllegalArgumentException, SecurityException,
         InstantiationException, IllegalAccessException, InvocationTargetException {
       super(pTarget, AssocField.ITEMSET.name, pQueryStr, pQueryTerms, pQueryLen, 0,
-          pMaxResults, ScoreThenSuppRankComparator.class);
+          pMaxResults, ScoreThenSuppRankComparator.class, paramBM25StemmedIDF);
     }
     
     @Override
@@ -241,6 +242,8 @@ public class FISQueryExpander {
   private static final boolean DEAFULT_MAGIC_ALLOWED = false;
   
   private static boolean paramClusteringWeightIDF = false;
+  
+  private static boolean paramBM25StemmedIDF = true;
   
   /**
    * @param args
@@ -1537,12 +1540,14 @@ public class FISQueryExpander {
     return Sets.difference(extraTerms2, doneTerms);
     
   }
-  
-  OpenObjectFloatHashMap<String> queryTermFreq(String query, MutableLong qLenOut)
+  public OpenObjectFloatHashMap<String> queryTermFreq(String query, MutableLong qLenOut) throws IOException{
+    return queryTermFreq(query, qLenOut, ANALYZER, TweetField.TEXT.name); 
+  }
+  public OpenObjectFloatHashMap<String> queryTermFreq(String query, MutableLong qLenOut, Analyzer pAnalyzer, String pFieldName)
       throws IOException {
     OpenObjectFloatHashMap<String> queryFreq = new OpenObjectFloatHashMap<String>();
     // String[] queryTokens = query.toString().split("\\W");
-    TokenStream queryTokens = ANALYZER.tokenStream(TweetField.TEXT.name,
+    TokenStream queryTokens = pAnalyzer.tokenStream(pFieldName,
         new StringReader(query.toString().trim()));
     queryTokens.reset();
     

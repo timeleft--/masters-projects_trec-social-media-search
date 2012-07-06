@@ -7,6 +7,7 @@ import java.util.TreeMap;
 
 import org.apache.commons.lang.mutable.MutableLong;
 import org.apache.commons.math.util.MathUtils;
+import org.apache.lucene.analysis.TwitterEnglishAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.Term;
@@ -18,18 +19,21 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import ca.uwaterloo.twitter.TwitterIndexBuilder.TweetField;
-import ca.uwaterloo.twitter.queryexpand.FISQueryExpander.FISCollector.ScoreThenSuppRankComparator;
 
 public abstract class BM25Collector<K extends Comparable<K>, V> extends Collector {
   private static final Logger LOG = LoggerFactory.getLogger(BM25Collector.class);
   
   // Defaults
-  public static final float K1 = 1.2f; // default 1.2f;
+  public static final float K1 = 1.2f; // default 1.2f;1.1 and 1.3 work slightly better on training
   public static final float B = 0.0f; // default 0.75
   public static final float LAVG = 9.63676320707029f; // really!
   
-  private final boolean clarityIDF = true;
-  private final boolean clarityScore = false;
+  public final boolean clarityIDF = true;
+  public final boolean clarityScore = false;
+  public final boolean binaryFtd = false;
+  
+  private static TwitterEnglishAnalyzer stemmingAnalyzer = new TwitterEnglishAnalyzer();
+  public final boolean stemmedIDF;
   
   /**
    * Sorts in descending order. Good if the obj represnts time.
@@ -66,17 +70,28 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
   public BM25Collector(FISQueryExpander pTarget, String pDocTextField,
       String pQueryStr, OpenObjectFloatHashMap<String> pQueryTerms, float pQueryLen,
       int addNEnglishStopWordsToQueryTerms, int pMaxResults,
-      Class<? extends Comparator<ScoreIxObj<K>>> comparatorClazz)
+      Class<? extends Comparator<ScoreIxObj<K>>> comparatorClazz, boolean pStemmedIDF)
       throws IOException, IllegalArgumentException, SecurityException, InstantiationException,
       IllegalAccessException, InvocationTargetException {
     docTextField = pDocTextField;
     target = pTarget;
     queryStr = pQueryStr;
-    queryTerms = (OpenObjectFloatHashMap<String>) pQueryTerms.clone();
+    stemmedIDF = pStemmedIDF;
+    if (stemmedIDF) {
+      MutableLong qLenOut = new MutableLong();
+      queryTerms = target.queryTermFreq(queryStr,
+          qLenOut,
+          stemmingAnalyzer,
+          TweetField.STEMMED_EN.name);
+      queryLen = qLenOut.floatValue();
+    } else {
+      queryTerms = (OpenObjectFloatHashMap<String>) pQueryTerms.clone();
+      queryLen = pQueryLen;
+    }
     for (int s = 0; s < addNEnglishStopWordsToQueryTerms; ++s) {
       queryTerms.put(stopWordsEN[s], 1);
     }
-    queryLen = pQueryLen;
+    
     Comparator<ScoreIxObj<K>> comparator;
     // if(comparatorClazz == null){
     // comparator = new ScoreThenObjDescComparator();
@@ -94,7 +109,7 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
       InvocationTargetException {
     this(pTarget, pDocTextField, pQueryStr, pQueryTerms, pQueryLen,
         addNEnglishStopWordsToQueryTerms, pMaxResults,
-        (Class<? extends Comparator<ScoreIxObj<K>>>) ScoreThenObjDescComparator.class);
+        (Class<? extends Comparator<ScoreIxObj<K>>>) ScoreThenObjDescComparator.class, false);
   }
   
   @Override
@@ -107,21 +122,30 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
     // float score = scorer.score();
     
     Document doc = reader.document(docId);
-    TermFreqVector docTermsVector = reader.getTermFreqVector(docId,
-        docTextField);
+    
     float ld = 0;
-    if (docTermsVector != null) {
-      docTerms = new OpenObjectFloatHashMap<String>();
-      for (int i = 0; i < docTermsVector.size(); ++i) {
-        int f = docTermsVector.getTermFrequencies()[i];
-        docTerms.put(docTermsVector.getTerms()[i], f);
-        ld += f;
-      }
-    } else {
+    if (stemmedIDF) {
+      // TODO if this works store the stemmed vector instead of reparseing the whole index
       String tweet = doc.get(docTextField);
       MutableLong docLen = new MutableLong();
-      docTerms = target.queryTermFreq(tweet, docLen);
+      docTerms = target.queryTermFreq(tweet, docLen, stemmingAnalyzer, TweetField.STEMMED_EN.name);
       ld = docLen.floatValue();
+    } else {
+      TermFreqVector docTermsVector = reader.getTermFreqVector(docId,
+          docTextField);
+      if (docTermsVector != null) {
+        docTerms = new OpenObjectFloatHashMap<String>();
+        for (int i = 0; i < docTermsVector.size(); ++i) {
+          int f = docTermsVector.getTermFrequencies()[i];
+          docTerms.put(docTermsVector.getTerms()[i], f);
+          ld += f;
+        }
+      } else {
+        String tweet = doc.get(docTextField);
+        MutableLong docLen = new MutableLong();
+        docTerms = target.queryTermFreq(tweet, docLen);
+        ld = docLen.floatValue();
+      }
     }
     // BM25
     float score = 0;
@@ -130,9 +154,18 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
       if (ftd == 0) {
         continue;
       }
+      if (binaryFtd) {
+        ftd = 1;
+      }
       
       // IDF alwaus comes from the tweet index
-      Term t = new Term(TweetField.TEXT.name, tStr);
+      String fieldName;
+      if (stemmedIDF) {
+        fieldName = TweetField.STEMMED_EN.name;
+      } else {
+        fieldName = TweetField.TEXT.name;
+      }
+      Term t = new Term(fieldName, tStr);
       
       // weight of term is its IDF
       

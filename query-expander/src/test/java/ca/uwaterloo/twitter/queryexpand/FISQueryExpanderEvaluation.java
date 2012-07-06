@@ -47,6 +47,7 @@ import org.slf4j.LoggerFactory;
 
 import ca.uwaterloo.trecutil.QRelUtil;
 import ca.uwaterloo.twitter.TwitterIndexBuilder.TweetField;
+import ca.uwaterloo.twitter.queryexpand.BM25Collector.ScoreThenObjDescComparator;
 import ca.uwaterloo.twitter.queryexpand.FISQueryExpander.QueryParseMode;
 
 import com.google.common.collect.Lists;
@@ -65,7 +66,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   
   private static final String TWT_CHUNKS_ROOT = "/u2/yaboulnaga/datasets/twitter-trec2011/index-stemmed_chunks";
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-tweets_chunks";
-  private static final String RESULT_PATH = "/u2/yaboulnaga/datasets/twitter-trec2011/runs/"; // bm25-param-tune";
+  private static final String RESULT_PATH = "/u2/yaboulnaga/datasets/twitter-trec2011/runs/"; //bm25-param-tune-fbin";
   private static final String TOPICS_XML_PATH =
       "/u2/yaboulnaga/datasets/twitter-trec2011/2011.topics.MB1-50.xml";
   private static final String QREL_PATH = "/u2/yaboulnaga/datasets/twitter-trec2011/microblog11-qrels.txt";
@@ -82,6 +83,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   private boolean paramParseToTermQueries = true;
   private boolean paramClusteringWeightIDF = false;
   private int paramNumEnglishStopWords = 0;
+  private boolean paramBM25StemmedIDF = true;
   
   private static final int LOG_TOP_COUNT = 30;
   
@@ -120,7 +122,8 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     public TrecResultFileCollector(FISQueryExpander pTarget, String pTopicId, String pRunTag,
         String pQueryStr, OpenObjectFloatHashMap<String> pQueryTerms, int pQueryLen)
         throws IOException, IllegalArgumentException, SecurityException, InstantiationException, IllegalAccessException, InvocationTargetException {
-      super(pTarget,TweetField.TEXT.name, pQueryStr, pQueryTerms, pQueryLen, paramNumEnglishStopWords,MAX_RESULTS);
+      super(pTarget,TweetField.TEXT.name, pQueryStr, pQueryTerms, pQueryLen, paramNumEnglishStopWords,MAX_RESULTS,
+          (Class<? extends Comparator<ScoreIxObj<String>>>) ScoreThenObjDescComparator.class, paramBM25StemmedIDF);
       runTag = pRunTag;
       
       if (trecEvalFormat) {
@@ -241,7 +244,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
         + "_i" + numItemsetsToConsider + "-t" + numTermsToAppend
         + "_closed" + paramClosedOnly + "-prop" + paramPropagateItemSetScores + "-subsetidf"
         + (paramsBoostSubsets && paramSubsetBoostIDF) + "-parseMode" + paramQueryParseMode
-        + "-parseTQ" + paramParseToTermQueries + "-stop" + paramNumEnglishStopWords);
+        + "-parseTQ" + paramParseToTermQueries + "-stop" + paramNumEnglishStopWords + "-stemmedIDF" + paramBM25StemmedIDF);
     if (resultFile.exists()) {
       // throw new IllegalArgumentException("The result file already exists.. won't overwrite");
       FileUtils
@@ -552,9 +555,9 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
         queryLen,
         target.twtQparser, paramQueryParseMode, paramsBoostSubsets));
     
-    for (float b : Arrays.asList(0.0f, 1.0f, 0.5f, 0.3f, 0.7f, 0.2f, 0.6f, 0.1f, 0.8f, 0.9f)) {
+    for (float b : Arrays.asList(0.0f, 0.03f, 0.07f, 0.12f, 1.0f, 0.5f, 0.3f, 0.7f, 0.2f, 0.6f, 0.1f, 0.8f, 0.9f)) {
       // = 0.0f; b < 3; b += 0.05) {
-      for (float k : Arrays.asList(0.0f, 1000f, 0.25f, 0.75f, 1.20f, 2.0f, 7f, 33f, 99f)) {
+      for (float k : Arrays.asList(0.0f,0.66f,0.77f,0.9f,1.0f,1.1f,1.3f,1.5f, 1000f, 0.25f, 0.75f, 1.20f, 2.0f, 7f, 33f, 99f)) {
         // = 0.0f; k < 3; k += 0.05) {
         
         collector = new GridSearchCollector(target, topicIds.get(topicIx),
@@ -574,9 +577,9 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     
     setUpBeforeClass();
     
-    ExecutorService exec = Executors.newFixedThreadPool(3);
+    ExecutorService exec = Executors.newFixedThreadPool(9);
     Future<Void> lastFuture = null;
-    for (int i = 5; i < topicIds.size(); i += 5) {
+    for (int i: Arrays.asList(5,9,10,15,20,25,30,35,40,45)){
       FISQueryExpanderEvaluation app = new FISQueryExpanderEvaluation(i);
       lastFuture = exec.submit(app);
     }
