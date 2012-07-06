@@ -30,7 +30,7 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
   
   public final boolean clarityIDF = true;
   public final boolean clarityScore = false;
-  public final boolean binaryFtd = false;
+  public final boolean binaryFtd = true;
   
   private static TwitterEnglishAnalyzer stemmingAnalyzer = new TwitterEnglishAnalyzer();
   public final boolean stemmedIDF;

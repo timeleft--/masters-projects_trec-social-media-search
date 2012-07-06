@@ -71,14 +71,26 @@ public class CosineDistance implements DistanceFunction {
     double sumW2 = 0;
     
     for (int i = 0; i < n; ++i) {
-      double v = first.value(i);
-      double w = second.value(i);
+      double v = first.isMissing(i) ? 0 : first.value(i);
+      double w = second.isMissing(i) ? 0 : second.value(i);
       sumVW += v * w;
       sumV2 += v * v;
       sumW2 += w * w;
     }
     
-    double result = sumVW / Math.sqrt(sumV2 * sumW2);
+    double result;
+    if (sumV2 == 0 || sumW2 == 0) {
+      if (sumV2 == sumW2) {
+        // Both instances are all zeros
+        result = 1;
+      } else {
+        // TODO: This is kind of arbitrary..
+        // A word that coocurrs with no other words is not similar to any
+        result = 0;
+      }
+    } else {
+      result = sumVW / Math.sqrt(sumV2 * sumW2);
+    }
     return 1 - result;
   }
   
