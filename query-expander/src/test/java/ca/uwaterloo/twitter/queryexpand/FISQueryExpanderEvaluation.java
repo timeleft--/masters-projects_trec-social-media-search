@@ -404,7 +404,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
         List<MutableFloat> totalXTermScores = Lists.newArrayList();
         
         PriorityQueue<ScoreIxObj<String>>[] clustersTerms = target
-            .convertResultToWeightedTermsByClustering(fis, queryStr, paramClosedOnly,
+            .convertResultToWeightedTermsByClusteringTerms(fis, queryStr, paramClosedOnly,
                 minXTermScores, maxXTermScores, totalXTermScores,paramClusteringWeightIDF);
         
         timedQuery = target.expandAndFilterQuery(queryTerms,
