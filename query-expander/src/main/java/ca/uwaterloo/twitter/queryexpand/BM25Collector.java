@@ -14,7 +14,9 @@ import org.apache.lucene.index.Term;
 import org.apache.lucene.index.TermFreqVector;
 import org.apache.lucene.search.Collector;
 import org.apache.lucene.search.Scorer;
+import org.apache.mahout.clustering.lda.cvb.TopicModel;
 import org.apache.mahout.math.map.OpenObjectFloatHashMap;
+import org.apache.mahout.math.set.OpenIntHashSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -24,8 +26,10 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
   private static final Logger LOG = LoggerFactory.getLogger(BM25Collector.class);
   
   // Defaults
-  public static final float K1 = 1.2f; // default 1.2f;1.1 and 1.3 work slightly better on training
-  public static final float B = 0.0f; // default 0.75
+  // For StemmedIDF = false: binaryTFD = false with b = 0 & k = 1.2 achieves P@30 = 0.3965
+  // For StemmedIDF = true: binaryTFD = true with b in [0.2:0.8] & k=0 achieves p@30 = 0.4370
+  public static final float K1 = 0.0f; //textbook default 1.2 
+  public static final float B = 0.2f; // textbook default 0.75
   public static final float LAVG = 9.63676320707029f; // really!
   
   public final boolean clarityIDF = true;
@@ -117,9 +121,17 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
     this.scorer = scorer;
   }
   
+  protected final OpenIntHashSet encounteredDocs = new OpenIntHashSet();
   @Override
   public void collect(int docId) throws IOException {
     // float score = scorer.score();
+    
+    if(encounteredDocs.contains(docId)){
+      LOG.warn("Duplicate document {} for query {}", docId, queryStr);
+      return;
+    } else {
+      encounteredDocs.add(docId);
+    }
     
     Document doc = reader.document(docId);
     
@@ -185,17 +197,13 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
       if (clarityScore) {
         score += idf;
       } else {
-        // Mutiplying this formula by makes it controllable in the way I want,
-        // because I want to make tf negligible, and it saturates to (k+1)*idf as tf -> INF
-        score += (queryTerms.get(tStr) * ftd * (getK1() + 1) * idf)
-            / ((getK1() * ((1 - getB()) + (getB() * ld / getLAVG()))) + ftd);
+//        score += (queryTerms.get(tStr) * ftd * (getK1() + 1) * idf)
+//            / ((getK1() * ((1 - getB()) + (getB() * ld / getLAVG()))) + ftd);
         
-        // But we have not fields
-        // // The BM25F formula as per http://nlp.uned.es/~jperezi/Lucene-BM25/
-        // float wt = ftd / ((1-B) + (B * dl / LAVG));
-        // bm25 += queryTerms.get(tStr) * (wt * idf) / (K1 + wt);
+         // The BM25F formula as per http://nlp.uned.es/~jperezi/Lucene-BM25/
+         float wt = ftd / ((1-getB()) + (getB() * ld / getLAVG()));
+         score += (queryTerms.get(tStr) * wt * idf) / (getK1() + wt);
       }
-      
     }
     
     if (score > maxScore) {

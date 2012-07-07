@@ -48,6 +48,7 @@ import org.slf4j.LoggerFactory;
 import ca.uwaterloo.trecutil.QRelUtil;
 import ca.uwaterloo.twitter.TwitterIndexBuilder.TweetField;
 import ca.uwaterloo.twitter.queryexpand.BM25Collector.ScoreThenObjDescComparator;
+import ca.uwaterloo.twitter.queryexpand.FISQueryExpander.ExpandMode;
 import ca.uwaterloo.twitter.queryexpand.FISQueryExpander.QueryParseMode;
 
 import com.google.common.collect.Lists;
@@ -57,7 +58,7 @@ import com.ibm.icu.text.SimpleDateFormat;
 public class FISQueryExpanderEvaluation implements Callable<Void> {
   private static final Logger LOG = LoggerFactory.getLogger(FISQueryExpanderEvaluation.class);
   
-  public  static final int MAX_RESULTS = 10000;
+  public static final int MAX_RESULTS = 10000;
   private File fisIncIxLocation = new File(
       "/u2/yaboulnaga/datasets/twitter-trec2011/assoc-mr_0608-0530/index");
   private File twtIncIxLoc = new File(
@@ -66,7 +67,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   
   private static final String TWT_CHUNKS_ROOT = "/u2/yaboulnaga/datasets/twitter-trec2011/index-stemmed_chunks";
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-tweets_chunks";
-  private static final String RESULT_PATH = "/u2/yaboulnaga/datasets/twitter-trec2011/runs/"; //bm25-param-tune-fbin";
+  private static final String RESULT_PATH = "/u2/yaboulnaga/datasets/twitter-trec2011/runs/"; // bm25-param-tune-fbin";
   private static final String TOPICS_XML_PATH =
       "/u2/yaboulnaga/datasets/twitter-trec2011/2011.topics.MB1-50.xml";
   private static final String QREL_PATH = "/u2/yaboulnaga/datasets/twitter-trec2011/microblog11-qrels.txt";
@@ -81,16 +82,18 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   private boolean paramSubsetBoostIDF = true;
   private QueryParseMode paramQueryParseMode = QueryParseMode.DISJUNCTIVE;
   private boolean paramParseToTermQueries = true;
-  private boolean paramClusteringWeightIDF = false;
+  private boolean paramClusteringWeight = true;
   private int paramNumEnglishStopWords = 0;
   private boolean paramBM25StemmedIDF = true;
   
   private static final int LOG_TOP_COUNT = 30;
   
   private static final String TAG_BASELINE = "baseline";
+  private static final String TAG_FREQ = "freq";
   private static final String TAG_QUERY_CONDPROB = "qCondProb";
   private static final String TAG_KL_DIVER = "klDiver";
-  private static final String TAG_CLUSTER = "clusters";
+  private static final String TAG_CLUSTER_PATTERNS = "clusPatt";
+  private static final String TAG_CLUSTER_TERMS = "clusTerm";
   
   private static final boolean SORT_TOPICS_CHRONOLOGICALLY = false;
   
@@ -106,7 +109,6 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   static QRelUtil qrelUtil;
   
   FISQueryExpander target;
-
   
   /**
    * query_id, iter, docno, rank, sim, run_id
@@ -114,16 +116,19 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
    * @author yaboulna
    * 
    */
-  public class TrecResultFileCollector extends BM25Collector<String,String> {
+  public class TrecResultFileCollector extends BM25Collector<String, String> {
     
     final String runTag;
     final String topicId;
     
     public TrecResultFileCollector(FISQueryExpander pTarget, String pTopicId, String pRunTag,
         String pQueryStr, OpenObjectFloatHashMap<String> pQueryTerms, int pQueryLen)
-        throws IOException, IllegalArgumentException, SecurityException, InstantiationException, IllegalAccessException, InvocationTargetException {
-      super(pTarget,TweetField.TEXT.name, pQueryStr, pQueryTerms, pQueryLen, paramNumEnglishStopWords,MAX_RESULTS,
-          (Class<? extends Comparator<ScoreIxObj<String>>>) ScoreThenObjDescComparator.class, paramBM25StemmedIDF);
+        throws IOException, IllegalArgumentException, SecurityException, InstantiationException,
+        IllegalAccessException, InvocationTargetException {
+      super(pTarget, TweetField.TEXT.name, pQueryStr, pQueryTerms, pQueryLen,
+          paramNumEnglishStopWords, MAX_RESULTS,
+          (Class<? extends Comparator<ScoreIxObj<String>>>) ScoreThenObjDescComparator.class,
+          paramBM25StemmedIDF);
       runTag = pRunTag;
       
       if (trecEvalFormat) {
@@ -155,13 +160,13 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
         ++rank;
       }
     }
-
+    
     @Override
     protected String getResultKey(int docId, Document doc) {
       String tweetId = doc.get(TweetField.ID.name);
       return tweetId;
     }
-
+    
     @Override
     protected String getResultValue(int docId, Document doc) {
       String text = null;
@@ -233,18 +238,23 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     resultWriters = Maps.newHashMap();
     resultFiles = Maps.newHashMap();
     
-    openWriterForTag(TAG_BASELINE);
-    // openWriterForTag(TAG_QUERY_CONDPROB);
-    // openWriterForTag(TAG_KL_DIVER);
-    // openWriterForTag(TAG_CLUSTER);
+     openWriterForTag(TAG_BASELINE);
+    openWriterForTag(TAG_FREQ);
+    openWriterForTag(TAG_QUERY_CONDPROB);
+    openWriterForTag(TAG_KL_DIVER);
+    openWriterForTag(TAG_CLUSTER_PATTERNS);
+    openWriterForTag(TAG_CLUSTER_TERMS);
+
   }
   
   private void openWriterForTag(String runTag) throws IOException {
-    File resultFile = new File(RESULT_PATH, runTag + "_bm25-b" + BM25Collector.B + "-k" + BM25Collector.K1 + "-lavg" + BM25Collector.LAVG
+    File resultFile = new File(RESULT_PATH, runTag + "_bm25-b" + BM25Collector.B + "-k"
+        + BM25Collector.K1 + "-lavg" + BM25Collector.LAVG
         + "_i" + numItemsetsToConsider + "-t" + numTermsToAppend
         + "_closed" + paramClosedOnly + "-prop" + paramPropagateItemSetScores + "-subsetidf"
         + (paramsBoostSubsets && paramSubsetBoostIDF) + "-parseMode" + paramQueryParseMode
-        + "-parseTQ" + paramParseToTermQueries + "-stop" + paramNumEnglishStopWords + "-stemmedIDF" + paramBM25StemmedIDF);
+        + "-parseTQ" + paramParseToTermQueries + "-stop" + paramNumEnglishStopWords + "-stemmedIDF"
+        + paramBM25StemmedIDF);
     if (resultFile.exists()) {
       // throw new IllegalArgumentException("The result file already exists.. won't overwrite");
       FileUtils
@@ -347,6 +357,9 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
       }
       // ////////////////////////////////////////
       
+      OpenObjectFloatHashMap<String> xQueryTerms;
+      MutableLong xQueryLen;
+      
       // ///////////////////////////////////////////////////////
       if (resultWriters.containsKey(TAG_QUERY_CONDPROB)) {
         PriorityQueue<ScoreIxObj<String>> extraTerms;
@@ -359,15 +372,18 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
             paramPropagateItemSetScores,
             minXTermScore, maxXTermScore, null);
         
+        xQueryTerms = new OpenObjectFloatHashMap<String>();
+        xQueryLen = new MutableLong(0);
         timedQuery = target.expandAndFilterQuery(queryTerms,
             queryLen.intValue(),
             new PriorityQueue[] { extraTerms },
             new float[] { minXTermScore.intValue() },
             new float[] { maxXTermScore.intValue() },
-            numTermsToAppend);
+            numTermsToAppend,
+            xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
         
         collector = new TrecResultFileCollector(target, topicIds.get(i),
-            TAG_QUERY_CONDPROB, queryStr, queryTerms, queryLen.intValue());
+            TAG_QUERY_CONDPROB, queryStr, xQueryTerms, xQueryLen.intValue());
         target.twtSearcher.search(timedQuery, collector);
         collector.writeResults();
       }
@@ -384,41 +400,97 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
             paramPropagateItemSetScores,
             minXTermScore, maxXTermScore, null);
         
+        xQueryTerms = new OpenObjectFloatHashMap<String>();
+        xQueryLen = new MutableLong(0);
         timedQuery = target.expandAndFilterQuery(queryTerms,
             queryLen.intValue(),
             new PriorityQueue[] { extraTerms },
             new float[] { minXTermScore.intValue() },
             new float[] { maxXTermScore.intValue() },
-            numTermsToAppend);
+            numTermsToAppend,
+            xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
         
         collector = new TrecResultFileCollector(target, topicIds.get(i),
-            TAG_QUERY_CONDPROB, queryStr, queryTerms, queryLen.intValue());
+            TAG_KL_DIVER, queryStr, xQueryTerms, xQueryLen.intValue());
+        target.twtSearcher.search(timedQuery, collector);
+        collector.writeResults();
+      }
+      
+      // /////////////////////////////////////////////////////////////
+      
+      if (resultWriters.containsKey(TAG_FREQ)) {
+        PriorityQueue<ScoreIxObj<String>> extraTerms;
+        MutableFloat minXTermScore = new MutableFloat();
+        MutableFloat maxXTermScore = new MutableFloat();
+        
+        extraTerms = target.convertResultToWeightedTermsByFrequency(fis,
+            queryStr, numItemsetsToConsider, paramClosedOnly, minXTermScore, maxXTermScore, null);
+        xQueryTerms = new OpenObjectFloatHashMap<String>();
+        xQueryLen = new MutableLong(0);
+        timedQuery = target.expandAndFilterQuery(queryTerms,
+            queryLen.intValue(),
+            new PriorityQueue[] { extraTerms },
+            new float[] { minXTermScore.intValue() },
+            new float[] { maxXTermScore.intValue() },
+            numTermsToAppend,
+            xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
+        
+        collector = new TrecResultFileCollector(target, topicIds.get(i),
+            TAG_FREQ, queryStr, xQueryTerms, xQueryLen.intValue());
         target.twtSearcher.search(timedQuery, collector);
         collector.writeResults();
       }
       
       // ///////////////////////////////////////////////////////
-      if (resultWriters.containsKey(TAG_CLUSTER)) {
+      if (resultWriters.containsKey(TAG_CLUSTER_PATTERNS)) {
+        List<MutableFloat> minXTermScores = Lists.newArrayList();
+        List<MutableFloat> maxXTermScores = Lists.newArrayList();
+        List<MutableFloat> totalXTermScores = Lists.newArrayList();
+        
+        PriorityQueue<ScoreIxObj<String>>[] clusters = target
+            .convertResultToWeightedTermsByClusteringPatterns(fis, queryStr, paramClosedOnly,
+                minXTermScores, maxXTermScores, totalXTermScores, paramClusteringWeight);
+        xQueryTerms = new OpenObjectFloatHashMap<String>();
+        xQueryLen = new MutableLong(0);
+        timedQuery = target.expandAndFilterQuery(queryTerms,
+            queryLen.intValue(),
+            clusters,
+            minXTermScores.toArray(new MutableFloat[0]),
+            maxXTermScores.toArray(new MutableFloat[0]),
+            numTermsToAppend,
+            xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
+        
+        collector = new TrecResultFileCollector(target, topicIds.get(i),
+            TAG_CLUSTER_PATTERNS, queryStr, xQueryTerms, xQueryLen.intValue());
+        target.twtSearcher.search(timedQuery, collector);
+        collector.writeResults();
+      }
+      
+      // ///////////////////////////////////////////////////////
+      if (resultWriters.containsKey(TAG_CLUSTER_TERMS)) {
         List<MutableFloat> minXTermScores = Lists.newArrayList();
         List<MutableFloat> maxXTermScores = Lists.newArrayList();
         List<MutableFloat> totalXTermScores = Lists.newArrayList();
         
         PriorityQueue<ScoreIxObj<String>>[] clustersTerms = target
             .convertResultToWeightedTermsByClusteringTerms(fis, queryStr, paramClosedOnly,
-                minXTermScores, maxXTermScores, totalXTermScores,paramClusteringWeightIDF);
-        
+                minXTermScores, maxXTermScores, totalXTermScores, paramClusteringWeight);
+        xQueryTerms = new OpenObjectFloatHashMap<String>();
+        xQueryLen = new MutableLong(0);
         timedQuery = target.expandAndFilterQuery(queryTerms,
             queryLen.intValue(),
             clustersTerms,
             minXTermScores.toArray(new MutableFloat[0]),
             maxXTermScores.toArray(new MutableFloat[0]),
-            numTermsToAppend);
+            numTermsToAppend,
+            xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
         
         collector = new TrecResultFileCollector(target, topicIds.get(i),
-            TAG_CLUSTER, queryStr, queryTerms, queryLen.intValue());
+            TAG_CLUSTER_TERMS, queryStr, xQueryTerms, xQueryLen.intValue());
         target.twtSearcher.search(timedQuery, collector);
         collector.writeResults();
       }
+      
     }
   }
   
@@ -429,9 +501,11 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     final private float myK1;
     final private String writerKey;
     
-    public GridSearchCollector(FISQueryExpander ptarget, String pTopicId, String pRunTag, String pQueryStr,
+    public GridSearchCollector(FISQueryExpander ptarget, String pTopicId, String pRunTag,
+        String pQueryStr,
         OpenObjectFloatHashMap<String> pQueryTerms, int pQueryLen, float pB, float pK1)
-        throws IOException, IllegalArgumentException, SecurityException, InstantiationException, IllegalAccessException, InvocationTargetException {
+        throws IOException, IllegalArgumentException, SecurityException, InstantiationException,
+        IllegalAccessException, InvocationTargetException {
       super(ptarget, pTopicId, pRunTag, pQueryStr, pQueryTerms, pQueryLen);
       myB = pB;
       myK1 = pK1;
@@ -555,9 +629,36 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
         queryLen,
         target.twtQparser, paramQueryParseMode, paramsBoostSubsets));
     
-    for (float b : Arrays.asList(0.0f, 0.03f, 0.07f, 0.12f, 1.0f, 0.5f, 0.3f, 0.7f, 0.2f, 0.6f, 0.1f, 0.8f, 0.9f)) {
+    for (float b : Arrays.asList(0.0f,
+        0.03f,
+        0.07f,
+        0.12f,
+        1.0f,
+        0.5f,
+        0.3f,
+        0.7f,
+        0.2f,
+        0.6f,
+        0.1f,
+        0.8f,
+        0.9f)) {
       // = 0.0f; b < 3; b += 0.05) {
-      for (float k : Arrays.asList(0.0f,0.66f,0.77f,0.9f,1.0f,1.1f,1.3f,1.5f, 1000f, 0.25f, 0.75f, 1.20f, 2.0f, 7f, 33f, 99f)) {
+      for (float k : Arrays.asList(0.0f,
+          0.66f,
+          0.77f,
+          0.9f,
+          1.0f,
+          1.1f,
+          1.3f,
+          1.5f,
+          1000f,
+          0.25f,
+          0.75f,
+          1.20f,
+          2.0f,
+          7f,
+          33f,
+          99f)) {
         // = 0.0f; k < 3; k += 0.05) {
         
         collector = new GridSearchCollector(target, topicIds.get(topicIx),
@@ -579,7 +680,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     
     ExecutorService exec = Executors.newFixedThreadPool(9);
     Future<Void> lastFuture = null;
-    for (int i: Arrays.asList(5,9,10,15,20,25,30,35,40,45)){
+    for (int i : Arrays.asList(5, 9, 10, 15, 20, 25, 30, 35, 40, 45)) {
       FISQueryExpanderEvaluation app = new FISQueryExpanderEvaluation(i);
       lastFuture = exec.submit(app);
     }

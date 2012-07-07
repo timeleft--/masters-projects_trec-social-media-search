@@ -132,8 +132,10 @@ public class FindTopKRuns {
         }
         wr.append("rankEff stats").append("\n").append(rankEffStats.toString()).append('\n');
         wr.append("avg prec stats").append("\n").append(avgPrecStats.toString()).append('\n');
+        wr.append("P@30 stats\n").append(pAt30Stats.toString()).append("\n");
         // topKRes.put(stats.getMean(), resF.getAbsolutePath());
-        topKRes.add(new Pair<String, Double>(resF.getAbsolutePath(),pAt30Stats.getMean())); 
+        topKRes.add(new Pair<String, Double>(resF.getAbsolutePath(),avgPrecStats.getMean()));
+//            pAt30Stats.getMean())); 
             //avgPrecStats.getMean()));
         // rankEffStats.getMean()));
       }
@@ -144,7 +146,7 @@ public class FindTopKRuns {
           break;
         }
         Pair<String, Double> res = topKRes.poll();
-        wr.append(k + ": " + res.getKey() + " - mean: " + res.getValue() + "\n");
+        wr.append(k + ": " + res.getKey() + " - mean MAP: " + res.getValue() + "\n");
         ++k;
       }
       wr.flush();

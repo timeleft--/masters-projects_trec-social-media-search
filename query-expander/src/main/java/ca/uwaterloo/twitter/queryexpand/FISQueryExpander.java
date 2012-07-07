@@ -58,6 +58,7 @@ import org.apache.lucene.util.Version;
 import org.apache.mahout.common.Pair;
 import org.apache.mahout.freqtermsets.TransactionTree;
 import org.apache.mahout.math.list.IntArrayList;
+import org.apache.mahout.math.map.AbstractIntFloatMap;
 import org.apache.mahout.math.map.OpenIntFloatHashMap;
 import org.apache.mahout.math.map.OpenObjectFloatHashMap;
 import org.apache.mahout.math.map.OpenObjectIntHashMap;
@@ -170,7 +171,7 @@ public class FISQueryExpander {
     PROB_QUERY("pq"),
     KL_DIVERG("kl"),
     CLUSTERING("clustering"),
-    SVD("svd");
+    SVD("svd"), FREQ("frequency");
     
     public final String name;
     
@@ -197,6 +198,22 @@ public class FISQueryExpander {
     }
   }
   
+  public enum ExpandMode {
+    FILTERING("filter"),
+    DIVERSITY("diverse");
+    
+    String name;
+    
+    private ExpandMode(String pName) {
+      name = pName;
+    }
+    
+    @Override
+    public String toString() {
+      return name;
+    }
+  }
+  
   private static final String FIS_INDEX_OPTION = "fis_inc_index";
   private static final String TWT_INC_INDEX_OPTION = "twt_inc_index";
   private static final String TWT_CHUNK_INDEX_OPTION = "twt_chunk_index";
@@ -206,13 +223,14 @@ public class FISQueryExpander {
   
   private static final String MIN_SCORE_OPTION = "min_score";
   private static final float MIN_SCORE_DEFAULT = Float.MIN_VALUE; // very sensitive!
-  
-  // Must be large, because otherwise the topic drifts quickly...
-  // it seems that the top itemsets are repetetive, so we need more breadth
-  private static final int NUM_HITS_INTERNAL_DEFAULT = 777;
-  // This is enough recall and the concept doesn't drift much.. one more level pulls trash..
-  // less is more precise, but I'm afraid won't have enough recall; will use score to block trash
-  private static final int MAX_LEVELS_EXPANSION = 3;
+// Whjen I was using lucene scorer I had to guess and try.. I was dumb!  
+//  // Must be large, because otherwise the topic drifts quickly...
+//  // it seems that the top itemsets are repetetive, so we need more breadth
+  private static final int NUM_HITS_INTERNAL_DEFAULT = 100;
+//  When using the lucene scorer it was an observational experiment.. I thought I was doing magic :(
+//  // This is enough recall and the concept doesn't drift much.. one more level pulls trash..
+//  // less is more precise, but I'm afraid won't have enough recall; will use score to block trash
+  private static final int MAX_LEVELS_EXPANSION = 2;
   private static final int NUM_HITS_SHOWN_DEFAULT = 1000;
   
   private static final Analyzer ANALYZER = new TwitterAnalyzer();// new
@@ -241,12 +259,13 @@ public class FISQueryExpander {
   
   private static final boolean QUERY_SUBSET_BOOST_IDF_DEFAULT = true;
   
-  private static final boolean QUERY_SUBSET_BOOST_YESNO_DEFAULT = true;
+  private static final boolean QUERY_SUBSET_BOOST_YESNO_DEFAULT = false;
   
   private static final boolean QUERY_PARSE_INTO_TERMS_DEFAULT = true;
   
   private static final int ENGLISH_STOPWORDS_COUNT = 5;
   private static final boolean DEAFULT_MAGIC_ALLOWED = false;
+  private static final boolean EXPAND_TERM_COUNT_EVENLY_OVER_CLUSTERS = false;
   
   private static boolean paramClusteringWeightInsts = true;
   
@@ -367,6 +386,9 @@ public class FISQueryExpander {
           mode = 0; // itemsets
         } else if (cmd.equals("l:")) {
           mode = 1; // close itemsets
+        } else if (cmd.equals("f:")) {
+          mode = 3; // terms with query divergence
+          termWeighting = TermWeigting.FREQ;
         } else if (cmd.equals("v:")) {
           mode = 4; // terms with query divergence
           termWeighting = TermWeigting.SVD;
@@ -463,7 +485,7 @@ public class FISQueryExpander {
             out.print("\n");
           }
           
-        } else if (mode == 6 || mode == 7 || mode == 4) {
+        } else if (mode == 6 || mode == 7 || mode == 4 || mode == 3) {
           
           PriorityQueue<ScoreIxObj<String>> weightedTerms = null;
           if (TermWeigting.PROB_QUERY.equals(termWeighting)) {
@@ -478,9 +500,20 @@ public class FISQueryExpander {
                     -1, propagateISWeights, null, null, null);
           } else if (TermWeigting.SVD.equals(termWeighting)) {
             weightedTerms = qEx
-                .convertResultToWeightedTermsBySVDOfPatternsMatrix(fisRs,
+                .convertResultToWeightedTermsBySVDOfTerms(
+                    // PatternsMatrix(
+                    fisRs,
                     true,
                     paramClusteringWeightInsts);
+          } else if (TermWeigting.FREQ.equals(termWeighting)) {
+            weightedTerms = qEx
+                .convertResultToWeightedTermsByFrequency(fisRs,
+                    query.toString(),
+                    -1,
+                    true,
+                    null,
+                    null,
+                    null);
           }
           
           int i = 0;
@@ -519,7 +552,10 @@ public class FISQueryExpander {
                 clustersTerms,
                 minXTermScores.toArray(new MutableFloat[0]),
                 maxXTermScores.toArray(new MutableFloat[0]),
-                clustersTerms.length * 7);
+                clustersTerms.length * 7,
+                null,
+                null,
+                ExpandMode.DIVERSITY);
           }
           
           LOG.debug("Querying Twitter by: " + twtQ.toString());
@@ -546,6 +582,71 @@ public class FISQueryExpander {
       if (qEx != null)
         qEx.close();
     }
+  }
+  
+  public PriorityQueue<ScoreIxObj<String>> convertResultToWeightedTermsByFrequency(
+      OpenIntFloatHashMap fisRs, String query, int numResults, boolean closedOnly,
+      MutableFloat minScoreOut, MutableFloat maxScoreOut, MutableFloat totalScoreOut)
+      throws IOException {
+    
+    PriorityQueue<ScoreIxObj<String>> result = new PriorityQueue<ScoreIxObj<String>>();
+    OpenObjectFloatHashMap<String> queryTerms = queryTermFreq(query, null);
+    OpenObjectIntHashMap<String> termIds = new OpenObjectIntHashMap<String>();
+    TransactionTree patternTree = convertResultToItemsetsInternal(fisRs,
+        null,
+        termIds,
+        numResults,
+        false);
+    
+    List<String> terms = Lists.newArrayListWithCapacity(termIds.size());
+    termIds.keysSortedByValue(terms);
+    
+    OpenObjectIntHashMap<String> termFreq = new OpenObjectIntHashMap<String>();
+    
+    if (patternTree.isTreeEmpty()) {
+      return result;
+    }
+    
+    Iterator<Pair<IntArrayList, Long>> itemsetIter = patternTree.iterator(closedOnly);
+    while (itemsetIter.hasNext()) {
+      Pair<IntArrayList, Long> patternPair = itemsetIter.next();
+      IntArrayList pattern = patternPair.getFirst();
+      int pSize = pattern.size();
+      for (int i = 0; i < pSize; ++i) {
+        String term = terms.get(pattern.getQuick(i));
+        termFreq.put(term, (int) (termFreq.get(term) + patternPair.getSecond()));
+      }
+    }
+    
+    if (minScoreOut != null) {
+      minScoreOut.setValue(Float.MAX_VALUE);
+    }
+    
+    if (maxScoreOut != null) {
+      maxScoreOut.setValue(Float.MIN_VALUE);
+    }
+    
+    for (String term : termFreq.keys()) {
+      if (queryTerms.containsKey(term)) {
+        continue;
+      }
+      float score = termFreq.get(term);
+      
+      result.add(new ScoreIxObj<String>(term, score));
+      
+      if (minScoreOut != null && score < minScoreOut.floatValue()) {
+        minScoreOut.setValue(score);
+      }
+      
+      if (maxScoreOut != null && score > maxScoreOut.floatValue()) {
+        maxScoreOut.setValue(score);
+      }
+      
+      if (totalScoreOut != null) {
+        totalScoreOut.add(score);
+      }
+    }
+    return result;
   }
   
   private final String timeFormatted;
@@ -613,7 +714,6 @@ public class FISQueryExpander {
   }
   
   private boolean parseToTermQueries = QUERY_PARSE_INTO_TERMS_DEFAULT;
-  private OpenObjectFloatHashMap<String> queryTerms;
   
   public float getTwitterCorpusModelWeight() {
     return twitterCorpusModelWeight;
@@ -1174,14 +1274,16 @@ public class FISQueryExpander {
       OpenObjectFloatHashMap<String> queryFreq, OpenObjectIntHashMap<String> termIdOut,
       int numResults, boolean doMagic)
       throws IOException {
-    
-    OpenObjectFloatHashMap<Set<String>> itemsets = new OpenObjectFloatHashMap<Set<String>>();
-    // OpenObjectIntHashMap<Set<String>> isToDoc = new OpenObjectIntHashMap<Set<String>>();
+    OpenObjectFloatHashMap<Set<String>> itemsetRankFusion = new OpenObjectFloatHashMap<Set<String>>();
+    OpenObjectFloatHashMap<Set<String>> itemsetWeight = new OpenObjectFloatHashMap<Set<String>>();
     
     IntArrayList keyList = new IntArrayList(rs.size());
     rs.keysSortedByValue(keyList);
-    int rank = 0;
+    int rank = 1;
     for (int i = rs.size() - 1; i >= 0; --i) {
+      if (numResults > 0 && rank > numResults) {
+        break;
+      }
       int hit = keyList.getQuick(i);
       TermFreqVector terms = fisIxReader.getTermFreqVector(hit,
           ItemSetIndexBuilder.AssocField.ITEMSET.name);
@@ -1190,10 +1292,10 @@ public class FISQueryExpander {
       }
       Set<String> termSet = Sets.newCopyOnWriteArraySet(Arrays.asList(terms.getTerms()));
       
-      float weight;
       if (doMagic) {
-        if (itemsets.containsKey(termSet)) {
-          weight = itemsets.get(termSet);
+        float weight;
+        if (itemsetWeight.containsKey(termSet)) {
+          weight = itemsetWeight.get(termSet);
         } else {
           // corpus level importance (added once)
           Document doc = fisIxReader.document(hit);
@@ -1235,22 +1337,29 @@ public class FISQueryExpander {
                 * ((1 - itemSetLenWght) + (termSet.size() / itemsetLenghtAvg) * itemSetLenWght)
                 + rank)) * (1 - itemsetCorpusModelWeight);
         weight += delta;
+        
+        itemsetWeight.put(termSet, weight);
       } else {
-        weight = rs.get(hit);
+        Document doc = fisIxReader.document(hit);
+        float patternFreq = Float.parseFloat(doc
+            .getFieldable(ItemSetIndexBuilder.AssocField.SUPPORT.name)
+            .stringValue());
+        itemsetWeight.put(termSet, patternFreq);
       }
-      itemsets.put(termSet, weight);
+      itemsetRankFusion.put(termSet, rs.get(hit));
+      ++rank;
     }
     
     TransactionTree result = new TransactionTree();
     int nextTerm = 0;
     LinkedList<Set<String>> keys = Lists.<Set<String>> newLinkedList();
-    itemsets.keysSortedByValue(keys);
+    itemsetRankFusion.keysSortedByValue(keys);
     Iterator<Set<String>> isIter = keys.descendingIterator();
     int r = 0;
     while (isIter.hasNext() && (numResults <= 0 || r/* result.size() */< numResults)) {
       ++r;
       Set<String> is = isIter.next();
-      long itemWeight = Math.round(MathUtils.round(itemsets.get(is), 5)
+      long itemWeight = Math.round(MathUtils.round(itemsetRankFusion.get(is), 5)
           * SCORE_PRECISION_MULTIPLIER);
       
       IntArrayList patternInts = new IntArrayList(is.size());
@@ -1359,13 +1468,20 @@ public class FISQueryExpander {
         maxXTermScore = fusion;
       }
       
+      Document doc = fisIxReader.document(docId);
+      float patternFreq = Float.parseFloat(doc
+          .getFieldable(ItemSetIndexBuilder.AssocField.SUPPORT.name)
+          .stringValue());
+      float termWeight = patternFreq;
+      
       for (String term : rs.get(docIdScore)) {
         // termVector.getTerms()) {
         if (queryTerms.contains(term)) {
           continue;
         }
         // scoreDoc.score or fusion didn't change performance in a visible way
-        extraTerms.add(new ScoreIxObj<String>(term, fusion)); // TODO: is it better to ignore this
+        extraTerms.add(new ScoreIxObj<String>(term, termWeight)); // TODO: is it better to ignore
+                                                                  // this??
       }
     }
     
@@ -1495,7 +1611,7 @@ public class FISQueryExpander {
           minXTermScore,
           maxXTermScore);
       // xtermQuery.obj.setBoost(xtermQuery.score);
-      queryTermWeight2.put(xterm.obj, xtermQuery.score);
+      queryTermWeight2.put(xterm.obj, (QUERY_SUBSET_BOOST_YESNO_DEFAULT?xtermQuery.score:1));
       
       for (String qterm : queryTermWeight.keys()) {
         
@@ -1505,6 +1621,7 @@ public class FISQueryExpander {
         qxQuery.add(qTermQuery, Occur.MUST);
         qxQuery.add((Query) xtermQuery.obj.clone(), Occur.MUST);
         
+        // This is now done by putting scores as values of queryTerms map passed to BM25Collector 
         // if (QUERY_SUBSET_BOOST_YESNO_DEFAULT) {
         // // qxQuery.setBoost(queryTermWeight.get(qterm) * xtermQuery.score);
         // qTermQuery.setBoost(queryTermWeight.get(qterm));
@@ -1716,56 +1833,97 @@ public class FISQueryExpander {
       int origQueryLen,
       PriorityQueue<ScoreIxObj<String>>[] extraTerms,
       float[] minXTermScoreFloats, float[] maxXTermScoreFloats,
-      int numTermsToAppend) throws IOException,
+      int numTermsToAppend,
+      OpenObjectFloatHashMap<String> xQueryTermsOut,
+      MutableLong xQueryLenOut,
+      ExpandMode mode) throws IOException,
       org.apache.lucene.queryParser.ParseException {
     
-    BooleanQuery result = new BooleanQuery();
+    BooleanQuery result = parseQueryIntoTerms(origQueryTerms,
+        origQueryLen,
+        twtQparser,
+        QueryParseMode.DISJUNCTIVE,
+        QUERY_SUBSET_BOOST_YESNO_DEFAULT);
+    
+    if (xQueryLenOut != null)
+      xQueryLenOut.setValue(origQueryLen);
+    
+    if (xQueryTermsOut != null)
+      for (String oTerm : origQueryTerms.keys()) {
+        float value = origQueryTerms.get(oTerm);
+        // Whatever I was doing earlier.. the term maps now store occurrence count I HOPE
+        xQueryTermsOut.put(oTerm, value);
+        if (xQueryLenOut != null)
+          xQueryLenOut.add(value);
+      }
     
     // this will make the expansion act like a filter
     // result.add(origQuery, Occur.MUST);
-    
-    // int numAppendPerQueue = numTermsToAppend / extraTerms.length;
-    // for (int c = 0; c < extraTerms.length; ++c) {
-    // for (int x = 0; x < numAppendPerQueue; ++x) {
+    Set<String> encounteredXTerms = Sets.newHashSet(origQueryTerms.keys());
     int t = 0;
     OpenIntHashSet emptyQueues = new OpenIntHashSet(extraTerms.length);
     while (t < numTermsToAppend) {
       for (int c = 0; c < extraTerms.length; ++c) {
         if (extraTerms[c].isEmpty()) {
-          if (emptyQueues.contains(c)) {
-            continue;
-          } else {
+          if (!emptyQueues.contains(c)) {
             emptyQueues.add(c);
-            t += (numTermsToAppend - t) / extraTerms.length;
+            if (EXPAND_TERM_COUNT_EVENLY_OVER_CLUSTERS)
+              t += (numTermsToAppend - t) / extraTerms.length;
+            
             if (emptyQueues.size() == extraTerms.length) {
+              numTermsToAppend = -1;
               break;
             }
           }
+          continue;
         }
-        ++t;
         
         ScoreIxObj<String> xterm = extraTerms[c].poll();
+        
+        if(encounteredXTerms.contains(xterm.obj)){
+          continue;
+        } else {
+          encounteredXTerms.add(xterm.obj);
+        }
+        
+        ++t;
+        
+        if (xQueryTermsOut != null)
+          // Whatever I was doing earlier.. the term maps now store occurrence count
+          xQueryTermsOut.put(xterm.obj, 1);
+        
+        if (xQueryLenOut != null)
+          xQueryLenOut.add(1);
+        
         ScoreIxObj<Query> xtermQuery = createTermQuery(xterm,
             TweetField.TEXT.name,
             twtIxReader,
             minXTermScoreFloats[c],
             maxXTermScoreFloats[c]);
         
-        for (String qterm : origQueryTerms.keys()) {
-          
-          BooleanQuery qxQuery = new BooleanQuery();
-          Query qQuery = new TermQuery(new Term(TweetField.TEXT.name, qterm));
-          
-          qxQuery.add(qQuery, Occur.MUST);
-          qxQuery.add(xtermQuery.obj, Occur.MUST);
+        if (mode.equals(ExpandMode.FILTERING)) {
+          for (String qterm : origQueryTerms.keys()) {
+            BooleanQuery qxQuery = new BooleanQuery();
+            Query qQuery = new TermQuery(new Term(TweetField.TEXT.name, qterm));
+            
+            qxQuery.add(qQuery, Occur.MUST);
+            qxQuery.add(xtermQuery.obj, Occur.MUST);
+            
+            if (QUERY_SUBSET_BOOST_YESNO_DEFAULT) {
+              // qxQuery.setBoost(origQueryTerms.get(qterm) * xtermQuery.score);
+              qQuery.setBoost(origQueryTerms.get(qterm));
+              qxQuery.setBoost(xtermQuery.score);
+            }
+            
+            result.add(qxQuery, Occur.SHOULD);
+          }
+        } else if (mode.equals(ExpandMode.DIVERSITY)) {
           
           if (QUERY_SUBSET_BOOST_YESNO_DEFAULT) {
-            // qxQuery.setBoost(origQueryTerms.get(qterm) * xtermQuery.score);
-            qQuery.setBoost(origQueryTerms.get(qterm));
-            qxQuery.setBoost(xtermQuery.score);
+            xtermQuery.obj.setBoost(xtermQuery.score);
           }
+          result.add(xtermQuery.obj, Occur.SHOULD);
           
-          result.add(qxQuery, Occur.SHOULD);
         }
       }
     }
@@ -1773,6 +1931,29 @@ public class FISQueryExpander {
     LOG.debug("Expanded by {} terms. Query: {}", t, result);
     
     return filterQuery(result);
+  }
+  
+  public FilteredQuery expandAndFilterQuery(OpenObjectFloatHashMap<String> queryTerms,
+      int queryLen, PriorityQueue<ScoreIxObj<String>>[] clustersTerms,
+      MutableFloat[] minXTermScores,
+      MutableFloat[] maxXTermScores, int numTermsToAppend,
+      OpenObjectFloatHashMap<String> xQueryTermsOut,
+      MutableLong xQueryLenOut,
+      ExpandMode mode) throws IOException,
+      org.apache.lucene.queryParser.ParseException {
+    // convert mutables to floats and call
+    float[] minXTermScoreFloats = new float[minXTermScores.length];
+    float[] maxXTermScoreFloats = new float[maxXTermScores.length];
+    for (int c = 0; c < minXTermScores.length; ++c) {
+      minXTermScoreFloats[c] = minXTermScores[c].floatValue();
+      maxXTermScoreFloats[c] = maxXTermScores[c].floatValue();
+    }
+    return expandAndFilterQuery(queryTerms,
+        queryLen,
+        clustersTerms,
+        minXTermScoreFloats,
+        maxXTermScoreFloats,
+        numTermsToAppend, xQueryTermsOut, xQueryLenOut, mode);
   }
   
   ScoreIxObj<Query> createTermQuery(ScoreIxObj<String> xterm, String field,
@@ -1817,18 +1998,13 @@ public class FISQueryExpander {
   private static final float CLUSTER_MEMBERSHIP_THRESHOLD = 0.0f;
   
   // ////////////////////// TERM-TO-TERM ALL TERMS FEATURES //////////////////////////////
-  @SuppressWarnings("unchecked")
-  public PriorityQueue<ScoreIxObj<String>>[] convertResultToWeightedTermsByClusteringTerms(
-      OpenIntFloatHashMap rs, String query, boolean closedOnly,
-      List<MutableFloat> minXTermScoresOut, List<MutableFloat> maxXTermScoresOut,
-      List<MutableFloat> totalXTermScoresOut, boolean weightIDF) throws Exception {
-    
-    PriorityQueue<ScoreIxObj<String>>[] result = null;
-    
-    OpenObjectIntHashMap<String> termIdMap = new OpenObjectIntHashMap<String>();
-    Set<Set<String>> itemsets = Sets.newLinkedHashSet();
-    TransactionTree patternTree = new TransactionTree();
-    FastVector attrs = new FastVector();
+  
+  Instances createTermTermMatrix(AbstractIntFloatMap rs, boolean weightInstances,
+      OpenObjectIntHashMap<String> termIdMapOut,
+      Set<Set<String>> itemsetsOut,
+      TransactionTree patternTreeOut,
+      boolean closedOnly,
+      FastVector attrsOut) throws IOException {
     int nextId = 0;
     
     IntArrayList keyList = new IntArrayList(rs.size());
@@ -1842,46 +2018,72 @@ public class FISQueryExpander {
       }
       Set<String> termSet = Sets.newCopyOnWriteArraySet(Arrays.asList(terms.getTerms()));
       
-      if (itemsets.contains(termSet)) {
+      if (itemsetsOut.contains(termSet)) {
         continue;
       }
       
-      itemsets.add(termSet);
+      itemsetsOut.add(termSet);
       
       IntArrayList pattern = new IntArrayList(termSet.size());
       
       for (String term : termSet) {
-        if (!termIdMap.containsKey(term)) {
-          termIdMap.put(term, nextId++);
-          attrs.addElement(new Attribute(term));
+        if (!termIdMapOut.containsKey(term)) {
+          termIdMapOut.put(term, nextId++);
+          attrsOut.addElement(new Attribute(term));
         }
-        pattern.add(termIdMap.get(term));
+        pattern.add(termIdMapOut.get(term));
       }
       
-      patternTree.addPattern(pattern, 1);
+      patternTreeOut.addPattern(pattern, 1);
     }
-    if (patternTree.isTreeEmpty()) {
-      return new PriorityQueue[0];
+    if (patternTreeOut.isTreeEmpty()) {
+      return null;
     }
     
-    Instances insts = new Instances("term-term", attrs, attrs.size());// itemsets.size());
+    Instances insts = new Instances("term-term", attrsOut, attrsOut.size());
     
-    Enumeration attrsEnum = attrs.elements();
+    Enumeration attrsEnum = attrsOut.elements();
     while (attrsEnum.hasMoreElements()) {
       Attribute termAttr = (Attribute) attrsEnum.nextElement();
       Term termT = new Term(TweetField.TEXT.name, termAttr.name());
       
       double weight = 1;
-      if (weightIDF) {
+      if (weightInstances) {
         twtSimilarity.idf(twtIxReader.docFreq(termT),
             twtIxReader.numDocs());
       }
-      Instance termInst = new Instance(weight, new double[attrs.size()]);
+      Instance termInst = new Instance(weight, new double[attrsOut.size()]);
       
       termInst.setDataset(insts);
       insts.add(termInst);
     }
+    return insts;
+  }
+  
+  @SuppressWarnings("unchecked")
+  public PriorityQueue<ScoreIxObj<String>>[] convertResultToWeightedTermsByClusteringTerms(
+      OpenIntFloatHashMap rs, String query, boolean closedOnly,
+      List<MutableFloat> minXTermScoresOut, List<MutableFloat> maxXTermScoresOut,
+      List<MutableFloat> totalXTermScoresOut, boolean weightIDF) throws Exception {
     
+    PriorityQueue<ScoreIxObj<String>>[] result = null;
+    
+    OpenObjectIntHashMap<String> termIdMap = new OpenObjectIntHashMap<String>();
+    Set<Set<String>> itemsets = Sets.newLinkedHashSet();
+    TransactionTree patternTree = new TransactionTree();
+    FastVector attrs = new FastVector();
+    
+    Instances insts = createTermTermMatrix(rs,
+        weightIDF,
+        termIdMap,
+        itemsets,
+        patternTree,
+        closedOnly,
+        attrs);
+    
+    if (patternTree.isTreeEmpty()) {
+      return result;
+    }
     Iterator<Pair<IntArrayList, Long>> patternsIter = patternTree.iterator(closedOnly);
     while (patternsIter.hasNext()) {
       IntArrayList pattern = patternsIter.next().getFirst();
@@ -2002,6 +2204,58 @@ public class FISQueryExpander {
         termScores = termScoresClone;
         
       }
+    }
+    return result;
+  }
+  
+  public PriorityQueue<ScoreIxObj<String>> convertResultToWeightedTermsBySVDOfTerms(
+      AbstractIntFloatMap rs, boolean closedOnly, boolean weightInsts) throws Exception {
+    PriorityQueue<ScoreIxObj<String>> result = new PriorityQueue<ScoreIxObj<String>>();
+    
+    OpenObjectIntHashMap<String> termIdMap = new OpenObjectIntHashMap<String>();
+    Set<Set<String>> itemsets = Sets.newLinkedHashSet();
+    TransactionTree patternTree = new TransactionTree();
+    FastVector attrs = new FastVector();
+    
+    Instances insts = createTermTermMatrix(rs,
+        weightInsts,
+        termIdMap,
+        itemsets,
+        patternTree,
+        closedOnly,
+        attrs);
+    if (insts != null) {
+      // Removes attributes with only one distinct values (all of them), and so fails
+      // try {
+      // LatentSemanticAnalysis lsa = new LatentSemanticAnalysis();
+      // lsa.buildEvaluator(insts);
+      
+      // create matrix of attribute values and compute singular value decomposition
+      double[][] trainValues = new double[attrs.size()][insts.numInstances()];
+      for (int i = 0; i < attrs.size(); i++) {
+        trainValues[i] = insts.attributeToDoubleArray(i);
+      }
+      Matrix trainMatrix = new Matrix(trainValues);
+      // svd requires rows >= columns, so transpose data if necessary
+      if (attrs.size() < insts.numInstances()) {
+        trainMatrix = trainMatrix.transpose();
+      }
+      SingularValueDecomposition trainSVD = trainMatrix.svd();
+      Matrix s = trainSVD.getS(); // singular values
+      
+      Enumeration attrsEnum = attrs.elements();
+      int i = 0;
+      while (attrsEnum.hasMoreElements()) {
+        Attribute attr = (Attribute) attrsEnum.nextElement();
+        
+        // float score = (float) lsa.evaluateAttribute(i);
+        float score = (float) s.get(i, i);
+        result.add(new ScoreIxObj<String>(attr.name(), score));
+        i++;
+      }
+      // } catch (WekaException ingored) {
+      // LOG.error(ingored.getMessage(), ingored);
+      // }
     }
     return result;
   }
@@ -2159,7 +2413,7 @@ public class FISQueryExpander {
     }
     
     result = new PriorityQueue[clusterer.numberOfClusters()];
-    queryTerms = queryTermFreq(query, null);
+    OpenObjectFloatHashMap<String> queryTerms = queryTermFreq(query, null);
     for (int c = 0; c < clusterer.numberOfClusters(); ++c) {
       result[c] = new PriorityQueue<ScoreIxObj<String>>();
       for (String term : termWeights[c].keys()) {
@@ -2187,60 +2441,38 @@ public class FISQueryExpander {
         itemsets);
     if (insts != null) {
       // Removes attributes with only one distinct values (all of them), and so fails
-//      try {
-//        LatentSemanticAnalysis lsa = new LatentSemanticAnalysis();
-//        lsa.buildEvaluator(insts);
+      // try {
+      // LatentSemanticAnalysis lsa = new LatentSemanticAnalysis();
+      // lsa.buildEvaluator(insts);
+      
+      // create matrix of attribute values and compute singular value decomposition
+      double[][] trainValues = new double[attrs.size()][insts.numInstances()];
+      for (int i = 0; i < attrs.size(); i++) {
+        trainValues[i] = insts.attributeToDoubleArray(i);
+      }
+      Matrix trainMatrix = new Matrix(trainValues);
+      // svd requires rows >= columns, so transpose data if necessary
+      if (attrs.size() < insts.numInstances()) {
+        trainMatrix = trainMatrix.transpose();
+      }
+      SingularValueDecomposition trainSVD = trainMatrix.svd();
+      Matrix s = trainSVD.getS(); // singular values
+      
+      Enumeration attrsEnum = attrs.elements();
+      int i = 0;
+      while (attrsEnum.hasMoreElements()) {
+        Attribute attr = (Attribute) attrsEnum.nextElement();
         
-        // create matrix of attribute values and compute singular value decomposition
-        double [][] trainValues = new double[attrs.size()][insts.numInstances()];
-        for (int i = 0; i < attrs.size(); i++) {
-          trainValues[i] = insts.attributeToDoubleArray(i);
-        }
-        Matrix trainMatrix = new Matrix(trainValues);
-        // svd requires rows >= columns, so transpose data if necessary
-        if (attrs.size() < insts.numInstances()) {
-          trainMatrix = trainMatrix.transpose();
-        }
-        SingularValueDecomposition trainSVD = trainMatrix.svd();
-        Matrix s = trainSVD.getS(); // singular values
-        
-        
-        // SingularValueDecomposition svd = new SingularValueDecomposition(insts);
-        Enumeration attrsEnum = attrs.elements();
-        int i = 0;
-        while (attrsEnum.hasMoreElements()) {
-          Attribute attr = (Attribute) attrsEnum.nextElement();
-          
-//          float score = (float) lsa.evaluateAttribute(i);
-          float score = (float)s.get(i, i);
-          result.add(new ScoreIxObj<String>(attr.name(), score));
-          i++;
-        }
-//      } catch (WekaException ingored) {
-//        LOG.error(ingored.getMessage(), ingored);
-//      }
+        // float score = (float) lsa.evaluateAttribute(i);
+        float score = (float) s.get(i, i);
+        result.add(new ScoreIxObj<String>(attr.name(), score));
+        i++;
+      }
+      // } catch (WekaException ingored) {
+      // LOG.error(ingored.getMessage(), ingored);
+      // }
     }
     return result;
-  }
-  
-  public FilteredQuery expandAndFilterQuery(OpenObjectFloatHashMap<String> queryTerms,
-      int queryLen, PriorityQueue<ScoreIxObj<String>>[] clustersTerms,
-      MutableFloat[] minXTermScores,
-      MutableFloat[] maxXTermScores, int numTermsToAppend) throws IOException,
-      org.apache.lucene.queryParser.ParseException {
-    // convert mutables to floats and call
-    float[] minXTermScoreFloats = new float[minXTermScores.length];
-    float[] maxXTermScoreFloats = new float[maxXTermScores.length];
-    for (int c = 0; c < minXTermScores.length; ++c) {
-      minXTermScoreFloats[c] = minXTermScores[c].floatValue();
-      maxXTermScoreFloats[c] = maxXTermScores[c].floatValue();
-    }
-    return expandAndFilterQuery(queryTerms,
-        queryLen,
-        clustersTerms,
-        minXTermScoreFloats,
-        maxXTermScoreFloats,
-        numTermsToAppend);
   }
   
 }
