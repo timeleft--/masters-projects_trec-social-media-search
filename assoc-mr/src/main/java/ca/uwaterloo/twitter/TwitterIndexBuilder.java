@@ -92,7 +92,7 @@ public class TwitterIndexBuilder implements Callable<Void> {
       InterruptedException, ExecutionException {
     
     // TODO from commandline
-    boolean incremental = true;
+    boolean incremental = false;
     
     Options options = new Options();
     options.addOption(OptionBuilder.withArgName("path").hasArg()
@@ -311,9 +311,9 @@ public class TwitterIndexBuilder implements Callable<Void> {
         doc.add(new NumericField(TweetField.TIMESTAMP.name, Store.YES, true)
             .setLongValue(timestamp));
         doc.add(new Field(TweetField.TEXT.name, tweet, Store.YES,
-            Index.ANALYZED, TermVector.WITH_POSITIONS_OFFSETS));
+            Index.ANALYZED, TermVector.NO));
         doc.add(new Field(TweetField.STEMMED_EN.name, tweet, Store.NO,
-            Index.ANALYZED, TermVector.NO));// not enough disk space :( YES));
+            Index.ANALYZED, TermVector.YES));
         
         writer.addDocument(doc);
         if (++cnt % 10000 == 0) {

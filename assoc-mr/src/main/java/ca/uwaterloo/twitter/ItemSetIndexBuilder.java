@@ -315,7 +315,7 @@ public class ItemSetIndexBuilder {
                 Index.ANALYZED,
                 TermVector.YES));
             doc.add(new Field(AssocField.STEMMED_EN.name, itemsetStr, Store.NO,
-                Index.ANALYZED, TermVector.NO));// not enough disk space :( YES));
+                Index.ANALYZED, TermVector.YES));// not enough disk space :( YES));
             
             // No need to treat rankd and support as numeric fields.. will never sort or filter
             

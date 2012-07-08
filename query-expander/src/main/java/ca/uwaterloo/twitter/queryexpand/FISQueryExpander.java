@@ -96,7 +96,7 @@ public class FISQueryExpander {
   
   private static Logger LOG = LoggerFactory.getLogger(FISQueryExpander.class);
   
-  class FISCollector extends BM25Collector<Integer, String[]> {
+  static class FISCollector extends BM25Collector<Integer, String[]> {
     
     public class ScoreThenSuppRankComparator implements Comparator<ScoreIxObj<Integer>> {
       
@@ -134,8 +134,8 @@ public class FISQueryExpander {
         OpenObjectFloatHashMap<String> pQueryTerms, float pQueryLen,
         int pMaxResults) throws IOException, IllegalArgumentException, SecurityException,
         InstantiationException, IllegalAccessException, InvocationTargetException {
-      // (paramBM25StemmedIDF ? AssocField.ITEMSET.name : AssocField.STEMMED_EN.name)
-      super(pTarget, AssocField.ITEMSET.name,
+      
+      super(pTarget,  (paramBM25StemmedIDF ? AssocField.STEMMED_EN.name : AssocField.ITEMSET.name),
           pQueryStr, pQueryTerms, pQueryLen, 0,
           pMaxResults, ScoreThenSuppRankComparator.class, paramBM25StemmedIDF);
       
@@ -169,6 +169,93 @@ public class FISQueryExpander {
       return AVG_PATTERN_LENGTH;
     }
     
+  }
+  
+  public static class QueryExpansionBM25Collector extends BM25Collector<String, String> {
+    
+    public QueryExpansionBM25Collector(FISQueryExpander pTarget, String pDocTextField,
+        String pQueryStr, OpenObjectFloatHashMap<String> pQueryTerms, float pQueryLen,
+        int addNEnglishStopWordsToQueryTerms, int pMaxResults,
+        Class<? extends Comparator<ScoreIxObj<String>>> comparatorClazz, boolean pStemmedIDF)
+        throws IOException, IllegalArgumentException, SecurityException, InstantiationException,
+        IllegalAccessException, InvocationTargetException {
+      super(pTarget, pDocTextField, pQueryStr, pQueryTerms, pQueryLen,
+          addNEnglishStopWordsToQueryTerms,
+          pMaxResults, comparatorClazz, pStemmedIDF);
+    }
+    
+    protected static final TwitterAnalyzer tweetAnalyzer = new TwitterAnalyzer();
+    
+    public OpenObjectFloatHashMap<String> expansionTermsByFrequency(int numResultsToCosider,
+        MutableFloat minScoreOut, MutableFloat maxScoreOut, MutableFloat totalScoreOut)
+        throws IOException {
+      
+      OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>();
+      
+      if (minScoreOut != null) {
+        minScoreOut.setValue(Float.MAX_VALUE);
+      }
+      
+      if (maxScoreOut != null) {
+        maxScoreOut.setValue(Float.MIN_VALUE);
+      }
+      
+      int rank = 1;
+      for (ScoreIxObj<String> doc : resultSet.keySet()) {
+        if (numResultsToCosider > 0 && rank > numResultsToCosider) {
+          break;
+        }
+        
+        OpenObjectFloatHashMap<String> hitTerms = target.queryTermFreq(resultSet.get(doc),
+            null,
+            tweetAnalyzer,
+            TweetField.TEXT.name);
+        if ((hitTerms.size() < MIN_ITEMSET_SIZE)) { // TODO: duplicates? || (.containsKey(termSet)
+          continue;
+        }
+        
+        for (String term : hitTerms.keys()) {
+          
+          if (queryTerms.containsKey(term)) {
+            continue;
+          }
+          
+          float score = hitTerms.get(term) + termFreq.get(term);
+          termFreq.put(term, score);
+          
+          if (minScoreOut != null && score < minScoreOut.floatValue()) {
+            minScoreOut.setValue(score);
+          }
+          
+          if (maxScoreOut != null && score > maxScoreOut.floatValue()) {
+            maxScoreOut.setValue(score);
+          }
+          
+          if (totalScoreOut != null) {
+            totalScoreOut.add(score);
+          }
+        }
+        
+        ++rank;
+      }
+      
+      return termFreq;
+    }
+    
+    @Override
+    protected String getResultKey(int docId, Document doc) {
+      String tweetId = doc.get(TweetField.ID.name);
+      return tweetId;
+    }
+    
+    @Override
+    protected String getResultValue(int docId, Document doc) {
+      String text = null;
+      if (LOG.isDebugEnabled()) {
+        text = doc.get(TweetField.TEXT.name);
+      }
+      return text;
+    }
   }
   
   public static enum TermWeigting {
@@ -1355,7 +1442,7 @@ public class FISQueryExpander {
       if (queryFreq.containsKey(t)) {
         continue;
       }
-      // Collection metric
+      // Collection metric FIXME : use stemmed
       Term tTerm = new Term(TweetField.TEXT.name, t);
       float docFreqC = twtIxReader.docFreq(tTerm);
       if (docFreqC == 0) {
@@ -1473,7 +1560,7 @@ public class FISQueryExpander {
       
       float termCorpusQuality = 0;
       if (twitterCorpusModelWeight > 0) {
-        // Collection metric
+        // Collection metric FIXME use stemmed
         Term tTerm = new Term(TweetField.TEXT.name, t);
         float docFreqC = twtIxReader.docFreq(tTerm);
         if (docFreqC == 0) {

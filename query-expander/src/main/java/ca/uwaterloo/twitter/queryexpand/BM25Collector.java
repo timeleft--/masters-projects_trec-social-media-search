@@ -4,8 +4,11 @@ import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.Set;
 import java.util.TreeMap;
 
+import org.apache.commons.lang.mutable.MutableFloat;
 import org.apache.commons.lang.mutable.MutableLong;
 import org.apache.commons.math.util.MathUtils;
 import org.apache.lucene.analysis.TwitterEnglishAnalyzer;
@@ -16,10 +19,14 @@ import org.apache.lucene.index.TermFreqVector;
 import org.apache.lucene.search.Collector;
 import org.apache.lucene.search.Scorer;
 import org.apache.mahout.clustering.lda.cvb.TopicModel;
+import org.apache.mahout.common.Pair;
+import org.apache.mahout.math.list.IntArrayList;
 import org.apache.mahout.math.map.OpenObjectFloatHashMap;
 import org.apache.mahout.math.set.OpenIntHashSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.google.common.collect.Maps;
 
 import ca.uwaterloo.twitter.ItemSetIndexBuilder.AssocField;
 import ca.uwaterloo.twitter.TwitterIndexBuilder.TweetField;
@@ -117,7 +124,19 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
     this.scorer = scorer;
   }
   
-  protected final OpenIntHashSet encounteredDocs = new OpenIntHashSet();
+  protected OpenIntHashSet encounteredDocs;
+  
+  @Override
+  public void setNextReader(IndexReader reader, int docBase) throws IOException {
+    this.reader = reader;
+    this.docBase = docBase;
+    encounteredDocs = new OpenIntHashSet();
+  }
+  
+  @Override
+  public boolean acceptsDocsOutOfOrder() {
+    return true;
+  }
   
   @Override
   public void collect(int docId) throws IOException {
@@ -145,8 +164,8 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
       TermFreqVector docTermsVector = reader.getTermFreqVector(docId,
           docTextField);
       
-      if (!stemmedIDF //FIXME: This is only because the indexes currently don't store the stemmed  
-          && docTermsVector != null) {
+      if (//!stemmedIDF && // This was only because the indexes currently don't store the stemmed  
+           docTermsVector != null) {
         docTerms = new OpenObjectFloatHashMap<String>();
         for (int i = 0; i < docTermsVector.size(); ++i) {
           int f = docTermsVector.getTermFrequencies()[i];
@@ -155,13 +174,13 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
         }
       } else {
         MutableLong docLen = new MutableLong();
-        if (stemmedIDF) {
-          docTerms = target.queryTermFreq(Arrays.toString(docTermsVector.getTerms()),
-              docLen, stemmingAnalyzer, docTextField);
-        } else {
+//        if (stemmedIDF) {
+//          docTerms = target.queryTermFreq(Arrays.toString(docTermsVector.getTerms()),
+//              docLen, stemmingAnalyzer, docTextField);
+//        } else {
           String tweet = doc.get(docTextField);
           docTerms = target.queryTermFreq(tweet, docLen);
-        }
+//        }
         ld = docLen.floatValue();
       }
 //    }
@@ -244,16 +263,6 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
     return K1;
   }
   
-  @Override
-  public void setNextReader(IndexReader reader, int docBase) throws IOException {
-    this.reader = reader;
-    this.docBase = docBase;
-  }
-  
-  @Override
-  public boolean acceptsDocsOutOfOrder() {
-    return true;
-  }
   
   public TreeMap<ScoreIxObj<K>, V> getResultSet() {
     return resultSet;
