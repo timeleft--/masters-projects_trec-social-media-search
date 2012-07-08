@@ -366,6 +366,8 @@ public class FISQueryExpander {
   public static final boolean PROPAGATE_IS_WEIGHTS_DEFAULT = true;
   private static final float TWITTER_CORPUS_LENGTH_IN_TERMS = 100055949; // / FIS TOTAL LENGTH:
                                                                          // 5760589;
+  public static final double PARAM_MARKOV_ALPHA = 0.5;
+  public static final int PARAM_MARKOV_NUM_WALK_STEPS = 2;
   
   private static boolean paramClusteringWeightInsts = true;
   
@@ -622,8 +624,8 @@ public class FISQueryExpander {
                 null,
                 null,
                 null,
-                2,
-                0.5);
+                PARAM_MARKOV_NUM_WALK_STEPS,
+                PARAM_MARKOV_ALPHA);
           }
           
           List<String> termList = Lists.newArrayListWithCapacity(weightedTerms.size());
@@ -1159,6 +1161,10 @@ public class FISQueryExpander {
       // patternSupportMap.put(pattern, patternPair.getSecond());
     }
     
+    if(bPWDTemp.size() == 0){
+      return new OpenObjectFloatHashMap<String>();
+    }
+    
     // There's a transpose happening while copying
     double[][] aPDW = new double[bPWDTemp.size()][numItemsetsToUse];
     double[][] bPWD = new double[numItemsetsToUse][bPWDTemp.size()];
@@ -1174,10 +1180,17 @@ public class FISQueryExpander {
     Matrix C = A.times(B);
     
     Matrix tQW = Matrix.identity(bPWDTemp.size(), bPWDTemp.size()); // numItemsetsToUse);
-    // FIXME: for(int k=0; k<numWalkSteps; ++k){
-    tQW = tQW.minus(C.times(alpha));
-    tQW = tQW.inverse();
-    
+    if (numWalkSteps == 1) {
+      tQW = tQW.minus(C.times(alpha));
+      tQW = tQW.inverse();
+    } else {
+      for (int k = 0; k < numWalkSteps - 1; ++k) {
+        tQW = tQW.plus(C.times(alpha));
+        alpha *= alpha;
+        C = C.times(C);
+      }
+      tQW = tQW.plus(C.times(alpha));
+    }
     Matrix tDW = tQW.times(A);
     
     tDW = tDW.times(1.0 - alpha);
@@ -1206,11 +1219,12 @@ public class FISQueryExpander {
         }
         if (qTermProb != 0) {
           pqd[d] *= qTermProb;
-        } else {
-          LOG.trace("breakpoint");
-        }
+        } 
+//        else {
+//          LOG.trace("breakpoint");
+//        }
       }
-      if(pqd[d] == 1){
+      if (pqd[d] == 1) {
         pqd[d] = 0;
       }
       ++d;
@@ -1219,6 +1233,10 @@ public class FISQueryExpander {
     d = 0;
     for (Set<String> termSet : itemsetsMap.keySet()) {
       for (String term : termSet) {
+        if (querySet.contains(term)) {
+          continue;
+        }
+        
         int termId = termIdMap.get(term);
         
         double docScore = pqd[d] * aPDW[termId][d];
@@ -1228,14 +1246,18 @@ public class FISQueryExpander {
     }
     
     for (String term : result.keys()) {
-      int termId = termIdMap.get(term);
-      
       float score = result.get(term);
       
-      // TODO: Smoothing
-      score *= twtIxReader.docFreq(stemmedList.get(termId)) / TWITTER_CORPUS_LENGTH_IN_TERMS;
-      
-      result.put(term, score);
+      if (score > 0) {
+        int termId = termIdMap.get(term);
+        // TODONE Smoothing
+        score *= (twtIxReader.docFreq(stemmedList.get(termId)) + termWeightSmoother)
+            / (TWITTER_CORPUS_LENGTH_IN_TERMS + termWeightSmoother);
+        
+        result.put(term, score);
+      } else {
+        result.removeKey(term);
+      }
       
       if (minScoreOut != null && score < minScoreOut.floatValue()) {
         minScoreOut.setValue(score);
