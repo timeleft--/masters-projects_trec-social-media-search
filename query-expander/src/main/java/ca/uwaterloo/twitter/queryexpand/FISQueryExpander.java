@@ -32,6 +32,7 @@ import org.apache.commons.lang.mutable.MutableLong;
 import org.apache.commons.math.util.MathUtils;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.TwitterEnglishAnalyzer;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Fieldable;
@@ -135,7 +136,7 @@ public class FISQueryExpander {
         int pMaxResults) throws IOException, IllegalArgumentException, SecurityException,
         InstantiationException, IllegalAccessException, InvocationTargetException {
       
-      super(pTarget,  (paramBM25StemmedIDF ? AssocField.STEMMED_EN.name : AssocField.ITEMSET.name),
+      super(pTarget, (paramBM25StemmedIDF ? AssocField.STEMMED_EN.name : AssocField.ITEMSET.name),
           pQueryStr, pQueryTerms, pQueryLen, 0,
           pMaxResults, ScoreThenSuppRankComparator.class, paramBM25StemmedIDF);
       
@@ -171,7 +172,11 @@ public class FISQueryExpander {
     
   }
   
+  protected static final TwitterEnglishAnalyzer tweetAnalyzer = new TwitterEnglishAnalyzer();
+  
   public static class QueryExpansionBM25Collector extends BM25Collector<String, String> {
+    
+    protected static final TwitterEnglishAnalyzer tweetAnalyzer = new TwitterEnglishAnalyzer();
     
     public QueryExpansionBM25Collector(FISQueryExpander pTarget, String pDocTextField,
         String pQueryStr, OpenObjectFloatHashMap<String> pQueryTerms, float pQueryLen,
@@ -183,8 +188,6 @@ public class FISQueryExpander {
           addNEnglishStopWordsToQueryTerms,
           pMaxResults, comparatorClazz, pStemmedIDF);
     }
-    
-    protected static final TwitterAnalyzer tweetAnalyzer = new TwitterAnalyzer();
     
     public OpenObjectFloatHashMap<String> expansionTermsByFrequency(int numResultsToCosider,
         MutableFloat minScoreOut, MutableFloat maxScoreOut, MutableFloat totalScoreOut)
@@ -263,7 +266,8 @@ public class FISQueryExpander {
     KL_DIVERG("kl"),
     CLUSTERING("clustering"),
     SVD("svd"), FREQ("frequency"),
-    TOPN("topn_pattern-rank");
+    TOPN("topn_pattern-rank"),
+    MARKOV("lafferty-zhai-2001");
     
     public final String name;
     
@@ -339,7 +343,7 @@ public class FISQueryExpander {
   private static final float ITEMSET_LEN_WEIGHT_DEFAULT = 0.33f;
   
   private static final float ITEMSET_CORPUS_MODEL_WEIGHT_DEFAULT = 0.77f;
-  private static final float TWITTER_CORPUS_MODEL_WEIGHT_DEFAULT = 0; // 0.33f;
+  private static final float TWITTER_CORPUS_MODEL_WEIGHT_DEFAULT = 0.33f;
   
   private static final float TERM_WEIGHT_SMOOTHER_DEFAULT = 10000.0f;
   
@@ -360,6 +364,8 @@ public class FISQueryExpander {
   private static final boolean EXPAND_TERM_COUNT_EVENLY_OVER_CLUSTERS = false;
   private static final boolean REAL_TIME_PATTERN_FREQ = false;
   public static final boolean PROPAGATE_IS_WEIGHTS_DEFAULT = true;
+  private static final float TWITTER_CORPUS_LENGTH_IN_TERMS = 100055949; // / FIS TOTAL LENGTH:
+                                                                         // 5760589;
   
   private static boolean paramClusteringWeightInsts = true;
   
@@ -497,6 +503,9 @@ public class FISQueryExpander {
         } else if (cmd.equals("d:")) {
           mode = 7; // terms with query divergence
           termWeighting = TermWeigting.KL_DIVERG;
+        } else if (cmd.equals("m:")) {
+          mode = 8; // terms with query divergence
+          termWeighting = TermWeigting.MARKOV;
         } else if (cmd.equals("r:")) {
           mode = 10; // results
         } else if (cmd.equals("e:")) {
@@ -580,7 +589,7 @@ public class FISQueryExpander {
             }
             out.print("\n");
           }
-        } else if (mode == 2 || mode == 3) {
+        } else if (mode == 2 || mode == 3 || mode == 6 || mode == 8) {
           OpenObjectFloatHashMap<String> weightedTerms = null;
           if (TermWeigting.FREQ.equals(termWeighting)) {
             weightedTerms = qEx
@@ -598,6 +607,23 @@ public class FISQueryExpander {
                 null,
                 null,
                 null);
+          } else if (TermWeigting.PROB_QUERY.equals(termWeighting)) {
+            weightedTerms = qEx.weightedTermsConditionalProb(fisRs,
+                query.toString(),
+                -1,
+                // PROPAGATE_IS_WEIGHTS_DEFAULT,
+                null,
+                null,
+                null);
+          } else if (TermWeigting.MARKOV.equals(termWeighting)) {
+            weightedTerms = qEx.weightedTermsMarkovChain(fisRs,
+                query.toString(),
+                100,
+                null,
+                null,
+                null,
+                2,
+                0.5);
           }
           
           List<String> termList = Lists.newArrayListWithCapacity(weightedTerms.size());
@@ -607,15 +633,16 @@ public class FISQueryExpander {
           for (String term : termList) {
             out.println(++i + " (" + weightedTerms.get(term) + "): " + term);
           }
-        } else if (mode == 6 || mode == 7 || mode == 4) {
+        } else if (mode == 7 || mode == 4) {
           
           PriorityQueue<ScoreIxObj<String>> weightedTerms = null;
-          if (TermWeigting.PROB_QUERY.equals(termWeighting)) {
-            weightedTerms = qEx
-                .convertResultToWeightedTermsConditionalProb(fisRs,
-                    query.toString(),
-                    -1, propagateISWeights, null, null, null);
-          } else if (TermWeigting.KL_DIVERG.equals(termWeighting)) {
+          // if (TermWeigting.PROB_QUERY.equals(termWeighting)) {
+          // weightedTerms = qEx
+          // .convertResultToWeightedTermsConditionalProb(fisRs,
+          // query.toString(),
+          // -1, propagateISWeights, null, null, null);
+          // } else
+          if (TermWeigting.KL_DIVERG.equals(termWeighting)) {
             weightedTerms = qEx
                 .convertResultToWeightedTermsKLDivergence(fisRs,
                     query.toString(),
@@ -866,217 +893,365 @@ public class FISQueryExpander {
     return termFreq;
   }
   
-  // public OpenObjectFloatHashMap<String> convertResultToWeightedTermsConditionalProb(
-  // OpenIntFloatHashMap fisRs,
-  // String query, int numResults, boolean propagateSupport,
-  // MutableFloat minXTermScoreOut,
-  // MutableFloat maxXTermScoreOut, MutableFloat totalTermScoreOut) throws IOException {
-  //
-  // if (minXTermScoreOut != null)
-  // minXTermScoreOut.setValue(Float.MAX_VALUE);
-  //
-  // if (maxXTermScoreOut != null)
-  // maxXTermScoreOut.setValue(Float.MIN_VALUE);
-  //
-  // OpenObjectFloatHashMap<String> queryTermProb = new OpenObjectFloatHashMap<String>();
-  //
-  // OpenObjectFloatHashMap<String> queryFreq = queryTermFreq(query, null);
-  //
-  // LinkedHashMap<Set<String>, Float> rankedItemsetScore = Maps.newLinkedHashMap();
-  //
-  // IntArrayList keyList = new IntArrayList(fisRs.size());
-  // fisRs.keysSortedByValue(keyList);
-  // int rank = 1;
-  // for (int i = fisRs.size() - 1; i >= 0; --i) {
-  // if (numResults > 0 && rank > numResults) {
-  // break;
-  // }
-  // int hit = keyList.getQuick(i);
-  // TermFreqVector terms = fisIxReader.getTermFreqVector(hit,
-  // ItemSetIndexBuilder.AssocField.ITEMSET.name);
-  // if (terms.size() < MIN_ITEMSET_SIZE) {
-  // continue;
-  // }
-  // Set<String> termSet = Sets.newCopyOnWriteArraySet(Arrays.asList(terms.getTerms()));
-  // if (rankedItemsetScore.containsKey(termSet)) {
-  // continue;
-  // }
-  //
-  // Document doc = fisIxReader.document(hit);
-  // float patternFreq = Float.parseFloat(doc
-  // .getFieldable(ItemSetIndexBuilder.AssocField.SUPPORT.name)
-  // .stringValue());
-  //
-  // rankedItemsetScore.put(termSet, patternFreq);
-  //
-  // for (String term : termSet) {
-  //
-  // if (queryTerms.containsKey(term)) {
-  // continue;
-  // }
-  //
-  // float score = (propagateSupport ? patternFreq : 1) + termFreq.get(term);
-  // termFreq.put(term, score);
-  //
-  // if (minScoreOut != null && score < minScoreOut.floatValue()) {
-  // minScoreOut.setValue(score);
-  // }
-  //
-  // if (maxScoreOut != null && score > maxScoreOut.floatValue()) {
-  // maxScoreOut.setValue(score);
-  // }
-  //
-  // if (totalScoreOut != null) {
-  // totalScoreOut.add(score);
-  // }
-  // }
-  //
-  // ++rank;
-  // }
-  //
-  // List<String> terms = Lists.newArrayListWithCapacity(termIds.size());
-  // termIds.keysSortedByValue(terms);
-  //
-  // Set<String> querySet = Sets.newCopyOnWriteArraySet(queryFreq.keys());
-  // Set<Set<String>> queryPowerSet = Sets.powerSet(querySet);
-  //
-  // int capacity = queryPowerSet.size() * (terms.size() - queryFreq.size());
-  // OpenObjectFloatHashMap<Set<String>> subsetFreq = new OpenObjectFloatHashMap<Set<String>>(
-  // Math.max(0, capacity));
-  // OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>(terms.size());
-  // float totalW = 0;
-  //
-  // Iterator<Pair<IntArrayList, Long>> itemsetIter = itemsets.iteratorClosed();
-  // while (itemsetIter.hasNext()) {
-  // Pair<IntArrayList, Long> patternPair = itemsetIter.next();
-  //
-  // float w = propagateISWeight ?
-  // (patternPair.getSecond().floatValue()
-  // / SCORE_PRECISION_MULTIPLIER) :
-  // 1;
-  // totalW += w;
-  //
-  // if (minXTermScoreOut != null && w < minXTermScoreOut.floatValue()) {
-  // minXTermScoreOut.setValue(w);
-  // }
-  //
-  // if (maxXTermScoreOut != null && w > maxXTermScoreOut.floatValue()) {
-  // maxXTermScoreOut.setValue(w);
-  // }
-  //
-  // IntArrayList pattern = patternPair.getFirst();
-  // int pSize = pattern.size();
-  // Set<String> fisTerms = Sets.newHashSet();
-  // for (int i = 0; i < pSize; ++i) {
-  // fisTerms.add(terms.get(pattern.getQuick(i)));
-  // }
-  //
-  // boolean weightNotAdded = true;
-  // for (String ft : fisTerms) {
-  // if (queryFreq.containsKey(ft)) {
-  // continue;
-  // }
-  // termFreq.put(ft, termFreq.get(ft) + w);
-  // for (Set<String> qSub : queryPowerSet) {
-  // if (qSub.isEmpty()) {
-  // continue;
-  // }
-  // if (!Sets.intersection(fisTerms, qSub).equals(qSub)) {
-  // // This query s
-  // continue;
-  // } else if (weightNotAdded) {
-  // subsetFreq.put(qSub, subsetFreq.get(qSub) + w);
-  // }
-  //
-  // Set<String> key = Sets.union(qSub, ImmutableSet.<String> of(ft));
-  // subsetFreq.put(key, subsetFreq.get(key) + w);
-  // }
-  // weightNotAdded = false;
-  // }
-  // }
-  //
-  // subsetFreq.put(ImmutableSet.<String> of(), totalW);
-  // for (String t : terms) {
-  // if (queryFreq.containsKey(t)) {
-  // continue;
-  // }
-  //
-  // float termCorpusQuality = 0;
-  // if (twitterCorpusModelWeight > 0) {
-  // // Collection metric
-  // Term tTerm = new Term(TweetField.TEXT.name, t);
-  // float docFreqC = twtIxReader.docFreq(tTerm);
-  // if (docFreqC == 0) {
-  // continue;
-  // }
-  //
-  // // odds of the term (not log odds)
-  // termCorpusQuality = (termWeightSmoother + docFreqC) / twtIxReader.numDocs();
-  // termCorpusQuality = termCorpusQuality / (1 - termCorpusQuality);
-  // termCorpusQuality = (float) Math.log(termCorpusQuality);
-  //
-  // // IDF is has very large scale compared to probabilities
-  // // float termCorpusQuality = (float) (Math.log(twtIxReader.numDocs() / (float) (docFreqC +
-  // // 1)) + 1.0);
-  // }
-  //
-  // // Query metric
-  // Set<String> tAsSet = ImmutableSet.<String> of(t);
-  // subsetFreq.put(tAsSet, termFreq.get(t));
-  //
-  // LinkedHashMap<Set<String>, Float> termQueryQuality = Maps
-  // .<Set<String>, Float> newLinkedHashMap();
-  //
-  // for (Set<String> qSub : queryPowerSet) {
-  //
-  // float freqSub = subsetFreq.get(qSub);
-  //
-  // if (freqSub == 0) {
-  // continue;
-  // }
-  //
-  // Set<String> qSubExp = Sets.union(qSub, tAsSet);
-  // float jointFreq = subsetFreq.get(qSubExp);
-  //
-  // // //Mutual information No normalization:
-  // // if (jf != 0) {
-  // // float jp = jf / totalW;
-  // // numer += jp * (Math.log(jf / (ft1 * ft2)) + lnTotalW);
-  // // denim += jp * Math.log(jp);
-  // // }
-  // float pExp = jointFreq / freqSub;
-  //
-  // termQueryQuality.put(qSubExp, pExp);
-  // }
-  //
-  // float termQueryQualityAggr = 0;
-  // for (String qTerm : querySet) {
-  // // for (List<String> qtPair : Sets.cartesianProduct(tAsSet, querySet)) {
-  // float qTermReps = queryFreq.get(qTerm);
-  // List<String> qtPair = ImmutableList.<String> of(t, qTerm);
-  // termQueryQualityAggr += qTermReps * aggregateTermQueryQuality(termQueryQuality,
-  // Sets.newCopyOnWriteArraySet(qtPair),
-  // termQueryQuality.get(tAsSet));
-  // }
-  // if (termQueryQualityAggr >= 1) {
-  // // FIXME: This happens in case of repeated hashtag
-  // termQueryQualityAggr = (float) (1 - 1E-6);
-  // }
-  //
-  // termQueryQualityAggr /= (1 - termQueryQualityAggr);
-  // termQueryQualityAggr = (float) Math.log(termQueryQualityAggr);
-  //
-  // float score = (float) (twitterCorpusModelWeight * termCorpusQuality +
-  // (1 - twitterCorpusModelWeight) * termQueryQualityAggr);
-  // result.add(new ScoreIxObj<String>(t, score));
-  // }
-  //
-  // if (totalTermScoreOut != null) {
-  // totalTermScoreOut.setValue(totalW);
-  // }
-  // return result;
-  //
-  // }
+  public OpenObjectFloatHashMap<String> weightedTermsConditionalProb(
+      OpenIntFloatHashMap fisRs,
+      String query, int numItemsetsToUse, // boolean propagateSupport,
+      MutableFloat minScoreOut,
+      MutableFloat maxScoreOut, MutableFloat totalScoreOut) throws IOException,
+      org.apache.lucene.queryParser.ParseException {
+    
+    if (minScoreOut != null)
+      minScoreOut.setValue(Float.MAX_VALUE);
+    
+    if (maxScoreOut != null)
+      maxScoreOut.setValue(Float.MIN_VALUE);
+    
+    if (totalScoreOut != null)
+      totalScoreOut.setValue(0);
+    
+    OpenObjectFloatHashMap<String> result = new OpenObjectFloatHashMap<String>();
+    
+    // MutableLong qLen = new MutableLong();
+    OpenObjectFloatHashMap<String> queryFreq = queryTermFreq(query, null);
+    Set<String> querySet = Sets.newCopyOnWriteArraySet(queryFreq.keys());
+    Set<Set<String>> queryPowerSet = Sets.powerSet(querySet);
+    OpenObjectFloatHashMap<Set<String>> subsetFreq = new OpenObjectFloatHashMap<Set<String>>();
+    OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>();
+    float totalW = 0;
+    
+    LinkedHashMap<Set<String>, Float> rankedItemsetScore = Maps.newLinkedHashMap();
+    
+    IntArrayList keyList = new IntArrayList(fisRs.size());
+    fisRs.keysSortedByValue(keyList);
+    int rank = 0;
+    for (int i = fisRs.size() - 1; i >= 0; --i) {
+      if (numItemsetsToUse > 0 && ++rank > numItemsetsToUse) {
+        break;
+      }
+      
+      int hit = keyList.getQuick(i);
+      Pair<Set<String>, Float> patternPair = getPattern(hit);
+      Set<String> termSet = patternPair.getFirst();
+      if (termSet.size() < MIN_ITEMSET_SIZE || rankedItemsetScore.containsKey(termSet)) {
+        continue;
+      }
+      
+      float patternFreq = patternPair.getSecond();
+      float w = patternFreq; // or 1??
+      
+      rankedItemsetScore.put(termSet, patternFreq);
+      
+      boolean weightNotAdded = true;
+      for (String term : termSet) {
+        
+        if (queryFreq.containsKey(term)) {
+          continue;
+        }
+        
+        termFreq.put(term, termFreq.get(term) + w);
+        for (Set<String> qSub : queryPowerSet) {
+          if (qSub.isEmpty()) {
+            continue;
+          }
+          if (!Sets.intersection(termSet, qSub).equals(qSub)) {
+            // This query s
+            continue;
+          } else if (weightNotAdded) {
+            subsetFreq.put(qSub, subsetFreq.get(qSub) + w);
+          }
+          
+          Set<String> key = Sets.union(qSub, ImmutableSet.<String> of(term));
+          subsetFreq.put(key, subsetFreq.get(key) + w);
+          totalW += w;
+        }
+        weightNotAdded = false;
+      }
+    }
+    
+    subsetFreq.put(ImmutableSet.<String> of(), totalW);
+    for (String t : termFreq.keys()) {
+      if (queryFreq.containsKey(t)) {
+        continue;
+      }
+      
+      // Query metric
+      Set<String> tAsSet = ImmutableSet.<String> of(t);
+      subsetFreq.put(tAsSet, termFreq.get(t));
+      
+      LinkedHashMap<Set<String>, Float> termQueryQuality = Maps
+          .<Set<String>, Float> newLinkedHashMap();
+      
+      for (Set<String> qSub : queryPowerSet) {
+        
+        float freqSub = subsetFreq.get(qSub);
+        
+        if (freqSub == 0) {
+          continue;
+        }
+        
+        Set<String> qSubExp = Sets.union(qSub, tAsSet);
+        float jointFreq = subsetFreq.get(qSubExp);
+        
+        // //Mutual information No normalization:
+        // if (jf != 0) {
+        // float jp = jf / totalW;
+        // numer += jp * (Math.log(jf / (ft1 * ft2)) + lnTotalW);
+        // denim += jp * Math.log(jp);
+        // }
+        float pExp = jointFreq / freqSub;
+        
+        termQueryQuality.put(qSubExp, pExp);
+      }
+      float termQueryQualityAggr = 0;
+      for (String qTerm : querySet) {
+        // for (List<String> qtPair : Sets.cartesianProduct(tAsSet, querySet)) {
+        
+        List<String> qtPair = ImmutableList.<String> of(t, qTerm);
+        termQueryQualityAggr += queryFreq.get(qTerm) * aggregateTermQueryQuality(termQueryQuality,
+            Sets.newCopyOnWriteArraySet(qtPair),
+            termQueryQuality.get(tAsSet));
+      }
+      if (termQueryQualityAggr >= 1) {
+        // FIXME: This happens in case of repeated hashtag
+        termQueryQualityAggr = (float) (1 - 1E-6);
+      }
+      
+      // Log odds
+      // termQueryQualityAggr /= (1 - termQueryQualityAggr);
+      // termQueryQualityAggr = (float) Math.log(termQueryQualityAggr);
+      
+      // ////////////////////
+      float termCorpusQuality = 0;
+      if (twitterCorpusModelWeight > 0) {
+        // Collection metric // TODO: use stemmed corpus metrics
+        Term tTerm = new Term(TweetField.TEXT.name, t);
+        float docFreqC = twtIxReader.docFreq(tTerm);
+        if (docFreqC == 0) {
+          continue;
+        }
+        
+        termCorpusQuality = (termWeightSmoother + docFreqC) / TWITTER_CORPUS_LENGTH_IN_TERMS;
+        
+        // // odds of the term (or log odds)
+        // termCorpusQuality = (termWeightSmoother + docFreqC) / twtIxReader.numDocs();
+        // termCorpusQuality = termCorpusQuality / (1 - termCorpusQuality);
+        // termCorpusQuality = (float) Math.log(termCorpusQuality);
+        //
+        // // IDF is has very large scale compared to probabilities
+        // // float termCorpusQuality = (float) (Math.log(twtIxReader.numDocs() / (float) (docFreqC
+        // +
+        // // 1)) + 1.0);
+      }
+      
+      float pTermSmoothed = (float) (twitterCorpusModelWeight * termCorpusQuality) +
+          ((1 - twitterCorpusModelWeight) * (termFreq.get(t) / totalW));
+      
+      // Should divide by probability of query, but this is a fixed value for all terms
+      float score = pTermSmoothed * termQueryQualityAggr;
+      
+      result.put(t, score);
+      
+      if (minScoreOut != null && score < minScoreOut.floatValue()) {
+        minScoreOut.setValue(score);
+      }
+      
+      if (maxScoreOut != null && score > maxScoreOut.floatValue()) {
+        maxScoreOut.setValue(score);
+      }
+      
+      if (totalScoreOut != null) {
+        totalScoreOut.add(score);
+      }
+    }
+    
+    return result;
+  }
+  
+  // ////////////////////// PATTERN-TO-TERM ///////////////////////////////
+  
+  public OpenObjectFloatHashMap<String> weightedTermsMarkovChain(
+      OpenIntFloatHashMap fisRs,
+      String query, int numItemsetsToUse, // boolean propagateSupport,
+      MutableFloat minScoreOut,
+      MutableFloat maxScoreOut, MutableFloat totalScoreOut, int numWalkSteps, double alpha)
+      throws IOException,
+      org.apache.lucene.queryParser.ParseException {
+    
+    if (numItemsetsToUse <= 0) {
+      throw new IllegalArgumentException("Must specify number of itemsets");
+    }
+    
+    if (minScoreOut != null)
+      minScoreOut.setValue(Float.MAX_VALUE);
+    
+    if (maxScoreOut != null)
+      maxScoreOut.setValue(Float.MIN_VALUE);
+    
+    if (totalScoreOut != null)
+      totalScoreOut.setValue(0);
+    
+    OpenObjectIntHashMap<String> termIdMap = new OpenObjectIntHashMap<String>();
+    
+    // LinkedHashMap<IntArrayList, Float> patternSupportMap = new LinkedHashMap<IntArrayList,
+    // Float>();
+    LinkedHashMap<Set<String>, Float> itemsetsMap = new LinkedHashMap<Set<String>, Float>();
+    // List<String> idTermMap = Lists.newArrayList();
+    List<Term> stemmedList = Lists.newArrayList();
+    
+    OpenIntFloatHashMap[] aPDWTemp = new OpenIntFloatHashMap[numItemsetsToUse];
+    List<OpenIntFloatHashMap> bPWDTemp = Lists.newArrayList();
+    
+    int rank = -1;
+    int nextId = 0;
+    
+    IntArrayList keyList = new IntArrayList(fisRs.size());
+    fisRs.keysSortedByValue(keyList);
+    
+    for (int i = fisRs.size() - 1; i >= 0; --i) {
+      if (++rank >= numItemsetsToUse) {
+        break;
+      }
+      aPDWTemp[rank] = new OpenIntFloatHashMap();
+      
+      int hit = keyList.getQuick(i);
+      
+      Pair<Set<String>, Float> patternPair = getPattern(hit);
+      Set<String> termSet = patternPair.getFirst();
+      
+      if (termSet.size() < MIN_ITEMSET_SIZE || itemsetsMap.containsKey(termSet)) {
+        continue;
+      }
+      
+      itemsetsMap.put(termSet, patternPair.getSecond());
+      
+      // IntArrayList pattern = new IntArrayList(termSet.size());
+      
+      for (String term : termSet) {
+        int termId;
+        if (!termIdMap.containsKey(term)) {
+          termId = nextId++;
+          termIdMap.put(term, termId);
+          // idTermMap.add(term);
+          bPWDTemp.add(new OpenIntFloatHashMap());
+          stemmedList.add(new Term(TweetField.STEMMED_EN.name,
+              queryTermFreq(term, null, tweetAnalyzer, TweetField.STEMMED_EN.name).keys().get(0)));
+        }
+        termId = termIdMap.get(term);
+        
+        Term stemmed = stemmedList.get(termId);
+        
+        // /// HEY THESE ARE MY OWN APPROXIMATIONSS >>> HOPE FOR THE BESTT!!!!!
+        float docFreq = twtIxReader.docFreq(stemmed);
+        float pdw;
+        if (docFreq == 0) {
+          pdw = 0;
+        } else {
+          pdw = termSet.size() / (docFreq * BM25Collector.LAVG);
+        }
+        float pwd = 1.0f / termSet.size();
+        
+        aPDWTemp[rank].put(termId, pdw);
+        bPWDTemp.get(termId).put(rank, pwd);
+        
+        // pattern.add(termId);
+      }
+      
+      // patternSupportMap.put(pattern, patternPair.getSecond());
+    }
+    
+    // There's a transpose happening while copying
+    double[][] aPDW = new double[bPWDTemp.size()][numItemsetsToUse];
+    double[][] bPWD = new double[numItemsetsToUse][bPWDTemp.size()];
+    for (int d = 0; d < numItemsetsToUse; ++d) {
+      for (int w = 0; w < bPWDTemp.size(); ++w) {
+        aPDW[w][d] = aPDWTemp[d].get(w);
+        bPWD[d][w] = bPWDTemp.get(w).get(d);
+      }
+    }
+    
+    Matrix A = new Matrix(aPDW); // Probability of Document given word
+    Matrix B = new Matrix(bPWD); // Probability of Word given document
+    Matrix C = A.times(B);
+    
+    Matrix tQW = Matrix.identity(bPWDTemp.size(), bPWDTemp.size()); // numItemsetsToUse);
+    // FIXME: for(int k=0; k<numWalkSteps; ++k){
+    tQW = tQW.minus(C.times(alpha));
+    tQW = tQW.inverse();
+    
+    Matrix tDW = tQW.times(A);
+    
+    tDW = tDW.times(1.0 - alpha);
+    tQW = tQW.times(1.0 - alpha);
+    
+    OpenObjectFloatHashMap<String> result = new OpenObjectFloatHashMap<String>();
+    
+    // MutableLong qLen = new MutableLong();
+    OpenObjectFloatHashMap<String> queryFreq = queryTermFreq(query, null);
+    Set<String> querySet = Sets.newCopyOnWriteArraySet(queryFreq.keys());
+    
+    // probabibilty of query given document
+    float[] pqd = new float[numItemsetsToUse];
+    int d = 0;
+    for (Set<String> termSet : itemsetsMap.keySet()) {
+      pqd[d] = 1;
+      for (String qTerm : querySet) {
+        if (!termSet.contains(qTerm)) {
+          continue;
+        }
+        int qTermId = termIdMap.get(qTerm);
+        double qTermProb = 0;
+        for (String dTerm : termSet) {
+          int dTermId = termIdMap.get(dTerm);
+          qTermProb += tQW.get(dTermId, qTermId) * bPWD[d][dTermId];
+        }
+        if (qTermProb != 0) {
+          pqd[d] *= qTermProb;
+        } else {
+          LOG.trace("breakpoint");
+        }
+      }
+      if(pqd[d] == 1){
+        pqd[d] = 0;
+      }
+      ++d;
+    }
+    
+    d = 0;
+    for (Set<String> termSet : itemsetsMap.keySet()) {
+      for (String term : termSet) {
+        int termId = termIdMap.get(term);
+        
+        double docScore = pqd[d] * aPDW[termId][d];
+        result.put(term, result.get(term) + (float) docScore);
+      }
+      ++d;
+    }
+    
+    for (String term : result.keys()) {
+      int termId = termIdMap.get(term);
+      
+      float score = result.get(term);
+      
+      // TODO: Smoothing
+      score *= twtIxReader.docFreq(stemmedList.get(termId)) / TWITTER_CORPUS_LENGTH_IN_TERMS;
+      
+      result.put(term, score);
+      
+      if (minScoreOut != null && score < minScoreOut.floatValue()) {
+        minScoreOut.setValue(score);
+      }
+      
+      if (maxScoreOut != null && score > maxScoreOut.floatValue()) {
+        maxScoreOut.setValue(score);
+      }
+      
+      if (totalScoreOut != null) {
+        totalScoreOut.add(score);
+      }
+    }
+    
+    return result;
+  }
   
   private final String timeFormatted;
   

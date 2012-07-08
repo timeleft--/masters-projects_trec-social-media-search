@@ -132,38 +132,38 @@ public class ItemSetIndexBuilder {
     seqPath += File.separator + PFPGrowth.FREQUENT_PATTERNS; // "frequentpatterns";
     LOG.info("Indexing " + seqPath);
     
-    List<IndexReader> ixRds = Lists.newLinkedList();
-    File twtIncIxLoc = new File(
-        "/u2/yaboulnaga/datasets/twitter-trec2011/index-stemmed_8hr-incremental");
-    
-    long now = System.currentTimeMillis();
-    
-    long incrEndTime = openTweetIndexesBeforeQueryTime(twtIncIxLoc,
-        true,
-        false,
-        Long.MIN_VALUE,
-        ixRds, now);
-    File[] twtChunkIxLocs = new File(
-        "/u2/yaboulnaga/datasets/twitter-trec2011/index-stemmed_chunks").listFiles();
-    if (twtChunkIxLocs != null) {
-      int i = 0;
-      long prevChunkEndTime = incrEndTime;
-      while (i < twtChunkIxLocs.length - 1) {
-        prevChunkEndTime = openTweetIndexesBeforeQueryTime(twtChunkIxLocs[i++],
-            false,
-            false,
-            prevChunkEndTime,
-            ixRds, now);
-      }
-      openTweetIndexesBeforeQueryTime(twtChunkIxLocs[i], false, true, prevChunkEndTime, ixRds, now);
-    }
-    twtIxReader = new MultiReader(ixRds.toArray(new IndexReader[0]));
-    twtSearcher = new IndexSearcher(twtIxReader);
-    twtSimilarity = new TwitterSimilarity();
-    twtSearcher.setSimilarity(twtSimilarity);
-    
-    twtQparser = new QueryParser(Version.LUCENE_36, TweetField.TEXT.name, ANALYZER);
-    twtQparser.setDefaultOperator(Operator.AND);
+//    List<IndexReader> ixRds = Lists.newLinkedList();
+//    File twtIncIxLoc = new File(
+//        "/u2/yaboulnaga/datasets/twitter-trec2011/index-stemmed_8hr-incremental");
+//    
+//    long now = System.currentTimeMillis();
+//    
+//    long incrEndTime = openTweetIndexesBeforeQueryTime(twtIncIxLoc,
+//        true,
+//        false,
+//        Long.MIN_VALUE,
+//        ixRds, now);
+//    File[] twtChunkIxLocs = new File(
+//        "/u2/yaboulnaga/datasets/twitter-trec2011/index-stemmed_chunks").listFiles();
+//    if (twtChunkIxLocs != null) {
+//      int i = 0;
+//      long prevChunkEndTime = incrEndTime;
+//      while (i < twtChunkIxLocs.length - 1) {
+//        prevChunkEndTime = openTweetIndexesBeforeQueryTime(twtChunkIxLocs[i++],
+//            false,
+//            false,
+//            prevChunkEndTime,
+//            ixRds, now);
+//      }
+//      openTweetIndexesBeforeQueryTime(twtChunkIxLocs[i], false, true, prevChunkEndTime, ixRds, now);
+//    }
+//    twtIxReader = new MultiReader(ixRds.toArray(new IndexReader[0]));
+//    twtSearcher = new IndexSearcher(twtIxReader);
+//    twtSimilarity = new TwitterSimilarity();
+//    twtSearcher.setSimilarity(twtSimilarity);
+//    
+//    twtQparser = new QueryParser(Version.LUCENE_36, TweetField.TEXT.name, ANALYZER);
+//    twtQparser.setDefaultOperator(Operator.AND);
     
     buildIndex(new Path(seqPath), indexLocation, Long.MIN_VALUE, Long.MAX_VALUE, null);
   }
