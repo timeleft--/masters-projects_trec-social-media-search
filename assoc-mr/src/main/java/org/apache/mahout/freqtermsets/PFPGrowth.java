@@ -556,6 +556,7 @@ public final class PFPGrowth implements Callable<Void> {
   }
   
   public static int getGroupFromHash(int attrHash, int numGroups) {
+    //TODO save log(2) as a constant and devide by it.. this function is SLOW
     int maskLen = (int) MathUtils.log(2, numGroups - 1) + 1;
     int mask = (int) Math.pow(2, maskLen) - 1;
     int result = 0;

@@ -2,6 +2,7 @@ package ca.uwaterloo.twitter.queryexpand;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.TreeMap;
 
@@ -20,7 +21,9 @@ import org.apache.mahout.math.set.OpenIntHashSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import ca.uwaterloo.twitter.ItemSetIndexBuilder.AssocField;
 import ca.uwaterloo.twitter.TwitterIndexBuilder.TweetField;
+import ca.uwaterloo.twitter.queryexpand.FISQueryExpander.FISCollector.ScoreThenSuppRankComparator;
 
 public abstract class BM25Collector<K extends Comparable<K>, V> extends Collector {
   private static final Logger LOG = LoggerFactory.getLogger(BM25Collector.class);
@@ -28,13 +31,13 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
   // Defaults
   // For StemmedIDF = false: binaryTFD = false with b = 0 & k = 1.2 achieves P@30 = 0.3965
   // For StemmedIDF = true: binaryTFD = true with b in [0.2:0.8] & k=0 achieves p@30 = 0.4370
-  public static final float K1 = 0.0f; //textbook default 1.2 
+  public static final float K1 = 0.0f; // textbook default 1.2
   public static final float B = 0.2f; // textbook default 0.75
   public static final float LAVG = 9.63676320707029f; // really!
   
-  public final boolean clarityIDF = true;
-  public final boolean clarityScore = false;
-  public final boolean binaryFtd = true;
+  public boolean clarityIDF = true;
+  public boolean clarityScore = false;
+  public boolean binaryFtd = true;
   
   private static TwitterEnglishAnalyzer stemmingAnalyzer = new TwitterEnglishAnalyzer();
   public final boolean stemmedIDF;
@@ -77,16 +80,19 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
       Class<? extends Comparator<ScoreIxObj<K>>> comparatorClazz, boolean pStemmedIDF)
       throws IOException, IllegalArgumentException, SecurityException, InstantiationException,
       IllegalAccessException, InvocationTargetException {
-    docTextField = pDocTextField;
+    
     target = pTarget;
     queryStr = pQueryStr;
+    docTextField = pDocTextField;
     stemmedIDF = pStemmedIDF;
+    if (pDocTextField.startsWith("stemmed") && !stemmedIDF) {
+      throw new IllegalArgumentException("It will be stemmed.. can't avoid it!");
+    }
     if (stemmedIDF) {
       MutableLong qLenOut = new MutableLong();
       queryTerms = target.queryTermFreq(queryStr,
           qLenOut,
-          stemmingAnalyzer,
-          TweetField.STEMMED_EN.name);
+          stemmingAnalyzer, docTextField);
       queryLen = qLenOut.floatValue();
     } else {
       queryTerms = (OpenObjectFloatHashMap<String>) pQueryTerms.clone();
@@ -106,28 +112,19 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
     maxResults = pMaxResults;
   }
   
-  public BM25Collector(FISQueryExpander pTarget, String pDocTextField,
-      String pQueryStr, OpenObjectFloatHashMap<String> pQueryTerms, float pQueryLen,
-      int addNEnglishStopWordsToQueryTerms, int pMaxResults) throws IllegalArgumentException,
-      SecurityException, IOException, InstantiationException, IllegalAccessException,
-      InvocationTargetException {
-    this(pTarget, pDocTextField, pQueryStr, pQueryTerms, pQueryLen,
-        addNEnglishStopWordsToQueryTerms, pMaxResults,
-        (Class<? extends Comparator<ScoreIxObj<K>>>) ScoreThenObjDescComparator.class, false);
-  }
-  
   @Override
   public void setScorer(Scorer scorer) throws IOException {
     this.scorer = scorer;
   }
   
   protected final OpenIntHashSet encounteredDocs = new OpenIntHashSet();
+  
   @Override
   public void collect(int docId) throws IOException {
     // float score = scorer.score();
     
-    if(encounteredDocs.contains(docId)){
-      LOG.warn("Duplicate document {} for query {}", docId, queryStr);
+    if (encounteredDocs.contains(docId)) {
+      LOG.trace("Duplicate document {} for query {}", docId, queryStr);
       return;
     } else {
       encounteredDocs.add(docId);
@@ -136,16 +133,20 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
     Document doc = reader.document(docId);
     
     float ld = 0;
-    if (stemmedIDF) {
-      // TODO if this works store the stemmed vector instead of reparseing the whole index
-      String tweet = doc.get(docTextField);
-      MutableLong docLen = new MutableLong();
-      docTerms = target.queryTermFreq(tweet, docLen, stemmingAnalyzer, TweetField.STEMMED_EN.name);
-      ld = docLen.floatValue();
-    } else {
+    
+//    if (stemmedIDF) {
+//      // TODONOT if this works store the stemmed vector instead of reparseing the whole index
+//      // I wish but there wasn't enough disk space :(
+//      String tweet = doc.get(docTextField);
+//      MutableLong docLen = new MutableLong();
+//      docTerms = target.queryTermFreq(tweet, docLen, stemmingAnalyzer, docTextField);
+//      ld = docLen.floatValue();
+//    } else {
       TermFreqVector docTermsVector = reader.getTermFreqVector(docId,
           docTextField);
-      if (docTermsVector != null) {
+      
+      if (!stemmedIDF //FIXME: This is only because the indexes currently don't store the stemmed  
+          && docTermsVector != null) {
         docTerms = new OpenObjectFloatHashMap<String>();
         for (int i = 0; i < docTermsVector.size(); ++i) {
           int f = docTermsVector.getTermFrequencies()[i];
@@ -153,12 +154,18 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
           ld += f;
         }
       } else {
-        String tweet = doc.get(docTextField);
         MutableLong docLen = new MutableLong();
-        docTerms = target.queryTermFreq(tweet, docLen);
+        if (stemmedIDF) {
+          docTerms = target.queryTermFreq(Arrays.toString(docTermsVector.getTerms()),
+              docLen, stemmingAnalyzer, docTextField);
+        } else {
+          String tweet = doc.get(docTextField);
+          docTerms = target.queryTermFreq(tweet, docLen);
+        }
         ld = docLen.floatValue();
       }
-    }
+//    }
+    
     // BM25
     float score = 0;
     for (String tStr : queryTerms.keys()) {
@@ -186,23 +193,23 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
         // // The IDF formula in http://nlp.uned.es/~jperezi/Lucene-BM25/ (used in Clarity)
         idf = target.twtIxReader.docFreq(t);
         idf = (target.twtIxReader.numDocs() - idf + 0.5f) / (idf + 0.5f);
-        idf = (float) MathUtils.log(2, idf);
+        idf = (float) Math.log(idf); //Slow: MathUtils.log(2, idf);
         
       } else {
         idf = target.twtIxReader.docFreq(t);
         idf = target.twtIxReader.numDocs() / idf;
-        idf = (float) MathUtils.log(2, idf);
+        idf = (float) Math.log(idf); //slow: MathUtils.log(2, idf);
       }
       
       if (clarityScore) {
         score += idf;
       } else {
-//        score += (queryTerms.get(tStr) * ftd * (getK1() + 1) * idf)
-//            / ((getK1() * ((1 - getB()) + (getB() * ld / getLAVG()))) + ftd);
+        // score += (queryTerms.get(tStr) * ftd * (getK1() + 1) * idf)
+        // / ((getK1() * ((1 - getB()) + (getB() * ld / getLAVG()))) + ftd);
         
-         // The BM25F formula as per http://nlp.uned.es/~jperezi/Lucene-BM25/
-         float wt = ftd / ((1-getB()) + (getB() * ld / getLAVG()));
-         score += (queryTerms.get(tStr) * wt * idf) / (getK1() + wt);
+        // The BM25F formula as per http://nlp.uned.es/~jperezi/Lucene-BM25/
+        float wt = ftd / ((1 - getB()) + (getB() * ld / getLAVG()));
+        score += (queryTerms.get(tStr) * wt * idf) / (getK1() + wt);
       }
     }
     

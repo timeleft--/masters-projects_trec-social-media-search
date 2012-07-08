@@ -60,14 +60,14 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   
   public static final int MAX_RESULTS = 10000;
   private File fisIncIxLocation = new File(
-      "/u2/yaboulnaga/datasets/twitter-trec2011/assoc-mr_0608-0530/index");
+      "/u2/yaboulnaga/datasets/twitter-trec2011/assoc-mr_0608-0530/index-closed");
   private File twtIncIxLoc = new File(
       "/u2/yaboulnaga/datasets/twitter-trec2011/index-stemmed_8hr-incremental");
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-tweets_8hr-increments");
   
   private static final String TWT_CHUNKS_ROOT = "/u2/yaboulnaga/datasets/twitter-trec2011/index-stemmed_chunks";
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-tweets_chunks";
-  private static final String RESULT_PATH = "/u2/yaboulnaga/datasets/twitter-trec2011/runs/"; // bm25-param-tune-fbin";
+  private static final String RESULT_PATH = "/u2/yaboulnaga/datasets/twitter-trec2011/runs/";
   private static final String TOPICS_XML_PATH =
       "/u2/yaboulnaga/datasets/twitter-trec2011/2011.topics.MB1-50.xml";
   private static final String QREL_PATH = "/u2/yaboulnaga/datasets/twitter-trec2011/microblog11-qrels.txt";
@@ -77,7 +77,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   private final boolean trecEvalFormat = true;
   private boolean paramNormalize = true;
   private boolean paramClosedOnly = true;
-  private boolean paramPropagateItemSetScores = false;
+  private boolean paramPropagateItemSetScores = true;
   private boolean paramsBoostSubsets = false;
   private boolean paramSubsetBoostIDF = true;
   private QueryParseMode paramQueryParseMode = QueryParseMode.DISJUNCTIVE;
@@ -90,6 +90,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   
   private static final String TAG_BASELINE = "baseline";
   private static final String TAG_FREQ = "freq";
+  private static final String TAG_TOPN = "nFromTopPatterns";
   private static final String TAG_QUERY_CONDPROB = "qCondProb";
   private static final String TAG_KL_DIVER = "klDiver";
   private static final String TAG_CLUSTER_PATTERNS = "clusPatt";
@@ -125,6 +126,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
         String pQueryStr, OpenObjectFloatHashMap<String> pQueryTerms, int pQueryLen)
         throws IOException, IllegalArgumentException, SecurityException, InstantiationException,
         IllegalAccessException, InvocationTargetException {
+      // (paramBM25StemmedIDF?TweetField.STEMMED_EN.name: TweetField.TEXT.name)
       super(pTarget, TweetField.TEXT.name, pQueryStr, pQueryTerms, pQueryLen,
           paramNumEnglishStopWords, MAX_RESULTS,
           (Class<? extends Comparator<ScoreIxObj<String>>>) ScoreThenObjDescComparator.class,
@@ -238,13 +240,14 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     resultWriters = Maps.newHashMap();
     resultFiles = Maps.newHashMap();
     
-     openWriterForTag(TAG_BASELINE);
+    openWriterForTag(TAG_BASELINE);
     openWriterForTag(TAG_FREQ);
-    openWriterForTag(TAG_QUERY_CONDPROB);
-    openWriterForTag(TAG_KL_DIVER);
-    openWriterForTag(TAG_CLUSTER_PATTERNS);
-    openWriterForTag(TAG_CLUSTER_TERMS);
-
+    openWriterForTag(TAG_TOPN);
+    // openWriterForTag(TAG_QUERY_CONDPROB);
+    // openWriterForTag(TAG_KL_DIVER);
+    // openWriterForTag(TAG_CLUSTER_PATTERNS);
+    // openWriterForTag(TAG_CLUSTER_TERMS);
+    
   }
   
   private void openWriterForTag(String runTag) throws IOException {
@@ -357,6 +360,67 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
       }
       // ////////////////////////////////////////
       
+      // /////////////////////////////////////////////////////////////
+      
+      if (resultWriters.containsKey(TAG_FREQ)) {
+        
+        MutableFloat minXTermScore = new MutableFloat();
+        MutableFloat maxXTermScore = new MutableFloat();
+        
+        OpenObjectFloatHashMap<String> extraTerms = target.weightedTermsByFreq(fis,
+            queryStr,
+            numItemsetsToConsider,
+            minXTermScore,
+            maxXTermScore,
+            null,
+            paramPropagateItemSetScores);
+        
+        OpenObjectFloatHashMap<String> xQueryTerms = new OpenObjectFloatHashMap<String>();
+        MutableLong xQueryLen = new MutableLong(0);
+        timedQuery = target.expandAndFilterQuery(queryTerms,
+            queryLen.intValue(),
+            new OpenObjectFloatHashMap[] { extraTerms },
+            new float[] { minXTermScore.intValue() },
+            new float[] { maxXTermScore.intValue() },
+            numTermsToAppend,
+            xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
+        
+        collector = new TrecResultFileCollector(target, topicIds.get(i),
+            TAG_FREQ, queryStr, xQueryTerms, xQueryLen.intValue());
+        target.twtSearcher.search(timedQuery, collector);
+        collector.writeResults();
+      }
+      // /////////////////////////////////////////////////////////////
+      
+      if (resultWriters.containsKey(TAG_TOPN)) {
+        
+        MutableFloat minXTermScore = new MutableFloat();
+        MutableFloat maxXTermScore = new MutableFloat();
+        
+        OpenObjectFloatHashMap<String> extraTerms = target.weightedTermsByPatternRank(fis,
+            queryStr,
+            numTermsToAppend,
+            minXTermScore,
+            maxXTermScore,
+            null);
+        
+        OpenObjectFloatHashMap<String> xQueryTerms = new OpenObjectFloatHashMap<String>();
+        MutableLong xQueryLen = new MutableLong(0);
+        timedQuery = target.expandAndFilterQuery(queryTerms,
+            queryLen.intValue(),
+            new OpenObjectFloatHashMap[] { extraTerms },
+            new float[] { minXTermScore.intValue() },
+            new float[] { maxXTermScore.intValue() },
+            numTermsToAppend,
+            xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
+        
+        collector = new TrecResultFileCollector(target, topicIds.get(i),
+            TAG_TOPN, queryStr, xQueryTerms, xQueryLen.intValue());
+        target.twtSearcher.search(timedQuery, collector);
+        collector.writeResults();
+      }
+      
+      // ////////////////////////////
       OpenObjectFloatHashMap<String> xQueryTerms;
       MutableLong xQueryLen;
       
@@ -412,31 +476,6 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
         
         collector = new TrecResultFileCollector(target, topicIds.get(i),
             TAG_KL_DIVER, queryStr, xQueryTerms, xQueryLen.intValue());
-        target.twtSearcher.search(timedQuery, collector);
-        collector.writeResults();
-      }
-      
-      // /////////////////////////////////////////////////////////////
-      
-      if (resultWriters.containsKey(TAG_FREQ)) {
-        PriorityQueue<ScoreIxObj<String>> extraTerms;
-        MutableFloat minXTermScore = new MutableFloat();
-        MutableFloat maxXTermScore = new MutableFloat();
-        
-        extraTerms = target.convertResultToWeightedTermsByFrequency(fis,
-            queryStr, numItemsetsToConsider, paramClosedOnly, minXTermScore, maxXTermScore, null);
-        xQueryTerms = new OpenObjectFloatHashMap<String>();
-        xQueryLen = new MutableLong(0);
-        timedQuery = target.expandAndFilterQuery(queryTerms,
-            queryLen.intValue(),
-            new PriorityQueue[] { extraTerms },
-            new float[] { minXTermScore.intValue() },
-            new float[] { maxXTermScore.intValue() },
-            numTermsToAppend,
-            xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
-        
-        collector = new TrecResultFileCollector(target, topicIds.get(i),
-            TAG_FREQ, queryStr, xQueryTerms, xQueryLen.intValue());
         target.twtSearcher.search(timedQuery, collector);
         collector.writeResults();
       }
@@ -653,7 +692,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
           1.5f,
           1000f,
           0.25f,
-          0.75f,
+          0.05f,
           1.20f,
           2.0f,
           7f,
@@ -678,9 +717,9 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     
     setUpBeforeClass();
     
-    ExecutorService exec = Executors.newFixedThreadPool(9);
+    ExecutorService exec = Executors.newFixedThreadPool(10);
     Future<Void> lastFuture = null;
-    for (int i : Arrays.asList(5, 9, 10, 15, 20, 25, 30, 35, 40, 45)) {
+    for (int i : Arrays.asList(5, 9, 10, 15, 20, 25, /* 30, */35, 40, 45)) {
       FISQueryExpanderEvaluation app = new FISQueryExpanderEvaluation(i);
       lastFuture = exec.submit(app);
     }

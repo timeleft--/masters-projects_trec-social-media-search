@@ -313,7 +313,7 @@ public class TwitterIndexBuilder implements Callable<Void> {
         doc.add(new Field(TweetField.TEXT.name, tweet, Store.YES,
             Index.ANALYZED, TermVector.WITH_POSITIONS_OFFSETS));
         doc.add(new Field(TweetField.STEMMED_EN.name, tweet, Store.NO,
-            Index.ANALYZED, TermVector.YES));
+            Index.ANALYZED, TermVector.NO));// not enough disk space :( YES));
         
         writer.addDocument(doc);
         if (++cnt % 10000 == 0) {
