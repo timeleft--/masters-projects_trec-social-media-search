@@ -445,7 +445,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
               xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
           
           collector = new TrecResultFileCollector(target, topicIds.get(i),
-              TAG_CLUSTER_PATTERNS, queryStr, xQueryTerms, xQueryLen.intValue());
+              TAG_CLUSTER_TWEETS, queryStr, xQueryTerms, xQueryLen.intValue());
           target.twtSearcher.search(timedQuery, collector);
           collector.writeResults();
         }
