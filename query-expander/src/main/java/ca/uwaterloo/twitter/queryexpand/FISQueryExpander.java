@@ -265,7 +265,7 @@ public class FISQueryExpander {
   public static enum TermWeigting {
     PROB_QUERY("pq"),
     KL_DIVERG("kl"),
-    CLUSTERING("clustering"),
+    CLUSTERING_TERMS("clustering_term-coccurr"),
     SVD("svd"), FREQ("frequency"),
     TOPN("topn_pattern-rank"),
     MARKOV("lafferty-zhai-2001");
@@ -496,19 +496,17 @@ public class FISQueryExpander {
           mode = 3; // terms with query divergence
           termWeighting = TermWeigting.FREQ;
         } else if (cmd.equals("s:")) {
-          mode = 4; // terms with query divergence
+          mode = 4; // 
           termWeighting = TermWeigting.SVD;
-        } else if (cmd.equals("c:")) {
-          mode = 5; // terms with query divergence
-          termWeighting = TermWeigting.CLUSTERING;
+       
         } else if (cmd.equals("q:")) {
-          mode = 6; // terms with query probability
+          mode = 6; // 
           termWeighting = TermWeigting.PROB_QUERY;
         } else if (cmd.equals("d:")) {
-          mode = 7; // terms with query divergence
+          mode = 7; // 
           termWeighting = TermWeigting.KL_DIVERG;
         } else if (cmd.equals("m:")) {
-          mode = 8; // terms with query divergence
+          mode = 8; // 
           termWeighting = TermWeigting.MARKOV;
           
         } else if (cmd.equals("r:")) {
@@ -517,6 +515,9 @@ public class FISQueryExpander {
           mode = 20; // expanded
         } else if (cmd.equals("t:")) {
           mode = 30; // set the time
+        } else if (cmd.equals("c:")) {
+          mode = 50; // 
+          termWeighting = TermWeigting.CLUSTERING_TERMS;
         } else {
           out.println("Must prefix either\n i: for itemsets \n r: for results \n e: for expanded results \n t|d|q: for terms");
           continue;
@@ -568,15 +569,16 @@ public class FISQueryExpander {
             ScoreIxObj<List<String>> is = itemsets.poll();
             out.println(++i + " (" + is.score + "): " + is.obj.toString());
           }
-        } else if (mode == 5) {
-          PriorityQueue<ScoreIxObj<String>>[] clusterTerms = qEx
-              .convertResultToWeightedTermsByClusteringPatterns(fisRs,
-                  query.toString(),
-                  clusterClosedOnly,
-                  null,
-                  null,
-                  null,
-                  paramClusteringWeightInsts);
+        } else if (mode == 50) {
+//          PriorityQueue<ScoreIxObj<String>>[] clusterTerms = qEx
+//              .convertResultToWeightedTermsByClusteringPatterns(fisRs,
+//                  query.toString(),
+//                  clusterClosedOnly,
+//                  null,
+//                  null,
+//                  null,
+//                  paramClusteringWeightInsts);
+          PriorityQueue<ScoreIxObj<String>>[] clusterTerms = qEx.weightedTermsByClusteringTerms(fisRs, query.toString(), null, null, null);
           
           int i = 0;
           OpenIntHashSet empty = new OpenIntHashSet();
@@ -1452,6 +1454,215 @@ public class FISQueryExpander {
     
     return result;
   }
+  
+  
+//////////////////////// TERM-TO-TERM ALL TERMS FEATURES //////////////////////////////
+  
+ protected Instances termCooccurrenceInstances(AbstractIntFloatMap rs, 
+     OpenObjectIntHashMap<String> termIdMapOut,
+     LinkedHashMap<Set<String>, Float> itemsetsOut,
+     FastVector attrsOut) throws IOException, org.apache.lucene.queryParser.ParseException {
+   int nextId = 0;
+   
+   IntArrayList keyList = new IntArrayList(rs.size());
+   rs.keysSortedByValue(keyList);
+   for (int i = rs.size() - 1; i >= 0; --i) {
+     int hit = keyList.getQuick(i);
+     Pair<Set<String>, Float> patternPair = getPattern(hit);
+     Set<String> termSet = patternPair.getFirst();
+     if (termSet.size() < MIN_ITEMSET_SIZE || itemsetsOut.containsKey(termSet)) {
+       continue;
+     }
+     
+     itemsetsOut.put(termSet, patternPair.getSecond());
+     
+//     IntArrayList pattern = new IntArrayList(termSet.size());
+     
+     for (String term : termSet) {
+       if (!termIdMapOut.containsKey(term)) {
+         termIdMapOut.put(term, nextId++);
+         attrsOut.addElement(new Attribute(term));
+       }
+//       pattern.add(termIdMapOut.get(term));
+     }
+     
+//     patternTreeOut.addPattern(pattern, 1);
+   }
+   if (itemsetsOut.isEmpty()) {
+     return null;
+   }
+   
+   Instances insts = new Instances("term-term", attrsOut, attrsOut.size());
+   
+   Enumeration attrsEnum = attrsOut.elements();
+   while (attrsEnum.hasMoreElements()) {
+     Attribute termAttr = (Attribute) attrsEnum.nextElement();
+     Term termT = new Term(TweetField.TEXT.name, termAttr.name());
+     
+     double weight = 1;
+//     if (weightInstances) {
+//       twtSimilarity.idf(twtIxReader.docFreq(termT),
+//           twtIxReader.numDocs());
+//     }
+     Instance termInst = new Instance(weight, new double[attrsOut.size()]);
+     
+     termInst.setDataset(insts);
+     insts.add(termInst);
+   }
+   
+   for(Set<String> termSet: itemsetsOut.keySet()){
+     for(String termi: termSet){
+       int i = termIdMapOut.get(termi);
+       Instance inst = insts.instance(i);
+       for(String termj: termSet){
+         int j = termIdMapOut.get(termj);
+         if (i == j) {
+           inst.setMissing(j);
+         } else {
+           double cooccur;
+           if(inst.isMissing(j)){
+             cooccur = 0;
+           } else {
+             cooccur = inst.value(j);
+           }
+           cooccur += itemsetsOut.get(termSet);
+           inst.setValue(j, cooccur);
+         }
+       }
+     }
+   }
+   
+   return insts;
+ }
+ 
+ @SuppressWarnings("unchecked")
+ public PriorityQueue<ScoreIxObj<String>>[] weightedTermsByClusteringTerms(
+     OpenIntFloatHashMap rs, String query, 
+     List<MutableFloat> minXTermScoresOut, List<MutableFloat> maxXTermScoresOut,
+     List<MutableFloat> totalXTermScoresOut) throws Exception {
+   
+   PriorityQueue<ScoreIxObj<String>>[] result = null;
+   
+   OpenObjectIntHashMap<String> termIdMap = new OpenObjectIntHashMap<String>();
+   LinkedHashMap<Set<String>, Float> itemsets = Maps.newLinkedHashMap();
+   FastVector attrs = new FastVector();
+   
+   Instances insts = termCooccurrenceInstances(rs,
+       termIdMap,
+       itemsets,
+       attrs);
+   
+   if (itemsets.isEmpty()) {
+     return result;
+   }
+   
+   XMeans clusterer = new XMeans();
+   ((XMeans) clusterer).setDistanceF(new CosineDistance());
+   clusterer.buildClusterer(insts);
+   
+   LOG.info("Number of clusters: {}", clusterer.numberOfClusters());
+   
+   result = new PriorityQueue[clusterer.numberOfClusters()];
+   if (TERM_SCORE_PERCLUSTER) {
+     for (int c = 0; c < clusterer.numberOfClusters(); ++c) {
+       result[c] = new PriorityQueue<ScoreIxObj<String>>();
+       if (minXTermScoresOut != null) {
+         minXTermScoresOut.add(new MutableFloat(Float.MAX_VALUE));
+       }
+       if (maxXTermScoresOut != null) {
+         maxXTermScoresOut.add(new MutableFloat(Float.MIN_VALUE));
+       }
+       if (totalXTermScoresOut != null) {
+         totalXTermScoresOut.add(new MutableFloat(0));
+       }
+     }
+     
+     for (String term : termIdMap.keys()) {
+       int termId = termIdMap.get(term);
+       Instance inst = insts.instance(termId);
+       double[] distrib = clusterer.distributionForInstance(inst);
+       for (int c = 0; c < distrib.length; ++c) {
+         if (distrib[c] <= CLUSTER_MEMBERSHIP_THRESHOLD) {
+           continue;
+         }
+         
+         // Probability is meaningless as score because it comes as either 0 or 1
+         // float score = termDistrib[c];
+         
+         // Closeness to centroid
+         Instance centroid = clusterer.getClusterCenters().instance(c);
+         float score = 1 - (float) clusterer.getDistanceF().distance(centroid, inst);
+         
+         result[c].add(new ScoreIxObj<String>(term, score));
+         
+         if (minXTermScoresOut != null) {
+           if (score < minXTermScoresOut.get(c).floatValue()) {
+             minXTermScoresOut.get(c).setValue(score);
+           }
+         }
+         
+         if (maxXTermScoresOut != null) {
+           if (score > maxXTermScoresOut.get(c).floatValue()) {
+             maxXTermScoresOut.get(c).setValue(score);
+           }
+         }
+         
+         if (totalXTermScoresOut != null) {
+           totalXTermScoresOut.get(c).add(score);
+         }
+       }
+     }
+     
+   } else {
+     MutableFloat minScore = new MutableFloat(Float.MAX_VALUE);
+     MutableFloat maxScore = new MutableFloat(Float.MIN_VALUE);
+     MutableFloat totalScore = new MutableFloat(0);
+     PriorityQueue<ScoreIxObj<String>> termScores = convertResultToWeightedTermsKLDivergence(rs,
+         query,
+         -1,
+         false,
+         minScore,
+         maxScore,
+         totalScore);
+     // convertResultToWeightedTermsConditionalProb(rs,
+     // query,
+     // -1,
+     // false,
+     // minScore,
+     // maxScore,
+     // totalScore);
+     
+     for (int c = 0; c < result.length; ++c) {
+       result[c] = new PriorityQueue<ScoreIxObj<String>>();
+       if (minXTermScoresOut != null) {
+         minXTermScoresOut.add(minScore);
+       }
+       
+       if (maxXTermScoresOut != null) {
+         maxXTermScoresOut.add(maxScore);
+       }
+       
+       if (totalXTermScoresOut != null) {
+         totalXTermScoresOut.add(totalScore);
+       }
+       
+       PriorityQueue<ScoreIxObj<String>> termScoresClone = new PriorityQueue<ScoreIxObj<String>>();
+       while (!termScores.isEmpty()) {
+         ScoreIxObj<String> scoredTerm = termScores.poll();
+         termScoresClone.add(scoredTerm);
+         int termId = termIdMap.get(scoredTerm.obj);
+         Instance inst = insts.instance(termId);
+         double[] distrib = clusterer.distributionForInstance(inst);
+         if (distrib[c] > CLUSTER_MEMBERSHIP_THRESHOLD) {
+           result[c].add(scoredTerm);
+         }
+       }
+       termScores = termScoresClone;
+       
+     }
+   }
+   return result;
+ }
   
   private final String timeFormatted;
   

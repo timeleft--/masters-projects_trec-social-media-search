@@ -81,6 +81,8 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
   protected final String docTextField;
   protected OpenObjectFloatHashMap<String> docTerms;
   
+  private boolean stemmedField;
+  
   public BM25Collector(FISQueryExpander pTarget, String pDocTextField,
       String pQueryStr, OpenObjectFloatHashMap<String> pQueryTerms, float pQueryLen,
       int addNEnglishStopWordsToQueryTerms, int pMaxResults,
@@ -92,7 +94,8 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
     queryStr = pQueryStr;
     docTextField = pDocTextField;
     stemmedIDF = pStemmedIDF;
-    if (pDocTextField.startsWith("stemmed") && !stemmedIDF) {
+    stemmedField = pDocTextField.startsWith("stemmed");
+    if (stemmedField && !stemmedIDF) {
       throw new IllegalArgumentException("It will be stemmed.. can't avoid it!");
     }
     if (stemmedIDF) {
@@ -153,19 +156,24 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
     
     float ld = 0;
     
-//    if (stemmedIDF) {
-//      // TODONOT if this works store the stemmed vector instead of reparseing the whole index
-//      // I wish but there wasn't enough disk space :(
-//      String tweet = doc.get(docTextField);
-//      MutableLong docLen = new MutableLong();
-//      docTerms = target.queryTermFreq(tweet, docLen, stemmingAnalyzer, docTextField);
-//      ld = docLen.floatValue();
-//    } else {
+    if (stemmedIDF && !stemmedField) {
+      // TODONOT if this works store the stemmed vector instead of reparseing the whole index
+      // I wish but there wasn't enough disk space :(
+      String tweet = doc.get(docTextField);
+      if (tweet == null || tweet.isEmpty()) {
+        LOG.error("Couldn't retrieve neither vector nor text for field {} in document {}",
+            docTextField,
+            docId + docBase);
+        return;
+      }
+      MutableLong docLen = new MutableLong();
+      docTerms = target.queryTermFreq(tweet, docLen, stemmingAnalyzer, docTextField);
+      ld = docLen.floatValue();
+    } else {
       TermFreqVector docTermsVector = reader.getTermFreqVector(docId,
           docTextField);
       
-      if (//!stemmedIDF && // This was only because the indexes currently don't store the stemmed  
-           docTermsVector != null) {
+      if (docTermsVector != null) {
         docTerms = new OpenObjectFloatHashMap<String>();
         for (int i = 0; i < docTermsVector.size(); ++i) {
           int f = docTermsVector.getTermFrequencies()[i];
@@ -174,20 +182,18 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
         }
       } else {
         MutableLong docLen = new MutableLong();
-//        if (stemmedIDF) {
-//          docTerms = target.queryTermFreq(Arrays.toString(docTermsVector.getTerms()),
-//              docLen, stemmingAnalyzer, docTextField);
-//        } else {
-          String tweet = doc.get(docTextField);
-          if(tweet == null || tweet.isEmpty()){
-            LOG.error("Couldn't retrieve neither vector nor text for field {} in document {}", docTextField, docId + docBase);
-            return;
-          }
-          docTerms = target.queryTermFreq(tweet, docLen);
-//        }
+        String tweet = doc.get(docTextField);
+        if (tweet == null || tweet.isEmpty()) {
+          LOG.error("Couldn't retrieve neither vector nor text for field {} in document {}",
+              docTextField,
+              docId + docBase);
+          return;
+        }
+        docTerms = target.queryTermFreq(tweet, docLen);
+        
         ld = docLen.floatValue();
       }
-//    }
+    }
     
     // BM25
     float score = 0;
@@ -216,12 +222,12 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
         // // The IDF formula in http://nlp.uned.es/~jperezi/Lucene-BM25/ (used in Clarity)
         idf = target.twtIxReader.docFreq(t);
         idf = (target.twtIxReader.numDocs() - idf + 0.5f) / (idf + 0.5f);
-        idf = (float) Math.log(idf); //Slow: MathUtils.log(2, idf);
+        idf = (float) Math.log(idf); // Slow: MathUtils.log(2, idf);
         
       } else {
         idf = target.twtIxReader.docFreq(t);
         idf = target.twtIxReader.numDocs() / idf;
-        idf = (float) Math.log(idf); //slow: MathUtils.log(2, idf);
+        idf = (float) Math.log(idf); // slow: MathUtils.log(2, idf);
       }
       
       if (clarityScore) {
@@ -266,7 +272,6 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
   protected float getK1() {
     return K1;
   }
-  
   
   public TreeMap<ScoreIxObj<K>, V> getResultSet() {
     return resultSet;

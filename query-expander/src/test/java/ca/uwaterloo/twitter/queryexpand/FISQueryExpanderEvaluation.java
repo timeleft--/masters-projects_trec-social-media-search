@@ -64,11 +64,13 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
       "/u2/yaboulnaga/datasets/twitter-trec2011/assoc-mr_0608-0530/index-closed_stemmed-stored");
   
   private File twtIncIxLoc = new File(
-      "/u2/yaboulnaga/datasets/twitter-trec2011/stemmed-stored_8hr-increments");
+      "/u2/yaboulnaga/datasets/twitter-trec2011/" + "trash/index-stemmed_8hr-incremental");
+      //"stemmed-stored_8hr-increments");
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-stemmed_8hr-incremental");
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-tweets_8hr-increments");
   
-  private static final String TWT_CHUNKS_ROOT = "/u2/yaboulnaga/datasets/twitter-trec2011/stemmed-stored_chunks";
+  private static final String TWT_CHUNKS_ROOT = "/u2/yaboulnaga/datasets/twitter-trec2011/" + "trash/index-stemmed_chunks";
+//  		"stemmed-stored_chunks";
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-stemmed_chunks";
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-tweets_chunks";
   private static final String RESULT_PATH = "/u2/yaboulnaga/datasets/twitter-trec2011/runs/";
@@ -139,7 +141,8 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
         String pQueryStr, OpenObjectFloatHashMap<String> pQueryTerms, int pQueryLen)
         throws IOException, IllegalArgumentException, SecurityException, InstantiationException,
         IllegalAccessException, InvocationTargetException {
-      super(pTarget, (paramBM25StemmedIDF ? TweetField.STEMMED_EN.name : TweetField.TEXT.name),
+//      (paramBM25StemmedIDF ? TweetField.STEMMED_EN.name : TweetField.TEXT.name),
+      super(pTarget, TweetField.TEXT.name,
           pQueryStr, pQueryTerms, pQueryLen,
           paramNumEnglishStopWords, MAX_RESULTS,
           (Class<? extends Comparator<ScoreIxObj<String>>>) ScoreThenObjDescComparator.class,
@@ -249,8 +252,8 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     // openWriterForTag(TAG_KL_DIVER);
     // openWriterForTag(TAG_CLUSTER_PATTERNS);
     // openWriterForTag(TAG_CLUSTER_TERMS);
-//    openWriterForTag(TAG_MARKOV);
-    openWriterForTag(TAG_SVD);
+    openWriterForTag(TAG_MARKOV);
+//    openWriterForTag(TAG_SVD);
     
   }
   
