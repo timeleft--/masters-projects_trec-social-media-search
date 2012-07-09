@@ -80,8 +80,6 @@ import weka.core.matrix.Matrix;
 import weka.core.matrix.SingularValueDecomposition;
 import weka.filters.Filter;
 import weka.filters.unsupervised.attribute.ReplaceMissingValues;
-import weka.filters.unsupervised.attribute.Standardize;
-import weka.filters.unsupervised.instance.Normalize;
 import ca.uwaterloo.twitter.ItemSetIndexBuilder;
 import ca.uwaterloo.twitter.ItemSetIndexBuilder.AssocField;
 import ca.uwaterloo.twitter.ItemSetSimilarity;
@@ -276,7 +274,7 @@ public class FISQueryExpander {
     FREQ("frequency"),
     TOPN("topn_pattern-rank"),
     MARKOV("lafferty-zhai-2001"),
-    MUTUAL_ENTROPY("ibm-china");
+    MUTUAL_ENTROPY("ibm-china"), CLUSTERING_PATTERNS("duh");
     
     public final String name;
     
@@ -371,7 +369,7 @@ public class FISQueryExpander {
   private static final int ENGLISH_STOPWORDS_COUNT = 5;
   private static final boolean DEAFULT_MAGIC_ALLOWED = false;
   private static final boolean EXPAND_TERM_COUNT_EVENLY_OVER_CLUSTERS = false;
-  private static final boolean REAL_TIME_PATTERN_FREQ = false;
+  private static final boolean REAL_TIME_PATTERN_FREQ = true;
   public static final boolean PROPAGATE_IS_WEIGHTS_DEFAULT = true;
   private static final float TWITTER_CORPUS_LENGTH_IN_TERMS = 100055949;
   private static final float ITEMSET_CORPUS_LENGTH_IN_TERMS = 5760589;
@@ -532,6 +530,9 @@ public class FISQueryExpander {
         } else if (cmd.equals("c:")) {
           mode = 50; //
           termWeighting = TermWeigting.CLUSTERING_TERMS;
+        } else if (cmd.equals("x:")) {
+          mode = 52;
+          termWeighting = TermWeigting.CLUSTERING_PATTERNS;
         } else {
           out.println("Must prefix either\n i: for itemsets \n r: for results \n e: for expanded results \n t|d|q: for terms");
           continue;
@@ -583,7 +584,7 @@ public class FISQueryExpander {
             ScoreIxObj<List<String>> is = itemsets.poll();
             out.println(++i + " (" + is.score + "): " + is.obj.toString());
           }
-        } else if (mode == 50) {
+        } else if (mode == 50 || mode == 52) {
           // PriorityQueue<ScoreIxObj<String>>[] clusterTerms = qEx
           // .convertResultToWeightedTermsByClusteringPatterns(fisRs,
           // query.toString(),
@@ -592,9 +593,14 @@ public class FISQueryExpander {
           // null,
           // null,
           // paramClusteringWeightInsts);
-          PriorityQueue<ScoreIxObj<String>>[] clusterTerms = qEx
+          PriorityQueue<ScoreIxObj<String>>[] clusterTerms = null;
+          if(TermWeigting.CLUSTERING_TERMS.equals(termWeighting)){
+            clusterTerms = qEx
               .weightedTermsByClusteringTerms(fisRs, query.toString(), 100, null, null, null);
-          
+          } else if(TermWeigting.CLUSTERING_PATTERNS.equals(termWeighting)){ 
+            clusterTerms = qEx
+                .weightedTermsClusterPatterns(fisRs, query.toString(), 100, null, null, null, false);
+          }
           int i = 0;
           OpenIntHashSet empty = new OpenIntHashSet();
           while (empty.size() < clusterTerms.length) {
@@ -611,8 +617,8 @@ public class FISQueryExpander {
             }
             out.print("\n");
           }
-        } else if (mode == 2 || mode == 3 || mode == 4 || mode == 5 || mode == 6 || mode == 8
-            || mode == 9) {
+        } else if (mode == 2 || mode == 3 || mode == 4 || mode == 5 || mode == 6 || mode == 7
+            || mode == 8 || mode == 9) {
           OpenObjectFloatHashMap<String> weightedTerms = null;
           if (TermWeigting.FREQ.equals(termWeighting)) {
             weightedTerms = qEx
@@ -648,7 +654,7 @@ public class FISQueryExpander {
                 PARAM_MARKOV_NUM_WALK_STEPS,
                 PARAM_MARKOV_ALPHA, PARAM_PROB_DOC_FROM_TWITTER);
           } else if (TermWeigting.SVD_PATTERN.equals(termWeighting)) {
-            weightedTerms = qEx.weightedTermsSpectralPartitioning(fisRs,
+            weightedTerms = qEx.weightedTermsSVDOfPatternMatrix(fisRs,
                 query.toString(),
                 1000,
                 null,
@@ -672,6 +678,15 @@ public class FISQueryExpander {
                 null,
                 null,
                 null);
+          } else if (TermWeigting.KL_DIVERG.equals(termWeighting)) {
+            weightedTerms = qEx.weightedTermsByKLDivergence(fisRs,
+                query.toString(),
+                100,
+                null,
+                null,
+                null,
+                false);
+            
           }
           
           List<String> termList = Lists.newArrayListWithCapacity(weightedTerms.size());
@@ -681,7 +696,7 @@ public class FISQueryExpander {
           for (String term : termList) {
             out.println(++i + " (" + weightedTerms.get(term) + "): " + term);
           }
-        } else if (mode == 7) {
+        } else if (mode == -1) {
           
           PriorityQueue<ScoreIxObj<String>> weightedTerms = null;
           // if (TermWeigting.PROB_QUERY.equals(termWeighting)) {
@@ -690,12 +705,12 @@ public class FISQueryExpander {
           // query.toString(),
           // -1, propagateISWeights, null, null, null);
           // } else
-          if (TermWeigting.KL_DIVERG.equals(termWeighting)) {
-            weightedTerms = qEx
-                .convertResultToWeightedTermsKLDivergence(fisRs,
-                    query.toString(),
-                    -1, propagateISWeights, null, null, null);
-          }
+          // if (TermWeigting.KL_DIVERG.equals(termWeighting)) {
+          // weightedTerms = qEx
+          // .convertResultToWeightedTermsKLDivergence(fisRs,
+          // query.toString(),
+          // -1, propagateISWeights, null, null, null);
+          // }
           // else if (TermWeigting.SVD.equals(termWeighting)) {
           // weightedTerms = qEx
           // .convertResultToWeightedTermsBySVDOfTerms(
@@ -937,6 +952,88 @@ public class FISQueryExpander {
       }
       
       ++rank;
+    }
+    
+    return termFreq;
+  }
+  
+  public OpenObjectFloatHashMap<String> weightedTermsByKLDivergence(
+      OpenIntFloatHashMap fisRs, String query, int numItemsetsToConsider,
+      MutableFloat minScoreOut, MutableFloat maxScoreOut, MutableFloat totalScoreOut,
+      boolean pdwFromTwitter)
+      throws IOException, org.apache.lucene.queryParser.ParseException {
+    
+    OpenObjectFloatHashMap<String> queryTerms = queryTermFreq(query, null);
+    OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>();
+    
+    if (minScoreOut != null) {
+      minScoreOut.setValue(Float.MAX_VALUE);
+    }
+    
+    if (maxScoreOut != null) {
+      maxScoreOut.setValue(Float.MIN_VALUE);
+    }
+    
+    LinkedHashMap<Set<String>, Float> rankedItemsetScore = Maps.newLinkedHashMap();
+    
+    IntArrayList keyList = new IntArrayList(fisRs.size());
+    fisRs.keysSortedByValue(keyList);
+    float totalSupport = 0;
+    int rank = 1;
+    for (int i = fisRs.size() - 1; i >= 0; --i) {
+      if (numItemsetsToConsider > 0 && rank > numItemsetsToConsider) {
+        break;
+      }
+      int hit = keyList.getQuick(i);
+      
+      Pair<Set<String>, Float> patternPair = getPattern(hit);
+      Set<String> termSet = patternPair.getFirst();
+      if ((termSet.size() < MIN_ITEMSET_SIZE) || (rankedItemsetScore.containsKey(termSet))) {
+        continue;
+      }
+      
+      float patternFreq = patternPair.getSecond();
+      
+      rankedItemsetScore.put(termSet, patternFreq);
+      
+      for (String term : termSet) {
+        
+        if (queryTerms.containsKey(term)) {
+          continue;
+        }
+        
+        boolean propagateSupport = true;
+        float support = (propagateSupport ? patternFreq : 1);
+        termFreq.put(term, support + termFreq.get(term));
+        totalSupport += support;
+      }
+      ++rank;
+    }
+    for (String term : termFreq.keys()) {
+      float probAfter = termFreq.get(term) / totalSupport;
+      
+      String fieldname = (pdwFromTwitter ? TweetField.STEMMED_EN.name
+          : AssocField.STEMMED_EN.name);
+      Term termTerm = new Term(fieldname,
+          queryTermFreq(term, null, tweetAnalyzer, fieldname).keys().get(0));
+      float probBefore;
+      if (pdwFromTwitter) {
+        probBefore = twtIxReader.docFreq(termTerm) / TWITTER_CORPUS_LENGTH_IN_TERMS;
+      } else {
+        probBefore = fisIxReader.docFreq(termTerm) / ITEMSET_CORPUS_LENGTH_IN_TERMS;
+      }
+      float score = (float) (probAfter * Math.log(probAfter / probBefore));
+      if (minScoreOut != null && score < minScoreOut.floatValue()) {
+        minScoreOut.setValue(score);
+      }
+      
+      if (maxScoreOut != null && score > maxScoreOut.floatValue()) {
+        maxScoreOut.setValue(score);
+      }
+      
+      if (totalScoreOut != null) {
+        totalScoreOut.add(score);
+      }
     }
     
     return termFreq;
@@ -1338,7 +1435,7 @@ public class FISQueryExpander {
     return result;
   }
   
-  public OpenObjectFloatHashMap<String> weightedTermsSpectralPartitioning(
+  public OpenObjectFloatHashMap<String> weightedTermsSVDOfPatternMatrix(
       OpenIntFloatHashMap fisRs,
       String query,
       int numItemsetsToUse, // boolean propagateSupport,
@@ -1483,6 +1580,206 @@ public class FISQueryExpander {
         continue;
       }
       result.put(term, (float) termWeights[w]);
+    }
+    
+    return result;
+  }
+  
+  public PriorityQueue<ScoreIxObj<String>>[] weightedTermsClusterPatterns(
+      OpenIntFloatHashMap fisRs,
+      String query,
+      int numItemsetsToUse, // boolean propagateSupport,
+      List<MutableFloat> minXTermScoresOut, List<MutableFloat> maxXTermScoresOut,
+      List<MutableFloat> totalXTermScoresOut,
+      boolean pdwFromTwitter)
+      throws Exception {
+    
+    if (numItemsetsToUse <= 0) {
+      throw new IllegalArgumentException("Must specify number of itemsets");
+    }
+    
+    OpenObjectIntHashMap<String> termIdMap = new OpenObjectIntHashMap<String>();
+    OpenObjectFloatHashMap<String> termFISFreq = new OpenObjectFloatHashMap<String>();
+    float totalSupport = 0;
+    // LinkedHashMap<IntArrayList, Float> patternSupportMap = new LinkedHashMap<IntArrayList,
+    // Float>();
+    LinkedHashMap<Set<String>, Float> itemsetsMap = new LinkedHashMap<Set<String>, Float>();
+    List<String> idTermMap = Lists.newArrayList();
+    List<Term> stemmedList = Lists.newArrayList();
+    FastVector attrs = new FastVector();
+    
+    List<OpenIntFloatHashMap> bWordDocTemp = Lists.newArrayList();
+    
+    int rank = -1;
+    int nextId = 0;
+    
+    IntArrayList keyList = new IntArrayList(fisRs.size());
+    fisRs.keysSortedByValue(keyList);
+    
+    for (int i = fisRs.size() - 1; i >= 0; --i) {
+      if (++rank >= numItemsetsToUse) {
+        break;
+      }
+      
+      int hit = keyList.getQuick(i);
+      
+      Pair<Set<String>, Float> patternPair = getPattern(hit);
+      Set<String> termSet = patternPair.getFirst();
+      
+      if (termSet.size() < MIN_ITEMSET_SIZE || itemsetsMap.containsKey(termSet)) {
+        continue;
+      }
+      
+      itemsetsMap.put(termSet, patternPair.getSecond());
+      
+      // IntArrayList pattern = new IntArrayList(termSet.size());
+      
+      for (String term : termSet) {
+        int termId;
+        if (!termIdMap.containsKey(term)) {
+          termId = nextId++;
+          termIdMap.put(term, termId);
+          idTermMap.add(term);
+          bWordDocTemp.add(new OpenIntFloatHashMap());
+          String fieldname = (pdwFromTwitter ? TweetField.STEMMED_EN.name
+              : AssocField.STEMMED_EN.name);
+          stemmedList.add(new Term(fieldname,
+              queryTermFreq(term, null, tweetAnalyzer, fieldname).keys().get(0)));
+          attrs.addElement(new Attribute(term));
+        }
+        termId = termIdMap.get(term);
+        
+        Term stemmed = stemmedList.get(termId);
+        
+        // /// HEY THESE ARE MY OWN APPROXIMATIONSS >>> HOPE FOR THE BESTT!!!!!
+        float globalTi;
+        // TODO revise smoothing
+        if (pdwFromTwitter) {
+          globalTi = (termWeightSmoother + twtIxReader.docFreq(stemmed))
+              / (termWeightSmoother + TWITTER_CORPUS_LENGTH_IN_TERMS);
+        } else {
+          globalTi = (termWeightSmoother + fisIxReader.docFreq(stemmed))
+              / (termWeightSmoother + ITEMSET_CORPUS_LENGTH_IN_TERMS);
+        }
+        
+        bWordDocTemp.get(termId).put(rank, globalTi);
+        
+        termFISFreq.put(term, termFISFreq.get(term) + patternPair.getSecond());
+        totalSupport += patternPair.getSecond();
+        // pattern.add(termId);
+      }
+      
+      // patternSupportMap.put(pattern, patternPair.getSecond());
+    }
+    
+    if (bWordDocTemp.size() == 0) {
+      return new PriorityQueue[0];
+    }
+    // In case rank is less
+    numItemsetsToUse = rank;
+    
+    SummaryStatistics[] colStats = new SummaryStatistics[numItemsetsToUse];
+    
+    double[][] bPWD = new double[bWordDocTemp.size()][numItemsetsToUse];
+    for (int d = 0; d < numItemsetsToUse; ++d) {
+      colStats[d] = new SummaryStatistics();
+      for (int w = 0; w < bWordDocTemp.size(); ++w) {
+        bPWD[w][d] = bWordDocTemp.get(w).get(d);
+        float fisIDF = termFISFreq.get(idTermMap.get(w)) / totalSupport;
+        float corpusIDF;
+        if (pdwFromTwitter) {
+          corpusIDF = 1.0f * twtIxReader.docFreq(stemmedList.get(w)) / twtIxReader.numDocs();
+        } else {
+          corpusIDF = 1.0f * fisIxReader.docFreq(stemmedList.get(w)) / fisIxReader.numDocs();
+        }
+        if (corpusIDF == 0) {
+          // shit happens!!!
+          bPWD[w][d] = 0;
+        } else {
+          bPWD[w][d] *= Math.log(fisIDF / corpusIDF);
+        }
+        colStats[d].addValue(bPWD[w][d]);
+      }
+    }
+    Instances insts = new Instances("pattern-term", attrs, numItemsetsToUse);
+    for (int d = 0; d < numItemsetsToUse; ++d) {
+      Instance instance = new Instance(attrs.size());
+      for (int w = 0; w < bWordDocTemp.size(); ++w) {
+        instance.setValue(w, bPWD[w][d] - colStats[d].getMean()); // TODO divide by standard
+                                                                  // deviation??
+      }
+      
+      insts.add(instance);
+    }
+    
+    XMeans clusterer = new XMeans();
+    clusterer.setDistanceF(new CosineDistance());
+    clusterer.buildClusterer(insts);
+    
+    OpenObjectFloatHashMap<String>[] termWeights = new OpenObjectFloatHashMap[clusterer
+        .numberOfClusters()];
+    for (int c = 0; c < clusterer.numberOfClusters(); ++c) {
+      termWeights[c] = new OpenObjectFloatHashMap<String>();
+      if (minXTermScoresOut != null)
+        minXTermScoresOut.add(new MutableFloat(Float.MAX_VALUE));
+      
+      if (maxXTermScoresOut != null)
+        maxXTermScoresOut.add(new MutableFloat(Float.MIN_VALUE));
+      
+      if (totalXTermScoresOut != null)
+        totalXTermScoresOut.add(new MutableFloat(0));
+    }
+    
+    int d = -1;
+    for (Set<String> patternItems : itemsetsMap.keySet()) {
+      ++d;
+      Instance inst = insts.instance(d);
+      for (String item : patternItems) {
+        int termId = termIdMap.get(item);
+        String term = ((Attribute) attrs.elementAt(termId)).name();
+        double[] distrib = clusterer.distributionForInstance(inst);
+        for (int c = 0; c < distrib.length; ++c) {
+          if (distrib[c] <= CLUSTER_MEMBERSHIP_THRESHOLD) {
+            continue;
+          }
+          
+          // Closeness to centroid
+          Instance centroid = clusterer.getClusterCenters().instance(c);
+          float score = 1 - (float) clusterer.getDistanceF().distance(centroid, inst);
+          
+          score += termWeights[c].get(term);
+          termWeights[c].put(term, score);
+          
+          if (minXTermScoresOut != null) {
+            if (score < minXTermScoresOut.get(c).floatValue()) {
+              minXTermScoresOut.get(c).setValue(score);
+            }
+          }
+          
+          if (maxXTermScoresOut != null) {
+            if (score > maxXTermScoresOut.get(c).floatValue()) {
+              maxXTermScoresOut.get(c).setValue(score);
+            }
+          }
+          
+          if (totalXTermScoresOut != null) {
+            totalXTermScoresOut.get(c).add(score);
+          }
+        }
+      }
+    }
+    OpenObjectFloatHashMap<String> queryFreq = queryTermFreq(query, null);
+    PriorityQueue<ScoreIxObj<String>>[] result = new PriorityQueue[clusterer.numberOfClusters()];
+    OpenObjectFloatHashMap<String> queryTerms = queryTermFreq(query, null);
+    for (int c = 0; c < clusterer.numberOfClusters(); ++c) {
+      result[c] = new PriorityQueue<ScoreIxObj<String>>();
+      for (String term : termWeights[c].keys()) {
+        float score = termWeights[c].get(term);
+        if (queryTerms.containsKey(term) || score == 0) {
+          continue;
+        }
+        result[c].add(new ScoreIxObj<String>(term, score));
+      }
     }
     
     return result;
@@ -1685,28 +1982,49 @@ public class FISQueryExpander {
         patternEntropy.put(termSet, entropy);
       }
     } else {
-      // Calculate mutual infomarion with query
       
+      // Calculate mutual infomarion between terms
       for (Set<String> termSet : itemsets.keySet()) {
         float mi = 0;
-        for (String pTerm : termSet) {
-          int pTermId = termIdMap.get(pTerm);
-          float probTermP = termSupport.get(pTermId) / totalSupport;
-          for (String qTerm : queryTerms.keys()) {
-            int qTermId = termIdMap.get(qTerm);
-            if (qTermId == pTermId) {
+        for (String termx : termSet) {
+          int idx = termIdMap.get(termx);
+          float probX = termSupport.get(idx) / totalSupport;
+          for (String termy : termSet) {
+            int idy = termIdMap.get(termy);
+            if (idy == idx) {
               continue;
             }
-            float cooccur = (float) insts.instance(pTermId).value(qTermId);
-            if (cooccur == 0) {
-              continue;
-            }
-            float probTermQ = termSupport.get(qTermId) / totalSupport;
-            float probJoint = cooccur / totalSupport;
+            float probY = termSupport.get(idy) / totalSupport;
             
-            mi += (float) (probJoint * Math.log(probJoint / (probTermQ * probTermP)) / LOG2);
+            double cooccur = insts.instance(idx).value(idy);
+            
+            float probJoint = (float) (cooccur / totalSupport);
+            if (probJoint != 0) {
+              mi += probJoint * Math.log(probJoint / (probX * probY)) / LOG2;
+            }
           }
         }
+        
+        // // Calculate mutual infomarion with query
+        
+        // for (String pTerm : termSet) {
+        // int pTermId = termIdMap.get(pTerm);
+        // float probTermP = termSupport.get(pTermId) / totalSupport;
+        // for (String qTerm : queryTerms.keys()) {
+        // int qTermId = termIdMap.get(qTerm);
+        // if (qTermId == pTermId) {
+        // continue;
+        // }
+        // float cooccur = (float) insts.instance(pTermId).value(qTermId);
+        // if (cooccur == 0) {
+        // continue;
+        // }
+        // float probTermQ = termSupport.get(qTermId) / totalSupport;
+        // float probJoint = cooccur / totalSupport;
+        //
+        // mi += (float) (probJoint * Math.log(probJoint / (probTermQ * probTermP)) / LOG2);
+        // }
+        // }
         patternEntropy.put(termSet, mi);
       }
     }
@@ -1846,9 +2164,9 @@ public class FISQueryExpander {
       for (String term : termIdMap.keys()) {
         int termId = termIdMap.get(term);
         Instance inst = insts.instance(termId);
-//        if (PARAM_CLUSTERING_APPLY_LSA) {
-//          inst = lsa.convertInstance(inst);
-//        }
+        // if (PARAM_CLUSTERING_APPLY_LSA) {
+        // inst = lsa.convertInstance(inst);
+        // }
         double[] distrib = clusterer.distributionForInstance(inst);
         for (int c = 0; c < distrib.length; ++c) {
           if (distrib[c] <= CLUSTER_MEMBERSHIP_THRESHOLD) {
@@ -1921,9 +2239,9 @@ public class FISQueryExpander {
           termScoresClone.add(scoredTerm);
           int termId = termIdMap.get(scoredTerm.obj);
           Instance inst = insts.instance(termId);
-//          if (PARAM_CLUSTERING_APPLY_LSA) {
-//            inst = lsa.convertInstance(inst);
-//          }
+          // if (PARAM_CLUSTERING_APPLY_LSA) {
+          // inst = lsa.convertInstance(inst);
+          // }
           double[] distrib = clusterer.distributionForInstance(inst);
           if (distrib[c] > CLUSTER_MEMBERSHIP_THRESHOLD) {
             result[c].add(scoredTerm);
