@@ -29,6 +29,7 @@ import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.commons.lang.mutable.MutableFloat;
 import org.apache.commons.lang.mutable.MutableLong;
+import org.apache.commons.math.stat.descriptive.SummaryStatistics;
 import org.apache.commons.math.util.MathUtils;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenStream;
@@ -368,7 +369,7 @@ public class FISQueryExpander {
   private static final float ITEMSET_CORPUS_LENGTH_IN_TERMS = 5760589;
   public static final double PARAM_MARKOV_ALPHA = 0.5;
   public static final int PARAM_MARKOV_NUM_WALK_STEPS = 2;
-  private static final boolean PARAM_MARKOV_PROB_DOC_FROM_TWITTER = false;
+  private static final boolean PARAM_PROB_DOC_FROM_TWITTER = false;
   
   private static boolean paramClusteringWeightInsts = true;
   
@@ -494,7 +495,7 @@ public class FISQueryExpander {
         } else if (cmd.equals("f:")) {
           mode = 3; // terms with query divergence
           termWeighting = TermWeigting.FREQ;
-        } else if (cmd.equals("v:")) {
+        } else if (cmd.equals("s:")) {
           mode = 4; // terms with query divergence
           termWeighting = TermWeigting.SVD;
         } else if (cmd.equals("c:")) {
@@ -509,6 +510,7 @@ public class FISQueryExpander {
         } else if (cmd.equals("m:")) {
           mode = 8; // terms with query divergence
           termWeighting = TermWeigting.MARKOV;
+          
         } else if (cmd.equals("r:")) {
           mode = 10; // results
         } else if (cmd.equals("e:")) {
@@ -592,7 +594,7 @@ public class FISQueryExpander {
             }
             out.print("\n");
           }
-        } else if (mode == 2 || mode == 3 || mode == 6 || mode == 8) {
+        } else if (mode == 2 || mode == 3 || mode == 4 || mode == 6 || mode == 8) {
           OpenObjectFloatHashMap<String> weightedTerms = null;
           if (TermWeigting.FREQ.equals(termWeighting)) {
             weightedTerms = qEx
@@ -626,7 +628,16 @@ public class FISQueryExpander {
                 null,
                 null,
                 PARAM_MARKOV_NUM_WALK_STEPS,
-                PARAM_MARKOV_ALPHA, PARAM_MARKOV_PROB_DOC_FROM_TWITTER);
+                PARAM_MARKOV_ALPHA, PARAM_PROB_DOC_FROM_TWITTER);
+          } else if (TermWeigting.SVD.equals(termWeighting)) {
+            weightedTerms = qEx.weightedTermsSpectralPartitioning(fisRs,
+                query.toString(),
+                1000,
+                null,
+                null,
+                null,
+                PARAM_PROB_DOC_FROM_TWITTER);
+            
           }
           
           List<String> termList = Lists.newArrayListWithCapacity(weightedTerms.size());
@@ -636,7 +647,7 @@ public class FISQueryExpander {
           for (String term : termList) {
             out.println(++i + " (" + weightedTerms.get(term) + "): " + term);
           }
-        } else if (mode == 7 || mode == 4) {
+        } else if (mode == 7) {
           
           PriorityQueue<ScoreIxObj<String>> weightedTerms = null;
           // if (TermWeigting.PROB_QUERY.equals(termWeighting)) {
@@ -650,14 +661,15 @@ public class FISQueryExpander {
                 .convertResultToWeightedTermsKLDivergence(fisRs,
                     query.toString(),
                     -1, propagateISWeights, null, null, null);
-          } else if (TermWeigting.SVD.equals(termWeighting)) {
-            weightedTerms = qEx
-                .convertResultToWeightedTermsBySVDOfTerms(
-                    // PatternsMatrix(
-                    fisRs,
-                    true,
-                    paramClusteringWeightInsts);
           }
+          // else if (TermWeigting.SVD.equals(termWeighting)) {
+          // weightedTerms = qEx
+          // .convertResultToWeightedTermsBySVDOfTerms(
+          // // PatternsMatrix(
+          // fisRs,
+          // true,
+          // paramClusteringWeightInsts);
+          // }
           
           int i = 0;
           while (!weightedTerms.isEmpty()) {
@@ -1262,7 +1274,7 @@ public class FISQueryExpander {
       
       if (score > 0) {
         int termId = termIdMap.get(term);
-        // TODONE Smoothing
+        // TODO Smoothing revise
         if (pdwFromTwitter) {
           score *= (twtIxReader.docFreq(stemmedList.get(termId)) + termWeightSmoother)
               / (TWITTER_CORPUS_LENGTH_IN_TERMS + termWeightSmoother);
@@ -1286,6 +1298,156 @@ public class FISQueryExpander {
       if (totalScoreOut != null) {
         totalScoreOut.add(score);
       }
+    }
+    
+    return result;
+  }
+  
+  public OpenObjectFloatHashMap<String> weightedTermsSpectralPartitioning(
+      OpenIntFloatHashMap fisRs,
+      String query,
+      int numItemsetsToUse, // boolean propagateSupport,
+      MutableFloat minScoreOut,
+      MutableFloat maxScoreOut, MutableFloat totalScoreOut,
+      boolean pdwFromTwitter)
+      throws IOException,
+      org.apache.lucene.queryParser.ParseException {
+    
+    if (numItemsetsToUse <= 0) {
+      throw new IllegalArgumentException("Must specify number of itemsets");
+    }
+    
+    if (minScoreOut != null)
+      minScoreOut.setValue(Float.MAX_VALUE);
+    
+    if (maxScoreOut != null)
+      maxScoreOut.setValue(Float.MIN_VALUE);
+    
+    if (totalScoreOut != null)
+      totalScoreOut.setValue(0);
+    
+    OpenObjectIntHashMap<String> termIdMap = new OpenObjectIntHashMap<String>();
+    OpenObjectFloatHashMap<String> termFISFreq = new OpenObjectFloatHashMap<String>();
+    float totalSupport = 0;
+    // LinkedHashMap<IntArrayList, Float> patternSupportMap = new LinkedHashMap<IntArrayList,
+    // Float>();
+    LinkedHashMap<Set<String>, Float> itemsetsMap = new LinkedHashMap<Set<String>, Float>();
+    List<String> idTermMap = Lists.newArrayList();
+    List<Term> stemmedList = Lists.newArrayList();
+    
+    List<OpenIntFloatHashMap> bWordDocTemp = Lists.newArrayList();
+    
+    int rank = -1;
+    int nextId = 0;
+    
+    IntArrayList keyList = new IntArrayList(fisRs.size());
+    fisRs.keysSortedByValue(keyList);
+    
+    for (int i = fisRs.size() - 1; i >= 0; --i) {
+      if (++rank >= numItemsetsToUse) {
+        break;
+      }
+      
+      int hit = keyList.getQuick(i);
+      
+      Pair<Set<String>, Float> patternPair = getPattern(hit);
+      Set<String> termSet = patternPair.getFirst();
+      
+      if (termSet.size() < MIN_ITEMSET_SIZE || itemsetsMap.containsKey(termSet)) {
+        continue;
+      }
+      
+      itemsetsMap.put(termSet, patternPair.getSecond());
+      
+      // IntArrayList pattern = new IntArrayList(termSet.size());
+      
+      for (String term : termSet) {
+        int termId;
+        if (!termIdMap.containsKey(term)) {
+          termId = nextId++;
+          termIdMap.put(term, termId);
+          idTermMap.add(term);
+          bWordDocTemp.add(new OpenIntFloatHashMap());
+          String fieldname = (pdwFromTwitter ? TweetField.STEMMED_EN.name
+              : AssocField.STEMMED_EN.name);
+          stemmedList.add(new Term(fieldname,
+              queryTermFreq(term, null, tweetAnalyzer, fieldname).keys().get(0)));
+        }
+        termId = termIdMap.get(term);
+        
+        Term stemmed = stemmedList.get(termId);
+        
+        // /// HEY THESE ARE MY OWN APPROXIMATIONSS >>> HOPE FOR THE BESTT!!!!!
+        float globalTi;
+        // TODO revise smoothing
+        if (pdwFromTwitter) {
+          globalTi = (termWeightSmoother + twtIxReader.docFreq(stemmed))
+              / (termWeightSmoother + TWITTER_CORPUS_LENGTH_IN_TERMS);
+        } else {
+          globalTi = (termWeightSmoother + fisIxReader.docFreq(stemmed))
+              / (termWeightSmoother + ITEMSET_CORPUS_LENGTH_IN_TERMS);
+        }
+        
+        bWordDocTemp.get(termId).put(rank, globalTi);
+        
+        termFISFreq.put(term, termFISFreq.get(term) + patternPair.getSecond());
+        totalSupport += patternPair.getSecond();
+        // pattern.add(termId);
+      }
+      
+      // patternSupportMap.put(pattern, patternPair.getSecond());
+    }
+    
+    if (bWordDocTemp.size() == 0) {
+      return new OpenObjectFloatHashMap<String>();
+    }
+    // In case rank is less
+    numItemsetsToUse = rank;
+    
+    SummaryStatistics[] colStats = new SummaryStatistics[numItemsetsToUse];
+    double[][] bPWD = new double[bWordDocTemp.size()][numItemsetsToUse];
+    for (int d = 0; d < numItemsetsToUse; ++d) {
+      colStats[d] = new SummaryStatistics();
+      for (int w = 0; w < bWordDocTemp.size(); ++w) {
+        bPWD[w][d] = bWordDocTemp.get(w).get(d);
+        float fisIDF = termFISFreq.get(idTermMap.get(w)) / totalSupport;
+        float corpusIDF;
+        if (pdwFromTwitter) {
+          corpusIDF = 1.0f * twtIxReader.docFreq(stemmedList.get(w)) / twtIxReader.numDocs();
+        } else {
+          corpusIDF = 1.0f * fisIxReader.docFreq(stemmedList.get(w)) / fisIxReader.numDocs();
+        }
+        if (corpusIDF == 0) {
+          // shit happens!!!
+          bPWD[w][d] = 0;
+        } else {
+          bPWD[w][d] *= Math.log(fisIDF / corpusIDF);
+        }
+        colStats[d].addValue(bPWD[w][d]);
+      }
+    }
+    
+    for (int d = 0; d < numItemsetsToUse; ++d) {
+      for (int w = 0; w < bWordDocTemp.size(); ++w) {
+        bPWD[w][d] -= colStats[d].getMean(); // TODO divide by standard deviation??
+      }
+    }
+    
+    Matrix B = new Matrix(bPWD);
+    SingularValueDecomposition svd = new SingularValueDecomposition(B);
+    double[] termWeights = svd.getSingularValues();
+    
+    OpenObjectFloatHashMap<String> queryFreq = queryTermFreq(query, null);
+    OpenObjectFloatHashMap<String> result = new OpenObjectFloatHashMap<String>();
+    for (int w = 0; w < termWeights.length; ++w) {
+      if (termWeights[w] == 0) {
+        continue;
+      }
+      String term = idTermMap.get(w);
+      if (queryFreq.containsKey(term)) {
+        continue;
+      }
+      result.put(term, (float) termWeights[w]);
     }
     
     return result;

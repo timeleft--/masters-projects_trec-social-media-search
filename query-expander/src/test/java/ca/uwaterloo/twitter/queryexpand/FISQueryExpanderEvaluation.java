@@ -76,7 +76,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
       "/u2/yaboulnaga/datasets/twitter-trec2011/2011.topics.MB1-50.xml";
   private static final String QREL_PATH = "/u2/yaboulnaga/datasets/twitter-trec2011/microblog11-qrels.txt";
   
-  private int numItemsetsToConsider = 1000;
+  private int numItemsetsToConsider = 100;
   private int numTermsToAppend = 10;
   private final boolean trecEvalFormat = true;
   private boolean paramNormalize = true;
@@ -102,8 +102,11 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   private static final String TAG_CLUSTER_PATTERNS = "clusPatt";
   private static final String TAG_CLUSTER_TERMS = "clusTerm";
   private static final String TAG_MARKOV = "markov";
+  private static final String TAG_SVD = "svd";
   
   private static final boolean SORT_TOPICS_CHRONOLOGICALLY = false;
+
+  
   
   private static File[] twtChunkIxLocs;
   
@@ -125,6 +128,9 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
    * 
    */
   public class TrecResultFileCollector extends QueryExpansionBM25Collector {
+    // save myself the pain of removing duplicate documents (FIXME: why are they still appearing)
+    // And hopefully increase the MAP without decreasing recall (requires paramNormalize = true)
+    private static final float SCORE_THRESHOLD = 0;
     
     final String runTag;
     final String topicId;
@@ -156,6 +162,9 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
       for (ScoreIxObj<String> tweet : resultSet.keySet()) {
         float score = (paramNormalize ? ((tweet.score - minScore) / (maxScore - minScore))
             : tweet.score);
+        if(paramNormalize && score <= SCORE_THRESHOLD){
+          continue;
+        }
         wr.append(topicId).append(' ')
             .append(trecEvalFormat ? "0 " : "")
             .append(tweet.obj).append(' ')
@@ -240,7 +249,8 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     // openWriterForTag(TAG_KL_DIVER);
     // openWriterForTag(TAG_CLUSTER_PATTERNS);
     // openWriterForTag(TAG_CLUSTER_TERMS);
-    openWriterForTag(TAG_MARKOV);
+//    openWriterForTag(TAG_MARKOV);
+    openWriterForTag(TAG_SVD);
     
   }
   
@@ -484,6 +494,36 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
         target.twtSearcher.search(timedQuery, collector);
         collector.writeResults();
       }
+   // /////////////////////////////////////////////////////////////
+      if (resultWriters.containsKey(TAG_SVD)) {
+        
+        MutableFloat minXTermScore = new MutableFloat();
+        MutableFloat maxXTermScore = new MutableFloat();
+        
+        OpenObjectFloatHashMap<String> extraTerms = target.weightedTermsSpectralPartitioning(fis,
+            queryStr,
+            numItemsetsToConsider,
+            minXTermScore,
+            maxXTermScore,
+            null,
+            paramMarkovProbDocFromTwitter);
+        
+        OpenObjectFloatHashMap<String> xQueryTerms = new OpenObjectFloatHashMap<String>();
+        MutableLong xQueryLen = new MutableLong(0);
+        timedQuery = target.expandAndFilterQuery(queryTerms,
+            queryLen.intValue(),
+            new OpenObjectFloatHashMap[] { extraTerms },
+            new float[] { minXTermScore.intValue() },
+            new float[] { maxXTermScore.intValue() },
+            numTermsToAppend,
+            xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
+        
+        collector = new TrecResultFileCollector(target, topicIds.get(i),
+            TAG_SVD, queryStr, xQueryTerms, xQueryLen.intValue());
+        target.twtSearcher.search(timedQuery, collector);
+        collector.writeResults();
+      }
+      
       
       // ////////////////////////////
       OpenObjectFloatHashMap<String> xQueryTerms;
