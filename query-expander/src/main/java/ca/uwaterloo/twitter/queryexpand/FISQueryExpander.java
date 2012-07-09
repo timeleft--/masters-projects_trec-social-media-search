@@ -13,6 +13,7 @@ import java.util.Date;
 import java.util.Enumeration;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +28,7 @@ import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.OptionBuilder;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
+import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.mutable.MutableFloat;
 import org.apache.commons.lang.mutable.MutableLong;
 import org.apache.commons.math.stat.descriptive.SummaryStatistics;
@@ -67,6 +69,7 @@ import org.apache.mahout.math.map.OpenIntFloatHashMap;
 import org.apache.mahout.math.map.OpenObjectFloatHashMap;
 import org.apache.mahout.math.map.OpenObjectIntHashMap;
 import org.apache.mahout.math.set.OpenIntHashSet;
+import org.knallgrau.utils.textcat.TextCategorizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -176,11 +179,24 @@ public class FISQueryExpander {
     
   }
   
-  protected static final TwitterEnglishAnalyzer tweetAnalyzer = new TwitterEnglishAnalyzer();
+  public static final TextCategorizer textcat = new TextCategorizer(FileUtils
+      .toFile(FISQueryExpander.class.getResource("/textcat.conf")).toString());
+  
+  public static final TwitterEnglishAnalyzer tweetStemmingAnalyzer = new TwitterEnglishAnalyzer();
+  public static final TwitterAnalyzer tweetNonStemmingAnalyzer = new TwitterAnalyzer();
   
   public static class QueryExpansionBM25Collector extends BM25Collector<String, String> {
     
-    protected static final TwitterEnglishAnalyzer tweetAnalyzer = new TwitterEnglishAnalyzer();
+    // protected static final float FREQ_PERCENTILE = 0.90f;
+    protected boolean languageIdentification = PARAM_LANGUAGE_IDENTIFICATION;
+    
+    public boolean isLanguageIdentification() {
+      return languageIdentification;
+    }
+    
+    public void setLanguageIdentification(boolean languageIdentification) {
+      this.languageIdentification = languageIdentification;
+    }
     
     public QueryExpansionBM25Collector(FISQueryExpander pTarget, String pDocTextField,
         String pQueryStr, OpenObjectFloatHashMap<String> pQueryTerms, float pQueryLen,
@@ -193,7 +209,189 @@ public class FISQueryExpander {
           pMaxResults, comparatorClazz, pStemmedIDF);
     }
     
-    public OpenObjectFloatHashMap<String> expansionTermsByFrequency(int numResultsToCosider,
+    public PriorityQueue<ScoreIxObj<String>>[] expansionTermsByClusterTopResults(
+        int numResultsToUse,
+        List<MutableFloat> minXTermScoresOut, List<MutableFloat> maxXTermScoresOut,
+        List<MutableFloat> totalXTermScoresOut) throws Exception {
+      
+      if (numResultsToUse <= 0) {
+        throw new IllegalArgumentException("Must specify number of results");
+      }
+      
+      OpenObjectIntHashMap<String> termIdMap = new OpenObjectIntHashMap<String>();
+      OpenObjectFloatHashMap<String> termRSFreq = new OpenObjectFloatHashMap<String>();
+      float totalRSFreq = 0;
+      List<String> idTermMap = Lists.newArrayList();
+//      List<Term> stemmedList = Lists.newArrayList();
+      LinkedHashSet<Set<String>> itemsetsSet = new LinkedHashSet<Set<String>>();
+      FastVector attrs = new FastVector();
+      
+      List<OpenIntFloatHashMap> bWordDocTemp = Lists.newArrayList();
+      
+      int rank = -1;
+      int nextId = 0;
+      
+      for (ScoreIxObj<String> key : resultSet.keySet()) {
+        if (++rank >= numResultsToUse) {
+          break;
+        }
+        
+        String tweet = resultSet.get(key);
+        MutableLong docLen = new MutableLong();
+        OpenObjectFloatHashMap<String> termDocFreq = target.queryTermFreq(tweet,
+            docLen,
+            tweetStemmingAnalyzer,
+            TweetField.STEMMED_EN.name);
+//            tweetNonStemmingAnalyzer,
+//            TweetField.TEXT.name);
+        itemsetsSet.add(Sets.newCopyOnWriteArraySet(termDocFreq.keys()));
+        
+        if (termDocFreq.size() < MIN_ITEMSET_SIZE) { // no repetition .containsKey(termSet)) {
+          continue;
+        }
+        
+        // IntArrayList pattern = new IntArrayList(termSet.size());
+        
+        for (String term : termDocFreq.keys()) {
+          int termId;
+          if (!termIdMap.containsKey(term)) {
+            termId = nextId++;
+            termIdMap.put(term, termId);
+            idTermMap.add(term);
+            bWordDocTemp.add(new OpenIntFloatHashMap());
+//            String fieldname = TweetField.STEMMED_EN.name;
+//            stemmedList.add();
+            attrs.addElement(new Attribute(term));
+          }
+          termId = termIdMap.get(term);
+          
+//          Term stemmed = stemmedList.get(termId);
+          Term stemmed = new Term(TweetField.STEMMED_EN.name, term);
+          
+          // /// HEY THESE ARE MY OWN APPROXIMATIONSS >>> HOPE FOR THE BESTT!!!!!
+          float globalTi;
+          // TODO revise smoothing
+            globalTi = (target.termWeightSmoother + target.twtIxReader.docFreq(stemmed))
+                / (target.termWeightSmoother + TWITTER_CORPUS_LENGTH_IN_TERMS);
+          
+          bWordDocTemp.get(termId).put(rank, globalTi);
+          
+          float freq = termDocFreq.get(term);
+          termRSFreq.put(term, termRSFreq.get(term) + freq);
+          totalRSFreq += freq;
+        }
+      }
+      
+      if (bWordDocTemp.size() == 0) {
+        return new PriorityQueue[0];
+      }
+      // In case rank is less
+      numResultsToUse = rank;
+      
+      SummaryStatistics[] colStats = new SummaryStatistics[numResultsToUse];
+      
+      double[][] bPWD = new double[bWordDocTemp.size()][numResultsToUse];
+      for (int d = 0; d < numResultsToUse; ++d) {
+        colStats[d] = new SummaryStatistics();
+        for (int w = 0; w < bWordDocTemp.size(); ++w) {
+          bPWD[w][d] = bWordDocTemp.get(w).get(d);
+          float rsIDF = termRSFreq.get(idTermMap.get(w)) / totalRSFreq;
+          float corpusIDF;
+            corpusIDF = 1.0f * target.twtIxReader.docFreq(new Term(TweetField.STEMMED_EN.name,idTermMap.get(w)))
+                / target.twtIxReader.numDocs();
+          if (corpusIDF == 0) {
+            // shit happens!!!
+            bPWD[w][d] = 0;
+          } else {
+            bPWD[w][d] *= Math.log(rsIDF / corpusIDF);
+          }
+          colStats[d].addValue(bPWD[w][d]);
+        }
+      }
+      Instances insts = new Instances("tweet-term", attrs, numResultsToUse);
+      for (int d = 0; d < numResultsToUse; ++d) {
+        Instance instance = new Instance(attrs.size());
+        for (int w = 0; w < bWordDocTemp.size(); ++w) {
+          instance.setValue(w, bPWD[w][d] - colStats[d].getMean()); // TODO divide by standard
+                                                                    // deviation??
+        }
+        
+        insts.add(instance);
+      }
+      
+      XMeans clusterer = new XMeans();
+      clusterer.setDistanceF(new CosineDistance());
+      clusterer.buildClusterer(insts);
+      
+      OpenObjectFloatHashMap<String>[] termWeights = new OpenObjectFloatHashMap[clusterer
+          .numberOfClusters()];
+      for (int c = 0; c < clusterer.numberOfClusters(); ++c) {
+        termWeights[c] = new OpenObjectFloatHashMap<String>();
+        if (minXTermScoresOut != null)
+          minXTermScoresOut.add(new MutableFloat(Float.MAX_VALUE));
+        
+        if (maxXTermScoresOut != null)
+          maxXTermScoresOut.add(new MutableFloat(Float.MIN_VALUE));
+        
+        if (totalXTermScoresOut != null)
+          totalXTermScoresOut.add(new MutableFloat(0));
+      }
+      
+      int d = -1;
+      for (Set<String> patternItems : itemsetsSet) {
+        ++d;
+        Instance inst = insts.instance(d);
+        for (String item : patternItems) {
+          int termId = termIdMap.get(item);
+          String term = ((Attribute) attrs.elementAt(termId)).name();
+          double[] distrib = clusterer.distributionForInstance(inst);
+          for (int c = 0; c < distrib.length; ++c) {
+            if (distrib[c] <= CLUSTER_MEMBERSHIP_THRESHOLD) {
+              continue;
+            }
+            
+            // Closeness to centroid
+            Instance centroid = clusterer.getClusterCenters().instance(c);
+            float score = 1 - (float) clusterer.getDistanceF().distance(centroid, inst);
+            
+            score += termWeights[c].get(term);
+            termWeights[c].put(term, score);
+            
+            if (minXTermScoresOut != null) {
+              if (score < minXTermScoresOut.get(c).floatValue()) {
+                minXTermScoresOut.get(c).setValue(score);
+              }
+            }
+            
+            if (maxXTermScoresOut != null) {
+              if (score > maxXTermScoresOut.get(c).floatValue()) {
+                maxXTermScoresOut.get(c).setValue(score);
+              }
+            }
+            
+            if (totalXTermScoresOut != null) {
+              totalXTermScoresOut.get(c).add(score);
+            }
+          }
+        }
+      }
+      PriorityQueue<ScoreIxObj<String>>[] result = new PriorityQueue[clusterer.numberOfClusters()];
+      OpenObjectFloatHashMap<String> queryTerms = target.queryTermFreq(queryStr, null);
+      for (int c = 0; c < clusterer.numberOfClusters(); ++c) {
+        result[c] = new PriorityQueue<ScoreIxObj<String>>();
+        for (String term : termWeights[c].keys()) {
+          float score = termWeights[c].get(term);
+          if (queryTerms.containsKey(term) || score == 0) {
+            continue;
+          }
+          result[c].add(new ScoreIxObj<String>(term, score));
+        }
+      }
+      
+      return result;
+    }
+    
+    public OpenObjectFloatHashMap<String> expansionTermsByIDFIncrease(int numResultsToCosider,
         MutableFloat minScoreOut, MutableFloat maxScoreOut, MutableFloat totalScoreOut)
         throws IOException {
       
@@ -207,16 +405,24 @@ public class FISQueryExpander {
         maxScoreOut.setValue(Float.MIN_VALUE);
       }
       
-      int rank = 1;
+      if (totalScoreOut != null) {
+        totalScoreOut.setValue(0);
+      }
+      
+      // float maxFreq = Float.MIN_VALUE;
+      // float totalFreq = 0;
+      int rank = 0;
       for (ScoreIxObj<String> doc : resultSet.keySet()) {
-        if (numResultsToCosider > 0 && rank > numResultsToCosider) {
+        if (numResultsToCosider > 0 && rank >= numResultsToCosider) {
           break;
         }
         
         OpenObjectFloatHashMap<String> hitTerms = target.queryTermFreq(resultSet.get(doc),
             null,
-            tweetAnalyzer,
-            TweetField.TEXT.name);
+            tweetStemmingAnalyzer,
+            TweetField.STEMMED_EN.name);
+        // tweetAnalyzer,
+        // TweetField.TEXT.name);
         if ((hitTerms.size() < MIN_ITEMSET_SIZE)) { // TODO: duplicates? || (.containsKey(termSet)
           continue;
         }
@@ -227,27 +433,92 @@ public class FISQueryExpander {
             continue;
           }
           
-          float score = hitTerms.get(term) + termFreq.get(term);
-          termFreq.put(term, score);
+          // IDF:
+          termFreq.put(term, termFreq.get(term) + 1);
           
-          if (minScoreOut != null && score < minScoreOut.floatValue()) {
-            minScoreOut.setValue(score);
-          }
+          // Frequency
+          // float score = hitTerms.get(term);
+          // totalFreq += score;
+          //
+          // score += termFreq.get(term);
+          // termFreq.put(term, score);
           
-          if (maxScoreOut != null && score > maxScoreOut.floatValue()) {
-            maxScoreOut.setValue(score);
-          }
+          // if (score > maxFreq) {
+          // maxFreq = score;
+          // }
           
-          if (totalScoreOut != null) {
-            totalScoreOut.add(score);
-          }
         }
         
         ++rank;
       }
       
+      // List<String> termsByFreq = Lists.newArrayListWithCapacity(termFreq.size());
+      // termFreq.keys(termsByFreq);
+      // int maxIx = (int) (FREQ_PERCENTILE * termFreq.size());
+      // maxFreq = termFreq.get(termsByFreq.get(maxIx));
+      //
+      // for (int i = maxIx + 1; i < termsByFreq.size(); ++i) {
+      // String term = termsByFreq.get(i);
+      // if (termFreq.get(term) > maxFreq) {
+      // termFreq.removeKey(term);
+      // }
+      // }
+      
+      for (String term : termFreq.keys()) {
+        Term stemmed = new Term(TweetField.STEMMED_EN.name,
+            target.queryTermFreq(term, null, tweetStemmingAnalyzer, TweetField.STEMMED_EN.name).keys()
+                .get(0));
+        float docFreq = target.twtIxReader.docFreq(stemmed);
+        float idfGlobal = 1.0f * docFreq / target.twtIxReader.numDocs();
+        float idfLocal = termFreq.get(term) / rank;
+        
+        float score = (float) Math.log(idfLocal / idfGlobal);
+        
+        // Pulls out stop words
+        // float tfGlobal = (docFreq + 10000) / (TWITTER_CORPUS_LENGTH_IN_TERMS); //) + 10000);
+        // score *= tfGlobal;
+        
+        termFreq.put(term, score);
+        
+        if (minScoreOut != null && score < minScoreOut.floatValue()) {
+          minScoreOut.setValue(score);
+        }
+        
+        if (maxScoreOut != null && score > maxScoreOut.floatValue()) {
+          maxScoreOut.setValue(score);
+        }
+        
+        if (totalScoreOut != null) {
+          totalScoreOut.add(score);
+        }
+      }
       return termFreq;
     }
+    
+    // This is slow as peppeee
+    // @Override
+    // public void collect(int docId) throws IOException {
+    // if (languageIdentification) {
+    //
+    // if (encounteredDocs.contains(docId)) {
+    // LOG.trace("Duplicate document {} for query {}", docId, queryStr);
+    // return;
+    // }
+    //
+    // Document doc = reader.document(docId);
+    //
+    // String tweet = doc.get(TweetField.TEXT.name);
+    // String lang = textcat.categorize(tweet);
+    // if ("english".equals(lang)) {
+    // super.collect(docId);
+    // } else {
+    // encounteredDocs.add(docId);
+    // LOG.debug("Neglecting ({}) tweet: {}", lang, tweet);
+    // }
+    // } else {
+    // super.collect(docId);
+    // }
+    // }
     
     @Override
     protected String getResultKey(int docId, Document doc) {
@@ -258,7 +529,7 @@ public class FISQueryExpander {
     @Override
     protected String getResultValue(int docId, Document doc) {
       String text = null;
-      if (LOG.isDebugEnabled()) {
+      if (languageIdentification || LOG.isDebugEnabled()) {
         text = doc.get(TweetField.TEXT.name);
       }
       return text;
@@ -345,7 +616,7 @@ public class FISQueryExpander {
   
   private static final String RETWEET_TERM = "rt";
   
-  private static final float ITEMSET_LEN_AVG_DEFAULT = 5;
+  private static final float ITEMSET_LEN_AVG_DEFAULT = 5;// FIXME: there is a correct number in FISCollector
   
   private static final float ITEMSET_LEN_WEIGHT_DEFAULT = 0.33f;
   
@@ -356,7 +627,7 @@ public class FISQueryExpander {
   
   private static final float SCORE_PRECISION_MULTIPLIER = 100000.0f;
   
-  private static final TermWeigting TERM_WEIGHTIN_DEFAULT = TermWeigting.PROB_QUERY;
+  private static final TermWeigting TERM_WEIGHTIN_DEFAULT = TermWeigting.CLUSTERING_PATTERNS;
   
   private static final String COLLECTION_STRING_CLEANER = "[\\,\\[\\]]";
   
@@ -369,7 +640,7 @@ public class FISQueryExpander {
   private static final int ENGLISH_STOPWORDS_COUNT = 5;
   private static final boolean DEAFULT_MAGIC_ALLOWED = false;
   private static final boolean EXPAND_TERM_COUNT_EVENLY_OVER_CLUSTERS = false;
-  private static final boolean REAL_TIME_PATTERN_FREQ = true;
+  private static final boolean REAL_TIME_PATTERN_FREQ = false;
   public static final boolean PROPAGATE_IS_WEIGHTS_DEFAULT = true;
   private static final float TWITTER_CORPUS_LENGTH_IN_TERMS = 100055949;
   private static final float ITEMSET_CORPUS_LENGTH_IN_TERMS = 5760589;
@@ -378,6 +649,7 @@ public class FISQueryExpander {
   private static final boolean PARAM_PROB_DOC_FROM_TWITTER = false;
   private static final boolean PARAM_MUTUAL_ENTROPY_START_WITH_ENTROPY = false;
   private static final boolean PARAM_CLUSTERING_APPLY_LSA = false;
+  private static final boolean PARAM_LANGUAGE_IDENTIFICATION = false;
   
   private static boolean paramClusteringWeightInsts = true;
   
@@ -594,10 +866,10 @@ public class FISQueryExpander {
           // null,
           // paramClusteringWeightInsts);
           PriorityQueue<ScoreIxObj<String>>[] clusterTerms = null;
-          if(TermWeigting.CLUSTERING_TERMS.equals(termWeighting)){
+          if (TermWeigting.CLUSTERING_TERMS.equals(termWeighting)) {
             clusterTerms = qEx
-              .weightedTermsByClusteringTerms(fisRs, query.toString(), 100, null, null, null);
-          } else if(TermWeigting.CLUSTERING_PATTERNS.equals(termWeighting)){ 
+                .weightedTermsByClusteringTerms(fisRs, query.toString(), 100, null, null, null);
+          } else if (TermWeigting.CLUSTERING_PATTERNS.equals(termWeighting)) {
             clusterTerms = qEx
                 .weightedTermsClusterPatterns(fisRs, query.toString(), 100, null, null, null, false);
           }
@@ -1015,7 +1287,7 @@ public class FISQueryExpander {
       String fieldname = (pdwFromTwitter ? TweetField.STEMMED_EN.name
           : AssocField.STEMMED_EN.name);
       Term termTerm = new Term(fieldname,
-          queryTermFreq(term, null, tweetAnalyzer, fieldname).keys().get(0));
+          queryTermFreq(term, null, tweetStemmingAnalyzer, fieldname).keys().get(0));
       float probBefore;
       if (pdwFromTwitter) {
         probBefore = twtIxReader.docFreq(termTerm) / TWITTER_CORPUS_LENGTH_IN_TERMS;
@@ -1284,7 +1556,7 @@ public class FISQueryExpander {
           String fieldname = (pdwFromTwitter ? TweetField.STEMMED_EN.name
               : AssocField.STEMMED_EN.name);
           stemmedList.add(new Term(fieldname,
-              queryTermFreq(term, null, tweetAnalyzer, fieldname).keys().get(0)));
+              queryTermFreq(term, null, tweetStemmingAnalyzer, fieldname).keys().get(0)));
         }
         termId = termIdMap.get(term);
         
@@ -1503,7 +1775,7 @@ public class FISQueryExpander {
           String fieldname = (pdwFromTwitter ? TweetField.STEMMED_EN.name
               : AssocField.STEMMED_EN.name);
           stemmedList.add(new Term(fieldname,
-              queryTermFreq(term, null, tweetAnalyzer, fieldname).keys().get(0)));
+              queryTermFreq(term, null, tweetStemmingAnalyzer, fieldname).keys().get(0)));
         }
         termId = termIdMap.get(term);
         
@@ -1644,7 +1916,7 @@ public class FISQueryExpander {
           String fieldname = (pdwFromTwitter ? TweetField.STEMMED_EN.name
               : AssocField.STEMMED_EN.name);
           stemmedList.add(new Term(fieldname,
-              queryTermFreq(term, null, tweetAnalyzer, fieldname).keys().get(0)));
+              queryTermFreq(term, null, tweetStemmingAnalyzer, fieldname).keys().get(0)));
           attrs.addElement(new Attribute(term));
         }
         termId = termIdMap.get(term);
@@ -1768,7 +2040,6 @@ public class FISQueryExpander {
         }
       }
     }
-    OpenObjectFloatHashMap<String> queryFreq = queryTermFreq(query, null);
     PriorityQueue<ScoreIxObj<String>>[] result = new PriorityQueue[clusterer.numberOfClusters()];
     OpenObjectFloatHashMap<String> queryTerms = queryTermFreq(query, null);
     for (int c = 0; c < clusterer.numberOfClusters(); ++c) {
@@ -1992,7 +2263,7 @@ public class FISQueryExpander {
           for (String termy : termSet) {
             int idy = termIdMap.get(termy);
             if (idy == idx) {
-              mi =+ (float) (probX * Math.log(1.0 / probX) / LOG2);
+              mi = +(float) (probX * Math.log(1.0 / probX) / LOG2);
               continue;
             }
             
@@ -2086,7 +2357,7 @@ public class FISQueryExpander {
           for (String termy : patterny) {
             int idy = termIdMap.get(termy);
             if (idy == idx) {
-              mutualEntropy =+ (float) (probX * Math.log(1.0 / probX) / LOG2);
+              mutualEntropy = +(float) (probX * Math.log(1.0 / probX) / LOG2);
               continue;
             }
             float probY = termSupport.get(idy) / totalSupport;
