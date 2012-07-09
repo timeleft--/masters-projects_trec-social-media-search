@@ -64,13 +64,15 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
       "/u2/yaboulnaga/datasets/twitter-trec2011/assoc-mr_0608-0530/index-closed_stemmed-stored");
   
   private File twtIncIxLoc = new File(
-      "/u2/yaboulnaga/datasets/twitter-trec2011/" + "trash/index-stemmed_8hr-incremental");
-      //"stemmed-stored_8hr-increments");
+      "/u2/yaboulnaga/datasets/twitter-trec2011/" +
+          // "trash/index-stemmed_8hr-incremental");
+          "stemmed-stored_8hr-increments");
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-stemmed_8hr-incremental");
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-tweets_8hr-increments");
   
-  private static final String TWT_CHUNKS_ROOT = "/u2/yaboulnaga/datasets/twitter-trec2011/" + "trash/index-stemmed_chunks";
-//  		"stemmed-stored_chunks";
+  private static final String TWT_CHUNKS_ROOT = "/u2/yaboulnaga/datasets/twitter-trec2011/"
+      // + "trash/index-stemmed_chunks";
+      + "stemmed-stored_chunks";
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-stemmed_chunks";
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-tweets_chunks";
   private static final String RESULT_PATH = "/u2/yaboulnaga/datasets/twitter-trec2011/runs/";
@@ -107,8 +109,6 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   private static final String TAG_SVD = "svd";
   
   private static final boolean SORT_TOPICS_CHRONOLOGICALLY = false;
-
-  
   
   private static File[] twtChunkIxLocs;
   
@@ -122,7 +122,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   static QRelUtil qrelUtil;
   
   FISQueryExpander target;
-
+  
   /**
    * query_id, iter, docno, rank, sim, run_id
    * 
@@ -132,7 +132,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   public class TrecResultFileCollector extends QueryExpansionBM25Collector {
     // save myself the pain of removing duplicate documents (FIXME: why are they still appearing)
     // And hopefully increase the MAP without decreasing recall (requires paramNormalize = true)
-    private static final float SCORE_THRESHOLD = 0;
+    private static final float SCORE_THRESHOLD = Float.MIN_VALUE;
     
     final String runTag;
     final String topicId;
@@ -141,7 +141,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
         String pQueryStr, OpenObjectFloatHashMap<String> pQueryTerms, int pQueryLen)
         throws IOException, IllegalArgumentException, SecurityException, InstantiationException,
         IllegalAccessException, InvocationTargetException {
-//      (paramBM25StemmedIDF ? TweetField.STEMMED_EN.name : TweetField.TEXT.name),
+      // (paramBM25StemmedIDF ? TweetField.STEMMED_EN.name : TweetField.TEXT.name),
       super(pTarget, TweetField.TEXT.name,
           pQueryStr, pQueryTerms, pQueryLen,
           paramNumEnglishStopWords, MAX_RESULTS,
@@ -165,7 +165,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
       for (ScoreIxObj<String> tweet : resultSet.keySet()) {
         float score = (paramNormalize ? ((tweet.score - minScore) / (maxScore - minScore))
             : tweet.score);
-        if(paramNormalize && score <= SCORE_THRESHOLD){
+        if (paramNormalize && score <= SCORE_THRESHOLD) {
           continue;
         }
         wr.append(topicId).append(' ')
@@ -251,9 +251,9 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     // openWriterForTag(TAG_QUERY_CONDPROB);
     // openWriterForTag(TAG_KL_DIVER);
     // openWriterForTag(TAG_CLUSTER_PATTERNS);
-    // openWriterForTag(TAG_CLUSTER_TERMS);
-    openWriterForTag(TAG_MARKOV);
-//    openWriterForTag(TAG_SVD);
+    openWriterForTag(TAG_CLUSTER_TERMS);
+    // openWriterForTag(TAG_MARKOV);
+    // openWriterForTag(TAG_SVD);
     
   }
   
@@ -497,7 +497,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
         target.twtSearcher.search(timedQuery, collector);
         collector.writeResults();
       }
-   // /////////////////////////////////////////////////////////////
+      // /////////////////////////////////////////////////////////////
       if (resultWriters.containsKey(TAG_SVD)) {
         
         MutableFloat minXTermScore = new MutableFloat();
@@ -526,7 +526,6 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
         target.twtSearcher.search(timedQuery, collector);
         collector.writeResults();
       }
-      
       
       // ////////////////////////////
       OpenObjectFloatHashMap<String> xQueryTerms;
@@ -620,8 +619,14 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
         List<MutableFloat> totalXTermScores = Lists.newArrayList();
         
         PriorityQueue<ScoreIxObj<String>>[] clustersTerms = target
-            .convertResultToWeightedTermsByClusteringTerms(fis, queryStr, paramClosedOnly,
-                minXTermScores, maxXTermScores, totalXTermScores, paramClusteringWeight);
+            .weightedTermsByClusteringTerms(fis,
+                queryStr,
+                numItemsetsToConsider,
+                minXTermScores,
+                maxXTermScores,
+                totalXTermScores);
+        // .convertResultToWeightedTermsByClusteringTerms(fis, queryStr, paramClosedOnly,
+        // minXTermScores, maxXTermScores, totalXTermScores, paramClusteringWeight);
         xQueryTerms = new OpenObjectFloatHashMap<String>();
         xQueryLen = new MutableLong(0);
         timedQuery = target.expandAndFilterQuery(queryTerms,
