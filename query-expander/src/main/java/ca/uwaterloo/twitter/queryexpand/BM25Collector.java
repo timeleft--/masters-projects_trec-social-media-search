@@ -179,6 +179,10 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
 //              docLen, stemmingAnalyzer, docTextField);
 //        } else {
           String tweet = doc.get(docTextField);
+          if(tweet == null || tweet.isEmpty()){
+            LOG.error("Couldn't retrieve neither vector nor text for field {} in document {}", docTextField, docId + docBase);
+            return;
+          }
           docTerms = target.queryTermFreq(tweet, docLen);
 //        }
         ld = docLen.floatValue();

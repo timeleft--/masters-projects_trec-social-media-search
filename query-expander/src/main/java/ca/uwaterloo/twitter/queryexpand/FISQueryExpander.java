@@ -322,7 +322,7 @@ public class FISQueryExpander {
   // Whjen I was using lucene scorer I had to guess and try.. I was dumb!
   // // Must be large, because otherwise the topic drifts quickly...
   // // it seems that the top itemsets are repetetive, so we need more breadth
-  private static final int NUM_HITS_INTERNAL_DEFAULT = 100;
+  private static final int NUM_HITS_INTERNAL_DEFAULT = 1000;
   // When using the lucene scorer it was an observational experiment.. I thought I was doing magic
   // :(
   // // This is enough recall and the concept doesn't drift much.. one more level pulls trash..
@@ -364,10 +364,11 @@ public class FISQueryExpander {
   private static final boolean EXPAND_TERM_COUNT_EVENLY_OVER_CLUSTERS = false;
   private static final boolean REAL_TIME_PATTERN_FREQ = false;
   public static final boolean PROPAGATE_IS_WEIGHTS_DEFAULT = true;
-  private static final float TWITTER_CORPUS_LENGTH_IN_TERMS = 100055949; // / FIS TOTAL LENGTH:
-                                                                         // 5760589;
+  private static final float TWITTER_CORPUS_LENGTH_IN_TERMS = 100055949;
+  private static final float ITEMSET_CORPUS_LENGTH_IN_TERMS = 5760589;
   public static final double PARAM_MARKOV_ALPHA = 0.5;
   public static final int PARAM_MARKOV_NUM_WALK_STEPS = 2;
+  private static final boolean PARAM_MARKOV_PROB_DOC_FROM_TWITTER = false;
   
   private static boolean paramClusteringWeightInsts = true;
   
@@ -625,7 +626,7 @@ public class FISQueryExpander {
                 null,
                 null,
                 PARAM_MARKOV_NUM_WALK_STEPS,
-                PARAM_MARKOV_ALPHA);
+                PARAM_MARKOV_ALPHA, PARAM_MARKOV_PROB_DOC_FROM_TWITTER);
           }
           
           List<String> termList = Lists.newArrayListWithCapacity(weightedTerms.size());
@@ -1073,9 +1074,11 @@ public class FISQueryExpander {
   
   public OpenObjectFloatHashMap<String> weightedTermsMarkovChain(
       OpenIntFloatHashMap fisRs,
-      String query, int numItemsetsToUse, // boolean propagateSupport,
+      String query,
+      int numItemsetsToUse, // boolean propagateSupport,
       MutableFloat minScoreOut,
-      MutableFloat maxScoreOut, MutableFloat totalScoreOut, int numWalkSteps, double alpha)
+      MutableFloat maxScoreOut, MutableFloat totalScoreOut, int numWalkSteps, double alpha,
+      boolean pdwFromTwitter)
       throws IOException,
       org.apache.lucene.queryParser.ParseException {
     
@@ -1135,20 +1138,27 @@ public class FISQueryExpander {
           termIdMap.put(term, termId);
           // idTermMap.add(term);
           bPWDTemp.add(new OpenIntFloatHashMap());
-          stemmedList.add(new Term(TweetField.STEMMED_EN.name,
-              queryTermFreq(term, null, tweetAnalyzer, TweetField.STEMMED_EN.name).keys().get(0)));
+          String fieldname = (pdwFromTwitter ? TweetField.STEMMED_EN.name
+              : AssocField.STEMMED_EN.name);
+          stemmedList.add(new Term(fieldname,
+              queryTermFreq(term, null, tweetAnalyzer, fieldname).keys().get(0)));
         }
         termId = termIdMap.get(term);
         
         Term stemmed = stemmedList.get(termId);
         
         // /// HEY THESE ARE MY OWN APPROXIMATIONSS >>> HOPE FOR THE BESTT!!!!!
-        float docFreq = twtIxReader.docFreq(stemmed);
+        float totalLength;
+        if (pdwFromTwitter) {
+          totalLength = twtIxReader.docFreq(stemmed) * BM25Collector.LAVG;
+        } else {
+          totalLength = fisIxReader.docFreq(stemmed) * FISCollector.AVG_PATTERN_LENGTH;
+        }
         float pdw;
-        if (docFreq == 0) {
+        if (totalLength == 0) {
           pdw = 0;
         } else {
-          pdw = termSet.size() / (docFreq * BM25Collector.LAVG);
+          pdw = (termSet.size() * patternPair.getSecond()) / (totalLength);
         }
         float pwd = 1.0f / termSet.size();
         
@@ -1161,9 +1171,11 @@ public class FISQueryExpander {
       // patternSupportMap.put(pattern, patternPair.getSecond());
     }
     
-    if(bPWDTemp.size() == 0){
+    if (bPWDTemp.size() == 0) {
       return new OpenObjectFloatHashMap<String>();
     }
+    // In case rank is less
+    numItemsetsToUse = rank;
     
     // There's a transpose happening while copying
     double[][] aPDW = new double[bPWDTemp.size()][numItemsetsToUse];
@@ -1219,10 +1231,10 @@ public class FISQueryExpander {
         }
         if (qTermProb != 0) {
           pqd[d] *= qTermProb;
-        } 
-//        else {
-//          LOG.trace("breakpoint");
-//        }
+        }
+        // else {
+        // LOG.trace("breakpoint");
+        // }
       }
       if (pqd[d] == 1) {
         pqd[d] = 0;
@@ -1251,9 +1263,13 @@ public class FISQueryExpander {
       if (score > 0) {
         int termId = termIdMap.get(term);
         // TODONE Smoothing
-        score *= (twtIxReader.docFreq(stemmedList.get(termId)) + termWeightSmoother)
-            / (TWITTER_CORPUS_LENGTH_IN_TERMS + termWeightSmoother);
-        
+        if (pdwFromTwitter) {
+          score *= (twtIxReader.docFreq(stemmedList.get(termId)) + termWeightSmoother)
+              / (TWITTER_CORPUS_LENGTH_IN_TERMS + termWeightSmoother);
+        } else {
+          score *= fisIxReader.docFreq(stemmedList.get(termId)) + termWeightSmoother
+              / (ITEMSET_CORPUS_LENGTH_IN_TERMS + termWeightSmoother);
+        }
         result.put(term, score);
       } else {
         result.removeKey(term);
@@ -2583,7 +2599,11 @@ public class FISQueryExpander {
           encounteredXTerms.add(xterm.obj);
         }
         
-        ++t;
+        // Don't count hashtag and its exact word (probably from the twitter tokenizer)
+        // without the # as distinct extra terms
+        if (!encounteredXTerms.contains("#" + xterm.obj)) {
+          ++t;
+        }
         
         if (xQueryTermsOut != null)
           // Whatever I was doing earlier.. the term maps now store occurrence count

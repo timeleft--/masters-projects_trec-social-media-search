@@ -76,7 +76,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
       "/u2/yaboulnaga/datasets/twitter-trec2011/2011.topics.MB1-50.xml";
   private static final String QREL_PATH = "/u2/yaboulnaga/datasets/twitter-trec2011/microblog11-qrels.txt";
   
-  private int numItemsetsToConsider = 100;
+  private int numItemsetsToConsider = 1000;
   private int numTermsToAppend = 10;
   private final boolean trecEvalFormat = true;
   private boolean paramNormalize = true;
@@ -89,6 +89,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   private boolean paramClusteringWeight = true;
   private int paramNumEnglishStopWords = 0;
   private boolean paramBM25StemmedIDF = true;
+  private boolean paramMarkovProbDocFromTwitter = false;
   
   private static final int LOG_TOP_COUNT = 30;
   
@@ -116,7 +117,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   static QRelUtil qrelUtil;
   
   FISQueryExpander target;
-  
+
   /**
    * query_id, iter, docno, rank, sim, run_id
    * 
@@ -250,7 +251,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
         + "_closed" + paramClosedOnly + "-prop" + paramPropagateItemSetScores + "-subsetidf"
         + (paramsBoostSubsets && paramSubsetBoostIDF) + "-parseMode" + paramQueryParseMode
         + "-parseTQ" + paramParseToTermQueries + "-stop" + paramNumEnglishStopWords + "-stemmedIDF"
-        + paramBM25StemmedIDF);
+        + paramBM25StemmedIDF + "-mpdw" + paramMarkovProbDocFromTwitter);
     if (resultFile.exists()) {
       // throw new IllegalArgumentException("The result file already exists.. won't overwrite");
       FileUtils
@@ -465,7 +466,8 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
             maxXTermScore,
             null,
             FISQueryExpander.PARAM_MARKOV_NUM_WALK_STEPS,
-            FISQueryExpander.PARAM_MARKOV_ALPHA);
+            FISQueryExpander.PARAM_MARKOV_ALPHA,
+            paramMarkovProbDocFromTwitter);
         
         OpenObjectFloatHashMap<String> xQueryTerms = new OpenObjectFloatHashMap<String>();
         MutableLong xQueryLen = new MutableLong(0);
