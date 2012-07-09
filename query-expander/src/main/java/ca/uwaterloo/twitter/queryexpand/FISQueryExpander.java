@@ -1992,8 +1992,10 @@ public class FISQueryExpander {
           for (String termy : termSet) {
             int idy = termIdMap.get(termy);
             if (idy == idx) {
+              mi =+ (float) (probX * Math.log(1.0 / probX) / LOG2);
               continue;
             }
+            
             float probY = termSupport.get(idy) / totalSupport;
             
             double cooccur = insts.instance(idx).value(idy);
@@ -2084,6 +2086,7 @@ public class FISQueryExpander {
           for (String termy : patterny) {
             int idy = termIdMap.get(termy);
             if (idy == idx) {
+              mutualEntropy =+ (float) (probX * Math.log(1.0 / probX) / LOG2);
               continue;
             }
             float probY = termSupport.get(idy) / totalSupport;
