@@ -136,6 +136,7 @@ public class PartitionByTimestamp {
         if (timestamp == null) {
           statusCount.put(-1,
               statusCount.get(-1) + 1);
+          LOG.debug("Null timestamp for tweet with id {} and http response {}", id, htmlResponse);
           continue;
         }
         
