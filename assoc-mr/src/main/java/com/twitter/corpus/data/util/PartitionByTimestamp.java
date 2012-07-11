@@ -35,6 +35,7 @@ import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.mahout.common.Pair;
 import org.apache.mahout.common.Parameters;
 import org.apache.mahout.freqtermsets.PFPGrowth;
+import org.apache.mahout.math.map.OpenIntIntHashMap;
 import org.apache.mahout.math.map.OpenLongObjectHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,13 +62,25 @@ public class PartitionByTimestamp {
   public static void main(String[] args) throws IOException {
     Configuration conf = new Configuration();
     FileSystem fs = FileSystem.get(conf);
-    Path htmlPath = new Path("file:///u2/yaboulnaga/Shared/datasets/twitter-trec2011/html");
+    Path htmlPath = new Path("file:///u2/yaboulnaga/datasets/twitter-trec2011/html");
     CorpusReader<PairOfLongString, HtmlStatus> reader =
         new CorpusReader<PairOfLongString, HtmlStatus>(htmlPath, fs, ".*\\.html\\.seq");
     
+    File outPath = new File(
+        /* "file:// */"/u2/yaboulnaga/Shared/datasets/twitter-trec2011/html_hour-5min");
+    // "hdfs://scspc400.cs.uwaterloo.ca:9000/twitter2011/byhour/");
+    
+    // HadoopUtil.delete(conf, outPath);
+    // FileUtils.deleteQuietly(outPath);
+    if (outPath.exists()) {
+      throw new IllegalArgumentException("Out Path already exists: " + outPath);
+    }
+    
+    OpenIntIntHashMap statusCount = new OpenIntIntHashMap();
+    
     Set<String> invalidTweetsSet = Sets.newHashSet();
     File validTweetsFile = new File(
-        "/u2/yaboulnaga/Shared/datasets/twitter-trec2011/tweetids/ian-id-status.01-May-2012");
+        "/u2/yaboulnaga/datasets/twitter-trec2011/tweetids/ian_may2012/ian-id-status.01-May-2012");
     BufferedReader validTweetsRd = new BufferedReader(Channels.newReader(FileUtils
         .openInputStream(validTweetsFile).getChannel(),
         "UTF-8"));
@@ -79,12 +92,6 @@ public class PartitionByTimestamp {
         invalidTweetsSet.add(fields[0]);
       }
     }
-    File outPath = new File(
-        /* "file:// */"/u2/yaboulnaga/Shared/datasets/twitter-trec2011/html_hour-5min");
-    // "hdfs://scspc400.cs.uwaterloo.ca:9000/twitter2011/byhour/");
-    
-    // HadoopUtil.delete(conf, outPath);
-    FileUtils.deleteQuietly(outPath);
     
     // DefaultStringifier<Pair<Pair<Long, String>, HtmlStatus>> stringifier =
     // new DefaultStringifier<Pair<Pair<Long, String>, HtmlStatus>>(
@@ -98,18 +105,40 @@ public class PartitionByTimestamp {
       while ((record = reader.next()) != null) {
         long id = record.getFirst().getLeftElement();
         HtmlStatus htmlStatus = record.getSecond();
+        // // FIXME: 301 when the new corpus arrives
+        // if (htmlStatus.getHttpStatusCode() >= 300) {
+        // continue;
+        // }
+        String tweet = extractTweet(htmlStatus.getHtml());
+        // if (tweet == null || tweet.isEmpty()) {
+        // statusCount.put(0,
+        // statusCount.get(0) + 1);
+        // continue;
+        // }
+        // Long timestamp = extractTimestamp(htmlStatus.getHtml(), id);
+        // // if (timestamp == null) {
+        // // continue;
+        // // }
+        int htmlResponse = htmlStatus.getHttpStatusCode();
+        if ((tweet == null || tweet.isEmpty()) // || (timestamp == null))
+            && (htmlResponse == 200 || htmlResponse == 301)) {
+          htmlResponse = 0;
+        }
+        statusCount.put(htmlResponse,
+            statusCount.get(htmlResponse) + 1);
         
-        // FIXME: 301 when the new corpus arrives
-        if (htmlStatus.getHttpStatusCode() >= 300) {
+        if (invalidTweetsSet.contains("" + id) || htmlResponse == 0
+            || !(htmlResponse == 200 || htmlResponse == 301)) {
           continue;
         }
-        if (invalidTweetsSet.contains("" + id)) {
-          continue;
-        }
+        
         Long timestamp = extractTimestamp(htmlStatus.getHtml(), id);
         if (timestamp == null) {
+          statusCount.put(-1,
+              statusCount.get(-1) + 1);
           continue;
         }
+        
         long hourstamp = getHourTimestamp(timestamp);
         
         if (!folders.containsKey(hourstamp)) {
@@ -177,10 +206,6 @@ public class PartitionByTimestamp {
             + timestamp + " doesn't fit in the prepared folder/file " +
             folderEndTime + "/" + fileEndTime;
         
-        String tweet = extractTweet(record.getSecond().getHtml());
-        if (tweet == null || tweet.isEmpty()) {
-          continue;
-        }
         // wr.append(record.getFirst(), record.getSecond());
         // wr.append(stringifier.toString(new Pair<Pair<Long, String>, HtmlStatus>(
         // new Pair<Long, String>(record.getFirst().getKey(), record.getFirst().getValue()),
@@ -191,6 +216,7 @@ public class PartitionByTimestamp {
             // record.getSecond().getTimestamp() + "\t"
             + StringEscapeUtils.escapeJava(tweet) + "\n");
       }
+      FileUtils.writeStringToFile(new File(outPath, "httpStatusCount.txt"), statusCount.toString());
     } finally {
       reader.close();
       
@@ -273,7 +299,7 @@ public class PartitionByTimestamp {
       timeList = chilrdenCache.get(cacheKey);
     } else {
       File[] children = FileUtils.listFiles(parent, null, false).toArray(new File[0]); // fs.listStatus(parent);
-      //TODO: provide OS indpendent comparator
+      // TODO: provide OS indpendent comparator
       Arrays.sort(children);
       timeList = new ArrayList<Pair<Long, File>>(children.length);
       
