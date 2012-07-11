@@ -75,7 +75,7 @@ public class PartitionByTimestamp {
     Pattern tabSplit = Pattern.compile("\\s");
     while ((line = validTweetsRd.readLine()) != null) {
       String[] fields = tabSplit.split(line);
-      if (!"200".equals(fields[1])) {
+      if (!("200".equals(fields[1]) || "301".equals(fields[1]))) {
         invalidTweetsSet.add(fields[0]);
       }
     }

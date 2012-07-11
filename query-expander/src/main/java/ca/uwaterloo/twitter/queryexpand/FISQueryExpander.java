@@ -53,6 +53,7 @@ import org.apache.lucene.search.FilteredQuery;
 import org.apache.lucene.search.FuzzyQuery;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.NumericRangeFilter;
+import org.apache.lucene.search.PhraseQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.Scorer;
@@ -144,7 +145,7 @@ public class FISQueryExpander {
         InstantiationException, IllegalAccessException, InvocationTargetException {
       
       super(pTarget, (paramBM25StemmedIDF ? AssocField.STEMMED_EN.name : AssocField.ITEMSET.name),
-          pQueryStr, pQueryTerms, pQueryLen, 0,
+          /* pQueryStr, */pQueryTerms, pQueryLen, 0,
           pMaxResults, ScoreThenSuppRankComparator.class, paramBM25StemmedIDF);
       
       clarityScore = true;
@@ -199,12 +200,12 @@ public class FISQueryExpander {
     }
     
     public QueryExpansionBM25Collector(FISQueryExpander pTarget, String pDocTextField,
-        String pQueryStr, OpenObjectFloatHashMap<String> pQueryTerms, float pQueryLen,
+        /* String pQueryStr, */OpenObjectFloatHashMap<String> pQueryTerms, float pQueryLen,
         int addNEnglishStopWordsToQueryTerms, int pMaxResults,
         Class<? extends Comparator<ScoreIxObj<String>>> comparatorClazz, boolean pStemmedIDF)
         throws IOException, IllegalArgumentException, SecurityException, InstantiationException,
         IllegalAccessException, InvocationTargetException {
-      super(pTarget, pDocTextField, pQueryStr, pQueryTerms, pQueryLen,
+      super(pTarget, pDocTextField, /* pQueryStr, */pQueryTerms, pQueryLen,
           addNEnglishStopWordsToQueryTerms,
           pMaxResults, comparatorClazz, pStemmedIDF);
     }
@@ -212,7 +213,7 @@ public class FISQueryExpander {
     public PriorityQueue<ScoreIxObj<String>>[] expansionTermsByClusterTopResults(
         int numResultsToUse,
         List<MutableFloat> minXTermScoresOut, List<MutableFloat> maxXTermScoresOut,
-        List<MutableFloat> totalXTermScoresOut) throws Exception {
+        List<MutableFloat> totalXTermScoresOut, String queryStr) throws Exception {
       
       if (numResultsToUse <= 0) {
         throw new IllegalArgumentException("Must specify number of results");
@@ -222,7 +223,7 @@ public class FISQueryExpander {
       OpenObjectFloatHashMap<String> termRSFreq = new OpenObjectFloatHashMap<String>();
       float totalRSFreq = 0;
       List<String> idTermMap = Lists.newArrayList();
-//      List<Term> stemmedList = Lists.newArrayList();
+      // List<Term> stemmedList = Lists.newArrayList();
       LinkedHashSet<Set<String>> itemsetsSet = new LinkedHashSet<Set<String>>();
       FastVector attrs = new FastVector();
       
@@ -242,8 +243,8 @@ public class FISQueryExpander {
             docLen,
             tweetStemmingAnalyzer,
             TweetField.STEMMED_EN.name);
-//            tweetNonStemmingAnalyzer,
-//            TweetField.TEXT.name);
+        // tweetNonStemmingAnalyzer,
+        // TweetField.TEXT.name);
         itemsetsSet.add(Sets.newCopyOnWriteArraySet(termDocFreq.keys()));
         
         if (termDocFreq.size() < MIN_ITEMSET_SIZE) { // no repetition .containsKey(termSet)) {
@@ -259,20 +260,20 @@ public class FISQueryExpander {
             termIdMap.put(term, termId);
             idTermMap.add(term);
             bWordDocTemp.add(new OpenIntFloatHashMap());
-//            String fieldname = TweetField.STEMMED_EN.name;
-//            stemmedList.add();
+            // String fieldname = TweetField.STEMMED_EN.name;
+            // stemmedList.add();
             attrs.addElement(new Attribute(term));
           }
           termId = termIdMap.get(term);
           
-//          Term stemmed = stemmedList.get(termId);
+          // Term stemmed = stemmedList.get(termId);
           Term stemmed = new Term(TweetField.STEMMED_EN.name, term);
           
           // /// HEY THESE ARE MY OWN APPROXIMATIONSS >>> HOPE FOR THE BESTT!!!!!
           float globalTi;
           // TODO revise smoothing
-            globalTi = (target.termWeightSmoother + target.twtIxReader.docFreq(stemmed))
-                / (target.termWeightSmoother + TWITTER_CORPUS_LENGTH_IN_TERMS);
+          globalTi = (target.termWeightSmoother + target.twtIxReader.docFreq(stemmed))
+              / (target.termWeightSmoother + TWITTER_CORPUS_LENGTH_IN_TERMS);
           
           bWordDocTemp.get(termId).put(rank, globalTi);
           
@@ -297,8 +298,9 @@ public class FISQueryExpander {
           bPWD[w][d] = bWordDocTemp.get(w).get(d);
           float rsIDF = termRSFreq.get(idTermMap.get(w)) / totalRSFreq;
           float corpusIDF;
-            corpusIDF = 1.0f * target.twtIxReader.docFreq(new Term(TweetField.STEMMED_EN.name,idTermMap.get(w)))
-                / target.twtIxReader.numDocs();
+          corpusIDF = 1.0f
+              * target.twtIxReader.docFreq(new Term(TweetField.STEMMED_EN.name, idTermMap.get(w)))
+              / target.twtIxReader.numDocs();
           if (corpusIDF == 0) {
             // shit happens!!!
             bPWD[w][d] = 0;
@@ -340,6 +342,9 @@ public class FISQueryExpander {
       int d = -1;
       for (Set<String> patternItems : itemsetsSet) {
         ++d;
+        if (d >= numResultsToUse) {
+          break;
+        }
         Instance inst = insts.instance(d);
         for (String item : patternItems) {
           int termId = termIdMap.get(item);
@@ -376,7 +381,13 @@ public class FISQueryExpander {
         }
       }
       PriorityQueue<ScoreIxObj<String>>[] result = new PriorityQueue[clusterer.numberOfClusters()];
-      OpenObjectFloatHashMap<String> queryTerms = target.queryTermFreq(queryStr, null);
+      OpenObjectFloatHashMap<String> queryTerms = target.queryTermFreq(queryStr,
+          null,
+          tweetStemmingAnalyzer,
+          TweetField.STEMMED_EN.name);
+      // tweetNonStemmingAnalyzer,
+      // TweetField.TEXT.name);
+      
       for (int c = 0; c < clusterer.numberOfClusters(); ++c) {
         result[c] = new PriorityQueue<ScoreIxObj<String>>();
         for (String term : termWeights[c].keys()) {
@@ -421,7 +432,7 @@ public class FISQueryExpander {
             null,
             tweetStemmingAnalyzer,
             TweetField.STEMMED_EN.name);
-        // tweetAnalyzer,
+        // tweetNonStemmingAnalyzer,
         // TweetField.TEXT.name);
         if ((hitTerms.size() < MIN_ITEMSET_SIZE)) { // TODO: duplicates? || (.containsKey(termSet)
           continue;
@@ -465,9 +476,14 @@ public class FISQueryExpander {
       // }
       
       for (String term : termFreq.keys()) {
-        Term stemmed = new Term(TweetField.STEMMED_EN.name,
-            target.queryTermFreq(term, null, tweetStemmingAnalyzer, TweetField.STEMMED_EN.name).keys()
-                .get(0));
+        Term stemmed = new Term(TweetField.STEMMED_EN.name, term);
+        // already stemmed
+        // target.queryTermFreq(term, null,
+        // // tweetStemmingAnalyzer, TweetField.STEMMED_EN.name)
+        // tweetNonStemmingAnalyzer,
+        // TweetField.TEXT.name)
+        // .keys()
+        // .get(0));
         float docFreq = target.twtIxReader.docFreq(stemmed);
         float idfGlobal = 1.0f * docFreq / target.twtIxReader.numDocs();
         float idfLocal = termFreq.get(term) / rank;
@@ -608,15 +624,16 @@ public class FISQueryExpander {
   private static final int MAX_LEVELS_EXPANSION = 1;
   private static final int NUM_HITS_SHOWN_DEFAULT = 1000;
   
-  private static final Analyzer ANALYZER = new TwitterAnalyzer();// new
-                                                                 // EnglishAnalyzer(Version.LUCENE_36);
+  // private static final Analyzer ANALYZER = new TwitterAnalyzer();// new
+  // // EnglishAnalyzer(Version.LUCENE_36);
   private static final boolean CHAR_BY_CHAR = false;
   
   private static final int MIN_ITEMSET_SIZE = 2;
   
   private static final String RETWEET_TERM = "rt";
   
-  private static final float ITEMSET_LEN_AVG_DEFAULT = 5;// FIXME: there is a correct number in FISCollector
+  private static final float ITEMSET_LEN_AVG_DEFAULT = 5;// FIXME: there is a correct number in
+                                                         // FISCollector
   
   private static final float ITEMSET_LEN_WEIGHT_DEFAULT = 0.33f;
   
@@ -650,6 +667,7 @@ public class FISQueryExpander {
   private static final boolean PARAM_MUTUAL_ENTROPY_START_WITH_ENTROPY = false;
   private static final boolean PARAM_CLUSTERING_APPLY_LSA = false;
   private static final boolean PARAM_LANGUAGE_IDENTIFICATION = false;
+  public static final boolean SEARCH_NON_STEMMED = true;
   
   private static boolean paramClusteringWeightInsts = true;
   
@@ -834,7 +852,7 @@ public class FISQueryExpander {
           fisRs = qEx.relatedItemsets(query.toString(), minScore);
         }
         
-        Query parsedQuery = qEx.twtQparser.parse(query.toString());
+        // Query parsedQuery = qEx.twtQparser.parse(query.toString());
         
         if (mode == 0) {
           IntArrayList keyList = new IntArrayList(fisRs.size());
@@ -1004,34 +1022,37 @@ public class FISQueryExpander {
           // twtQ.add(qEx.twtQparser.parse(RETWEET_QUERY).rewrite(qEx.twtIxReader), Occur.MUST_NOT);
           
           if (mode == 10) {
-            twtQ = qEx.filterQuery(parsedQuery);
+            throw new UnsupportedOperationException();
+            // twtQ = qEx.filterQuery(new PhraseQuery().//qEx.twtQparser.parse(query.toString()));
           } else if (mode == 20) {
-            // twtQ.add(qEx.convertResultToBooleanQuery(fisRs,
-            // query.toString(),
-            // NUM_HITS_INTERNAL_DEFAULT),
-            // Occur.SHOULD);
-            // twtQ.setMinimumNumberShouldMatch(1);
-            
-            List<MutableFloat> minXTermScores = Lists.newArrayList();
-            List<MutableFloat> maxXTermScores = Lists.newArrayList();
-            List<MutableFloat> totalXTermScores = Lists.newArrayList();
-            
-            PriorityQueue<ScoreIxObj<String>>[] clustersTerms = qEx
-                .convertResultToWeightedTermsByClusteringPatterns(fisRs, query.toString(), true,
-                    minXTermScores, maxXTermScores, totalXTermScores, paramClusteringWeightInsts);
-            
-            MutableLong queryLen = new MutableLong();
-            OpenObjectFloatHashMap<String> queryTerms = qEx.queryTermFreq(query.toString(),
-                queryLen);
-            twtQ = qEx.expandAndFilterQuery(queryTerms,
-                queryLen.intValue(),
-                clustersTerms,
-                minXTermScores.toArray(new MutableFloat[0]),
-                maxXTermScores.toArray(new MutableFloat[0]),
-                clustersTerms.length * 7,
-                null,
-                null,
-                ExpandMode.DIVERSITY);
+            throw new UnsupportedOperationException();
+            // // twtQ.add(qEx.convertResultToBooleanQuery(fisRs,
+            // // query.toString(),
+            // // NUM_HITS_INTERNAL_DEFAULT),
+            // // Occur.SHOULD);
+            // // twtQ.setMinimumNumberShouldMatch(1);
+            //
+            // List<MutableFloat> minXTermScores = Lists.newArrayList();
+            // List<MutableFloat> maxXTermScores = Lists.newArrayList();
+            // List<MutableFloat> totalXTermScores = Lists.newArrayList();
+            //
+            // PriorityQueue<ScoreIxObj<String>>[] clustersTerms = qEx
+            // .convertResultToWeightedTermsByClusteringPatterns(fisRs, query.toString(), true,
+            // minXTermScores, maxXTermScores, totalXTermScores, paramClusteringWeightInsts);
+            //
+            // MutableLong queryLen = new MutableLong();
+            // OpenObjectFloatHashMap<String> queryTerms = qEx.queryTermFreq(query.toString(),
+            // queryLen, tweetStemmingAnalyzer,
+            // TweetField.STEMMED_EN.name);
+            // twtQ = qEx.expandAndFilterQuery(queryTerms,
+            // queryLen.intValue(),
+            // clustersTerms,
+            // minXTermScores.toArray(new MutableFloat[0]),
+            // maxXTermScores.toArray(new MutableFloat[0]),
+            // clustersTerms.length * 7,
+            // null,
+            // null,
+            // ExpandMode.DIVERSITY);
           }
           
           LOG.debug("Querying Twitter by: " + twtQ.toString());
@@ -1067,31 +1088,34 @@ public class FISQueryExpander {
     Set<String> termSet = Sets.newCopyOnWriteArraySet(Arrays.asList(terms.getTerms()));
     float freq;
     if (REAL_TIME_PATTERN_FREQ) {
-      Query countQuery = twtQparser.parse(termSet.toString().replaceAll(COLLECTION_STRING_CLEANER,
-          ""));
-      countQuery = filterQuery(countQuery);
-      final MutableFloat count = new MutableFloat(0);
-      twtSearcher.search(countQuery, new Collector() {
-        // counting collector
-        @Override
-        public void setScorer(Scorer scorer) throws IOException {
-        }
-        
-        @Override
-        public void setNextReader(IndexReader reader, int docBase) throws IOException {
-        }
-        
-        @Override
-        public void collect(int doc) throws IOException {
-          count.add(1);
-        }
-        
-        @Override
-        public boolean acceptsDocsOutOfOrder() {
-          return true;
-        }
-      });
-      freq = count.floatValue();
+      throw new UnsupportedOperationException();
+      // Query countQuery =
+      // twtQparser.parse(termSet.toString().replaceAll(COLLECTION_STRING_CLEANER,
+      // ""));
+      // countQuery = filterQuery(countQuery);
+      // final MutableFloat count = new MutableFloat(0);
+      // twtSearcher.search(countQuery, new Collector() {
+      // // counting collector
+      // @Override
+      // public void setScorer(Scorer scorer) throws IOException {
+      // }
+      //
+      // @Override
+      // public void setNextReader(IndexReader reader, int docBase) throws IOException {
+      // }
+      //
+      // @Override
+      // public void collect(int doc) throws IOException {
+      // count.add(1);
+      // }
+      //
+      // @Override
+      // public boolean acceptsDocsOutOfOrder() {
+      // return true;
+      // }
+      // });
+      // freq = count.floatValue();
+      // if(freq < MINSUPPORT) freq = 0;
     } else {
       Document doc = fisIxReader.document(docid);
       freq = Float.parseFloat(doc
@@ -1108,7 +1132,10 @@ public class FISQueryExpander {
     if (numTermsToReturn <= 0) {
       numTermsToReturn = Integer.MAX_VALUE;
     }
-    OpenObjectFloatHashMap<String> queryTerms = queryTermFreq(query, null);
+    OpenObjectFloatHashMap<String> queryTerms = queryTermFreq(query,
+        null,
+        tweetNonStemmingAnalyzer,
+        TweetField.TEXT.name);
     OpenObjectFloatHashMap<String> result = new OpenObjectFloatHashMap<String>();
     
     if (minScoreOut != null) {
@@ -1169,7 +1196,10 @@ public class FISQueryExpander {
       boolean propagateSupport)
       throws IOException, org.apache.lucene.queryParser.ParseException {
     
-    OpenObjectFloatHashMap<String> queryTerms = queryTermFreq(query, null);
+    OpenObjectFloatHashMap<String> queryTerms = queryTermFreq(query,
+        null,
+        tweetNonStemmingAnalyzer,
+        TweetField.TEXT.name);
     OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>();
     
     if (minScoreOut != null) {
@@ -1235,7 +1265,10 @@ public class FISQueryExpander {
       boolean pdwFromTwitter)
       throws IOException, org.apache.lucene.queryParser.ParseException {
     
-    OpenObjectFloatHashMap<String> queryTerms = queryTermFreq(query, null);
+    OpenObjectFloatHashMap<String> queryTerms = queryTermFreq(query,
+        null,
+        tweetNonStemmingAnalyzer,
+        TweetField.TEXT.name);
     OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>();
     
     if (minScoreOut != null) {
@@ -1287,7 +1320,11 @@ public class FISQueryExpander {
       String fieldname = (pdwFromTwitter ? TweetField.STEMMED_EN.name
           : AssocField.STEMMED_EN.name);
       Term termTerm = new Term(fieldname,
-          queryTermFreq(term, null, tweetStemmingAnalyzer, fieldname).keys().get(0));
+          queryTermFreq(term, null,
+              tweetStemmingAnalyzer,
+              // tweetNonStemmingAnalyzer,
+              fieldname)
+              .keys().get(0));
       float probBefore;
       if (pdwFromTwitter) {
         probBefore = twtIxReader.docFreq(termTerm) / TWITTER_CORPUS_LENGTH_IN_TERMS;
@@ -1330,7 +1367,10 @@ public class FISQueryExpander {
     OpenObjectFloatHashMap<String> result = new OpenObjectFloatHashMap<String>();
     
     // MutableLong qLen = new MutableLong();
-    OpenObjectFloatHashMap<String> queryFreq = queryTermFreq(query, null);
+    OpenObjectFloatHashMap<String> queryFreq = queryTermFreq(query,
+        null,
+        tweetNonStemmingAnalyzer,
+        TweetField.TEXT.name);
     Set<String> querySet = Sets.newCopyOnWriteArraySet(queryFreq.keys());
     Set<Set<String>> queryPowerSet = Sets.powerSet(querySet);
     OpenObjectFloatHashMap<Set<String>> subsetFreq = new OpenObjectFloatHashMap<Set<String>>();
@@ -1626,7 +1666,10 @@ public class FISQueryExpander {
     OpenObjectFloatHashMap<String> result = new OpenObjectFloatHashMap<String>();
     
     // MutableLong qLen = new MutableLong();
-    OpenObjectFloatHashMap<String> queryFreq = queryTermFreq(query, null);
+    OpenObjectFloatHashMap<String> queryFreq = queryTermFreq(query,
+        null,
+        tweetNonStemmingAnalyzer,
+        TweetField.TEXT.name);
     Set<String> querySet = Sets.newCopyOnWriteArraySet(queryFreq.keys());
     
     // probabibilty of query given document
@@ -1841,7 +1884,10 @@ public class FISQueryExpander {
     SingularValueDecomposition svd = new SingularValueDecomposition(B);
     double[] termWeights = svd.getSingularValues();
     
-    OpenObjectFloatHashMap<String> queryFreq = queryTermFreq(query, null);
+    OpenObjectFloatHashMap<String> queryFreq = queryTermFreq(query,
+        null,
+        tweetNonStemmingAnalyzer,
+        TweetField.TEXT.name);
     OpenObjectFloatHashMap<String> result = new OpenObjectFloatHashMap<String>();
     for (int w = 0; w < termWeights.length; ++w) {
       if (termWeights[w] == 0) {
@@ -2001,7 +2047,7 @@ public class FISQueryExpander {
       if (totalXTermScoresOut != null)
         totalXTermScoresOut.add(new MutableFloat(0));
     }
-    
+    // float maxDistance = Float.MIN_VALUE;
     int d = -1;
     for (Set<String> patternItems : itemsetsMap.keySet()) {
       ++d;
@@ -2010,45 +2056,61 @@ public class FISQueryExpander {
         int termId = termIdMap.get(item);
         String term = ((Attribute) attrs.elementAt(termId)).name();
         double[] distrib = clusterer.distributionForInstance(inst);
+        int clusterMembershipCount = 0;
         for (int c = 0; c < distrib.length; ++c) {
           if (distrib[c] <= CLUSTER_MEMBERSHIP_THRESHOLD) {
             continue;
           }
+          ++clusterMembershipCount;
           
           // Closeness to centroid
           Instance centroid = clusterer.getClusterCenters().instance(c);
-          float score = 1 - (float) clusterer.getDistanceF().distance(centroid, inst);
-          
+          // "1 -" is the last thing to do.. sucker!!!!!
+          float score = (float) clusterer.getDistanceF().distance(centroid, inst);
           score += termWeights[c].get(term);
+          
+          // if (maxDistance < score) {
+          // maxDistance = score;
+          // }
+          
           termWeights[c].put(term, score);
-          
-          if (minXTermScoresOut != null) {
-            if (score < minXTermScoresOut.get(c).floatValue()) {
-              minXTermScoresOut.get(c).setValue(score);
-            }
-          }
-          
-          if (maxXTermScoresOut != null) {
-            if (score > maxXTermScoresOut.get(c).floatValue()) {
-              maxXTermScoresOut.get(c).setValue(score);
-            }
-          }
-          
-          if (totalXTermScoresOut != null) {
-            totalXTermScoresOut.get(c).add(score);
-          }
+        }
+        for (int c = 0; c < distrib.length; ++c) {
+          termWeights[c].put(term, termWeights[c].get(term) / clusterMembershipCount);
         }
       }
     }
+    
     PriorityQueue<ScoreIxObj<String>>[] result = new PriorityQueue[clusterer.numberOfClusters()];
-    OpenObjectFloatHashMap<String> queryTerms = queryTermFreq(query, null);
+    OpenObjectFloatHashMap<String> queryTerms = queryTermFreq(query,
+        null,
+        tweetNonStemmingAnalyzer,
+        TweetField.TEXT.name);
     for (int c = 0; c < clusterer.numberOfClusters(); ++c) {
       result[c] = new PriorityQueue<ScoreIxObj<String>>();
       for (String term : termWeights[c].keys()) {
-        float score = termWeights[c].get(term);
-        if (queryTerms.containsKey(term) || score == 0) {
+        if (queryTerms.containsKey(term) || !termWeights[c].containsKey(term)) {
           continue;
         }
+        float score = termWeights[c].get(term);
+        score = 1 - score;
+        
+        if (minXTermScoresOut != null) {
+          if (score < minXTermScoresOut.get(c).floatValue()) {
+            minXTermScoresOut.get(c).setValue(score);
+          }
+        }
+        
+        if (maxXTermScoresOut != null) {
+          if (score > maxXTermScoresOut.get(c).floatValue()) {
+            maxXTermScoresOut.get(c).setValue(score);
+          }
+        }
+        
+        if (totalXTermScoresOut != null) {
+          totalXTermScoresOut.get(c).add(score);
+        }
+        
         result[c].add(new ScoreIxObj<String>(term, score));
       }
     }
@@ -2160,7 +2222,10 @@ public class FISQueryExpander {
     if (totalScoreOut != null)
       totalScoreOut.setValue(0);
     
-    OpenObjectFloatHashMap<String> queryTerms = queryTermFreq(query, null);
+    OpenObjectFloatHashMap<String> queryTerms = queryTermFreq(query,
+        null,
+        tweetNonStemmingAnalyzer,
+        TweetField.TEXT.name);
     OpenObjectIntHashMap<String> termIdMap = new OpenObjectIntHashMap<String>();
     LinkedHashMap<Set<String>, Float> itemsets = Maps.newLinkedHashMap();
     // FastVector attrs = new FastVector();
@@ -2225,7 +2290,10 @@ public class FISQueryExpander {
     if (totalScoreOut != null)
       totalScoreOut.setValue(0);
     
-    OpenObjectFloatHashMap<String> queryTerms = queryTermFreq(query, null);
+    OpenObjectFloatHashMap<String> queryTerms = queryTermFreq(query,
+        null,
+        tweetNonStemmingAnalyzer,
+        TweetField.TEXT.name);
     OpenObjectIntHashMap<String> termIdMap = new OpenObjectIntHashMap<String>();
     LinkedHashMap<Set<String>, Float> itemsets = Maps.newLinkedHashMap();
     // FastVector attrs = new FastVector();
@@ -2475,55 +2543,57 @@ public class FISQueryExpander {
       }
       
     } else {
-      MutableFloat minScore = new MutableFloat(Float.MAX_VALUE);
-      MutableFloat maxScore = new MutableFloat(Float.MIN_VALUE);
-      MutableFloat totalScore = new MutableFloat(0);
-      PriorityQueue<ScoreIxObj<String>> termScores = convertResultToWeightedTermsKLDivergence(rs,
-          query,
-          -1,
-          false,
-          minScore,
-          maxScore,
-          totalScore);
-      // convertResultToWeightedTermsConditionalProb(rs,
+      throw new UnsupportedOperationException();
+      // MutableFloat minScore = new MutableFloat(Float.MAX_VALUE);
+      // MutableFloat maxScore = new MutableFloat(Float.MIN_VALUE);
+      // MutableFloat totalScore = new MutableFloat(0);
+      // PriorityQueue<ScoreIxObj<String>> termScores = convertResultToWeightedTermsKLDivergence(rs,
       // query,
       // -1,
       // false,
       // minScore,
       // maxScore,
       // totalScore);
-      
-      for (int c = 0; c < result.length; ++c) {
-        result[c] = new PriorityQueue<ScoreIxObj<String>>();
-        if (minXTermScoresOut != null) {
-          minXTermScoresOut.add(minScore);
-        }
-        
-        if (maxXTermScoresOut != null) {
-          maxXTermScoresOut.add(maxScore);
-        }
-        
-        if (totalXTermScoresOut != null) {
-          totalXTermScoresOut.add(totalScore);
-        }
-        
-        PriorityQueue<ScoreIxObj<String>> termScoresClone = new PriorityQueue<ScoreIxObj<String>>();
-        while (!termScores.isEmpty()) {
-          ScoreIxObj<String> scoredTerm = termScores.poll();
-          termScoresClone.add(scoredTerm);
-          int termId = termIdMap.get(scoredTerm.obj);
-          Instance inst = insts.instance(termId);
-          // if (PARAM_CLUSTERING_APPLY_LSA) {
-          // inst = lsa.convertInstance(inst);
-          // }
-          double[] distrib = clusterer.distributionForInstance(inst);
-          if (distrib[c] > CLUSTER_MEMBERSHIP_THRESHOLD) {
-            result[c].add(scoredTerm);
-          }
-        }
-        termScores = termScoresClone;
-        
-      }
+      // // convertResultToWeightedTermsConditionalProb(rs,
+      // // query,
+      // // -1,
+      // // false,
+      // // minScore,
+      // // maxScore,
+      // // totalScore);
+      //
+      // for (int c = 0; c < result.length; ++c) {
+      // result[c] = new PriorityQueue<ScoreIxObj<String>>();
+      // if (minXTermScoresOut != null) {
+      // minXTermScoresOut.add(minScore);
+      // }
+      //
+      // if (maxXTermScoresOut != null) {
+      // maxXTermScoresOut.add(maxScore);
+      // }
+      //
+      // if (totalXTermScoresOut != null) {
+      // totalXTermScoresOut.add(totalScore);
+      // }
+      //
+      // PriorityQueue<ScoreIxObj<String>> termScoresClone = new
+      // PriorityQueue<ScoreIxObj<String>>();
+      // while (!termScores.isEmpty()) {
+      // ScoreIxObj<String> scoredTerm = termScores.poll();
+      // termScoresClone.add(scoredTerm);
+      // int termId = termIdMap.get(scoredTerm.obj);
+      // Instance inst = insts.instance(termId);
+      // // if (PARAM_CLUSTERING_APPLY_LSA) {
+      // // inst = lsa.convertInstance(inst);
+      // // }
+      // double[] distrib = clusterer.distributionForInstance(inst);
+      // if (distrib[c] > CLUSTER_MEMBERSHIP_THRESHOLD) {
+      // result[c].add(scoredTerm);
+      // }
+      // }
+      // termScores = termScoresClone;
+      //
+      // }
     }
     return result;
   }
@@ -2534,7 +2604,7 @@ public class FISQueryExpander {
     return timeFormatted;
   }
   
-  final QueryParser fisQparser;
+  // final QueryParser fisQparser;
   final IndexSearcher fisSearcher;
   final IndexReader fisIxReader;
   
@@ -2543,7 +2613,7 @@ public class FISQueryExpander {
   
   final Similarity fisSimilarity;
   
-  final QueryParser twtQparser;
+  // final QueryParser twtQparser;
   final IndexSearcher twtSearcher;
   final MultiReader twtIxReader;
   
@@ -2666,18 +2736,21 @@ public class FISQueryExpander {
     fisSimilarity = new ItemSetSimilarity();
     fisSearcher.setSimilarity(fisSimilarity);
     
-    fisQparser = new QueryParser(Version.LUCENE_36,
-        ItemSetIndexBuilder.AssocField.ITEMSET.name,
-        ANALYZER);
-    fisQparser.setDefaultOperator(Operator.AND);
+    // fisQparser = new QueryParser(Version.LUCENE_36,
+    // AssocField.STEMMED_EN.name,
+    // tweetStemmingAnalyzer);
+    // // ItemSetIndexBuilder.AssocField.ITEMSET.name,
+    // // ANALYZER);
+    // fisQparser.setDefaultOperator(Operator.AND);
     
     List<IndexReader> ixRds = Lists.newLinkedList();
-    long incrEndTime = openTweetIndexesBeforeQueryTime(twtIncIxLoc,
-        true,
-        false,
-        Long.MIN_VALUE,
-        ixRds);
     if (twtChunkIxLocs != null) {
+      long incrEndTime = openTweetIndexesBeforeQueryTime(twtIncIxLoc,
+          true,
+          false,
+          Long.MIN_VALUE,
+          ixRds);
+      
       int i = 0;
       long prevChunkEndTime = incrEndTime;
       while (i < twtChunkIxLocs.length - 1) {
@@ -2688,14 +2761,18 @@ public class FISQueryExpander {
             ixRds);
       }
       openTweetIndexesBeforeQueryTime(twtChunkIxLocs[i], false, true, prevChunkEndTime, ixRds);
+    } else {
+      ixRds.add(IndexReader.open(new MMapDirectory(twtIncIxLoc)));
     }
     twtIxReader = new MultiReader(ixRds.toArray(new IndexReader[0]));
     twtSearcher = new IndexSearcher(twtIxReader);
     twtSimilarity = new TwitterSimilarity();
     twtSearcher.setSimilarity(twtSimilarity);
     
-    twtQparser = new QueryParser(Version.LUCENE_36, TweetField.TEXT.name, ANALYZER);
-    twtQparser.setDefaultOperator(Operator.AND);
+    // twtQparser = new QueryParser(Version.LUCENE_36, TweetField.STEMMED_EN.name,
+    // tweetStemmingAnalyzer);
+    // // TweetField.TEXT.name, ANALYZER);
+    // twtQparser.setDefaultOperator(Operator.AND);
     
     BooleanQuery.setMaxClauseCount(fisNumHits * fisNumHits);
   }
@@ -2782,12 +2859,27 @@ public class FISQueryExpander {
     // }
     
     MutableLong qLen = new MutableLong(0);
-    OpenObjectFloatHashMap<String> queryTermWeight = queryTermFreq(queryStr, qLen);
+    OpenObjectFloatHashMap<String> queryTermWeight = queryTermFreq(queryStr,
+        qLen,
+        (FISQueryExpander.SEARCH_NON_STEMMED ? FISQueryExpander.tweetNonStemmingAnalyzer
+            : FISQueryExpander.tweetStemmingAnalyzer),
+        (FISQueryExpander.SEARCH_NON_STEMMED ? AssocField.ITEMSET.name : AssocField.STEMMED_EN.name));
+    // tweetStemmingAnalyzer,
+    // AssocField.STEMMED_EN.name);
+    // tweetNonStemmingAnalyzer,
+    // AssocField.ITEMSET.name);
+    
     Query query = parseQueryIntoTerms(
         queryTermWeight,
         qLen.floatValue(),
-        fisQparser,
-        QueryParseMode.DISJUNCTIVE, false); // QUERY_SUBSET_BOOST_YESNO_DEFAULT);
+        // fisQparser,
+        QueryParseMode.DISJUNCTIVE,
+        false,
+        (FISQueryExpander.SEARCH_NON_STEMMED ? AssocField.ITEMSET.name : AssocField.STEMMED_EN.name),
+        // AssocField.ITEMSET.name,
+        // AssocField.STEMMED_EN.name,
+        fisIxReader);
+    // QUERY_SUBSET_BOOST_YESNO_DEFAULT);
     
     OpenIntFloatHashMap resultSet = new OpenIntFloatHashMap();
     FISCollector bm25Coll = new FISCollector(this, queryStr, queryTermWeight, qLen.floatValue(),
@@ -2829,262 +2921,264 @@ public class FISQueryExpander {
     return resultSet;
   }
   
-  public PriorityQueue<ScoreIxObj<String>> convertResultToWeightedTermsKLDivergence(
-      OpenIntFloatHashMap rs,
-      String query, int numItemsetsToConsider, boolean propagateISWeight,
-      MutableFloat minXTermScoreOut,
-      MutableFloat maxXTermScoreOut, MutableFloat totalTermScoreOut) throws IOException {
-    
-    if (minXTermScoreOut != null)
-      minXTermScoreOut.setValue(Float.MAX_VALUE);
-    if (maxXTermScoreOut != null)
-      maxXTermScoreOut.setValue(Float.MIN_VALUE);
-    
-    PriorityQueue<ScoreIxObj<String>> result = new PriorityQueue<ScoreIxObj<String>>();
-    
-    OpenObjectIntHashMap<String> termIds = new OpenObjectIntHashMap<String>();
-    OpenObjectFloatHashMap<String> queryFreq = queryTermFreq(query, null);
-    TransactionTree itemsets = convertResultToItemsetsInternal(rs,
-        queryFreq,
-        termIds,
-        numItemsetsToConsider, DEAFULT_MAGIC_ALLOWED);
-    
-    if (itemsets.isTreeEmpty()) {
-      return result;
-    }
-    
-    List<String> terms = Lists.newArrayListWithCapacity(termIds.size());
-    termIds.keysSortedByValue(terms);
-    
-    OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>(terms.size());
-    float totalW = 0;
-    
-    Iterator<Pair<IntArrayList, Long>> itemsetIter = itemsets.iteratorClosed();
-    while (itemsetIter.hasNext()) {
-      Pair<IntArrayList, Long> patternPair = itemsetIter.next();
-      
-      float w = propagateISWeight ?
-          (patternPair.getSecond().floatValue()
-          / SCORE_PRECISION_MULTIPLIER) :
-          1;
-      totalW += w;
-      
-      if (minXTermScoreOut != null && w < minXTermScoreOut.floatValue()) {
-        minXTermScoreOut.setValue(w);
-      }
-      
-      if (maxXTermScoreOut != null && w > maxXTermScoreOut.floatValue()) {
-        maxXTermScoreOut.setValue(w);
-      }
-      
-      IntArrayList pattern = patternPair.getFirst();
-      int pSize = pattern.size();
-      for (int i = 0; i < pSize; ++i) {
-        String ft = terms.get(pattern.getQuick(i));
-        if (queryFreq.containsKey(ft)) {
-          continue;
-        }
-        termFreq.put(ft, termFreq.get(ft) + w);
-      }
-    }
-    
-    for (String t : terms) {
-      if (queryFreq.containsKey(t)) {
-        continue;
-      }
-      // Collection metric FIXME : use stemmed
-      Term tTerm = new Term(TweetField.TEXT.name, t);
-      float docFreqC = twtIxReader.docFreq(tTerm);
-      if (docFreqC == 0) {
-        continue;
-      }
-      float pCollection = docFreqC / twtIxReader.numDocs();
-      
-      // KL Divergence considering all the itemsets as a document
-      
-      float pDoc = termFreq.get(t) / totalW;
-      float score = pDoc * (float) Math.log(pDoc / pCollection);  // slow: MathUtils.log(2, pDoc /
-                                                                 // pCollection);
-      result.add(new ScoreIxObj<String>(t, score));
-    }
-    
-    if (totalTermScoreOut != null) {
-      totalTermScoreOut.setValue(totalW);
-    }
-    
-    return result;
-  }
-  
-  public PriorityQueue<ScoreIxObj<String>> convertResultToWeightedTermsConditionalProb(
-      OpenIntFloatHashMap rs,
-      String query, int numItemsetsToConsider, boolean propagateISWeight,
-      MutableFloat minXTermScoreOut,
-      MutableFloat maxXTermScoreOut, MutableFloat totalTermScoreOut) throws IOException {
-    
-    if (minXTermScoreOut != null)
-      minXTermScoreOut.setValue(Float.MAX_VALUE);
-    
-    if (maxXTermScoreOut != null)
-      maxXTermScoreOut.setValue(Float.MIN_VALUE);
-    
-    PriorityQueue<ScoreIxObj<String>> result = new PriorityQueue<ScoreIxObj<String>>();
-    
-    OpenObjectIntHashMap<String> termIds = new OpenObjectIntHashMap<String>();
-    
-    OpenObjectFloatHashMap<String> queryFreq = queryTermFreq(query, null);
-    TransactionTree itemsets = convertResultToItemsetsInternal(rs,
-        queryFreq,
-        termIds,
-        numItemsetsToConsider, DEAFULT_MAGIC_ALLOWED);
-    
-    if (itemsets.isTreeEmpty()) {
-      return result;
-    }
-    
-    List<String> terms = Lists.newArrayListWithCapacity(termIds.size());
-    termIds.keysSortedByValue(terms);
-    
-    Set<String> querySet = Sets.newCopyOnWriteArraySet(queryFreq.keys());
-    Set<Set<String>> queryPowerSet = Sets.powerSet(querySet);
-    
-    int capacity = queryPowerSet.size() * (terms.size() - queryFreq.size());
-    OpenObjectFloatHashMap<Set<String>> subsetFreq = new OpenObjectFloatHashMap<Set<String>>(
-        Math.max(0, capacity));
-    OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>(terms.size());
-    float totalW = 0;
-    
-    Iterator<Pair<IntArrayList, Long>> itemsetIter = itemsets.iteratorClosed();
-    while (itemsetIter.hasNext()) {
-      Pair<IntArrayList, Long> patternPair = itemsetIter.next();
-      
-      float w = propagateISWeight ?
-          (patternPair.getSecond().floatValue()
-          / SCORE_PRECISION_MULTIPLIER) :
-          1;
-      totalW += w;
-      
-      if (minXTermScoreOut != null && w < minXTermScoreOut.floatValue()) {
-        minXTermScoreOut.setValue(w);
-      }
-      
-      if (maxXTermScoreOut != null && w > maxXTermScoreOut.floatValue()) {
-        maxXTermScoreOut.setValue(w);
-      }
-      
-      IntArrayList pattern = patternPair.getFirst();
-      int pSize = pattern.size();
-      Set<String> fisTerms = Sets.newHashSet();
-      for (int i = 0; i < pSize; ++i) {
-        fisTerms.add(terms.get(pattern.getQuick(i)));
-      }
-      
-      boolean weightNotAdded = true;
-      for (String ft : fisTerms) {
-        if (queryFreq.containsKey(ft)) {
-          continue;
-        }
-        termFreq.put(ft, termFreq.get(ft) + w);
-        for (Set<String> qSub : queryPowerSet) {
-          if (qSub.isEmpty()) {
-            continue;
-          }
-          if (!Sets.intersection(fisTerms, qSub).equals(qSub)) {
-            // This query s
-            continue;
-          } else if (weightNotAdded) {
-            subsetFreq.put(qSub, subsetFreq.get(qSub) + w);
-          }
-          
-          Set<String> key = Sets.union(qSub, ImmutableSet.<String> of(ft));
-          subsetFreq.put(key, subsetFreq.get(key) + w);
-        }
-        weightNotAdded = false;
-      }
-    }
-    
-    subsetFreq.put(ImmutableSet.<String> of(), totalW);
-    for (String t : terms) {
-      if (queryFreq.containsKey(t)) {
-        continue;
-      }
-      
-      float termCorpusQuality = 0;
-      if (twitterCorpusModelWeight > 0) {
-        // Collection metric FIXME use stemmed
-        Term tTerm = new Term(TweetField.TEXT.name, t);
-        float docFreqC = twtIxReader.docFreq(tTerm);
-        if (docFreqC == 0) {
-          continue;
-        }
-        
-        // odds of the term (not log odds)
-        termCorpusQuality = (termWeightSmoother + docFreqC) / twtIxReader.numDocs();
-        termCorpusQuality = termCorpusQuality / (1 - termCorpusQuality);
-        termCorpusQuality = (float) Math.log(termCorpusQuality);
-        
-        // IDF is has very large scale compared to probabilities
-        // float termCorpusQuality = (float) (Math.log(twtIxReader.numDocs() / (float) (docFreqC +
-        // 1)) + 1.0);
-      }
-      
-      // Query metric
-      Set<String> tAsSet = ImmutableSet.<String> of(t);
-      subsetFreq.put(tAsSet, termFreq.get(t));
-      
-      LinkedHashMap<Set<String>, Float> termQueryQuality = Maps
-          .<Set<String>, Float> newLinkedHashMap();
-      
-      for (Set<String> qSub : queryPowerSet) {
-        
-        float freqSub = subsetFreq.get(qSub);
-        
-        if (freqSub == 0) {
-          continue;
-        }
-        
-        Set<String> qSubExp = Sets.union(qSub, tAsSet);
-        float jointFreq = subsetFreq.get(qSubExp);
-        
-        // //Mutual information No normalization:
-        // if (jf != 0) {
-        // float jp = jf / totalW;
-        // numer += jp * (Math.log(jf / (ft1 * ft2)) + lnTotalW);
-        // denim += jp * Math.log(jp);
-        // }
-        float pExp = jointFreq / freqSub;
-        
-        termQueryQuality.put(qSubExp, pExp);
-      }
-      
-      float termQueryQualityAggr = 0;
-      for (String qTerm : querySet) {
-        // for (List<String> qtPair : Sets.cartesianProduct(tAsSet, querySet)) {
-        float qTermReps = queryFreq.get(qTerm);
-        List<String> qtPair = ImmutableList.<String> of(t, qTerm);
-        termQueryQualityAggr += qTermReps * aggregateTermQueryQuality(termQueryQuality,
-            Sets.newCopyOnWriteArraySet(qtPair),
-            termQueryQuality.get(tAsSet));
-      }
-      if (termQueryQualityAggr >= 1) {
-        // FIXME: This happens in case of repeated hashtag
-        termQueryQualityAggr = (float) (1 - 1E-6);
-      }
-      
-      termQueryQualityAggr /= (1 - termQueryQualityAggr);
-      termQueryQualityAggr = (float) Math.log(termQueryQualityAggr);
-      
-      float score = (float) (twitterCorpusModelWeight * termCorpusQuality +
-          (1 - twitterCorpusModelWeight) * termQueryQualityAggr);
-      result.add(new ScoreIxObj<String>(t, score));
-    }
-    
-    if (totalTermScoreOut != null) {
-      totalTermScoreOut.setValue(totalW);
-    }
-    return result;
-    
-  }
-  
+  //
+  // public PriorityQueue<ScoreIxObj<String>> convertResultToWeightedTermsKLDivergence(
+  // OpenIntFloatHashMap rs,
+  // String query, int numItemsetsToConsider, boolean propagateISWeight,
+  // MutableFloat minXTermScoreOut,
+  // MutableFloat maxXTermScoreOut, MutableFloat totalTermScoreOut) throws IOException {
+  //
+  // if (minXTermScoreOut != null)
+  // minXTermScoreOut.setValue(Float.MAX_VALUE);
+  // if (maxXTermScoreOut != null)
+  // maxXTermScoreOut.setValue(Float.MIN_VALUE);
+  //
+  // PriorityQueue<ScoreIxObj<String>> result = new PriorityQueue<ScoreIxObj<String>>();
+  //
+  // OpenObjectIntHashMap<String> termIds = new OpenObjectIntHashMap<String>();
+  // OpenObjectFloatHashMap<String> queryFreq = queryTermFreq(query, null,
+  // tweetNonStemmingAnalyzer);
+  // TransactionTree itemsets = convertResultToItemsetsInternal(rs,
+  // queryFreq,
+  // termIds,
+  // numItemsetsToConsider, DEAFULT_MAGIC_ALLOWED);
+  //
+  // if (itemsets.isTreeEmpty()) {
+  // return result;
+  // }
+  //
+  // List<String> terms = Lists.newArrayListWithCapacity(termIds.size());
+  // termIds.keysSortedByValue(terms);
+  //
+  // OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>(terms.size());
+  // float totalW = 0;
+  //
+  // Iterator<Pair<IntArrayList, Long>> itemsetIter = itemsets.iteratorClosed();
+  // while (itemsetIter.hasNext()) {
+  // Pair<IntArrayList, Long> patternPair = itemsetIter.next();
+  //
+  // float w = propagateISWeight ?
+  // (patternPair.getSecond().floatValue()
+  // / SCORE_PRECISION_MULTIPLIER) :
+  // 1;
+  // totalW += w;
+  //
+  // if (minXTermScoreOut != null && w < minXTermScoreOut.floatValue()) {
+  // minXTermScoreOut.setValue(w);
+  // }
+  //
+  // if (maxXTermScoreOut != null && w > maxXTermScoreOut.floatValue()) {
+  // maxXTermScoreOut.setValue(w);
+  // }
+  //
+  // IntArrayList pattern = patternPair.getFirst();
+  // int pSize = pattern.size();
+  // for (int i = 0; i < pSize; ++i) {
+  // String ft = terms.get(pattern.getQuick(i));
+  // if (queryFreq.containsKey(ft)) {
+  // continue;
+  // }
+  // termFreq.put(ft, termFreq.get(ft) + w);
+  // }
+  // }
+  //
+  // for (String t : terms) {
+  // if (queryFreq.containsKey(t)) {
+  // continue;
+  // }
+  // // Collection metric FIXME : use stemmed
+  // Term tTerm = new Term(TweetField.TEXT.name, t);
+  // float docFreqC = twtIxReader.docFreq(tTerm);
+  // if (docFreqC == 0) {
+  // continue;
+  // }
+  // float pCollection = docFreqC / twtIxReader.numDocs();
+  //
+  // // KL Divergence considering all the itemsets as a document
+  //
+  // float pDoc = termFreq.get(t) / totalW;
+  // float score = pDoc * (float) Math.log(pDoc / pCollection); // slow: MathUtils.log(2, pDoc /
+  // // pCollection);
+  // result.add(new ScoreIxObj<String>(t, score));
+  // }
+  //
+  // if (totalTermScoreOut != null) {
+  // totalTermScoreOut.setValue(totalW);
+  // }
+  //
+  // return result;
+  // }
+  //
+  // public PriorityQueue<ScoreIxObj<String>> convertResultToWeightedTermsConditionalProb(
+  // OpenIntFloatHashMap rs,
+  // String query, int numItemsetsToConsider, boolean propagateISWeight,
+  // MutableFloat minXTermScoreOut,
+  // MutableFloat maxXTermScoreOut, MutableFloat totalTermScoreOut) throws IOException {
+  //
+  // if (minXTermScoreOut != null)
+  // minXTermScoreOut.setValue(Float.MAX_VALUE);
+  //
+  // if (maxXTermScoreOut != null)
+  // maxXTermScoreOut.setValue(Float.MIN_VALUE);
+  //
+  // PriorityQueue<ScoreIxObj<String>> result = new PriorityQueue<ScoreIxObj<String>>();
+  //
+  // OpenObjectIntHashMap<String> termIds = new OpenObjectIntHashMap<String>();
+  //
+  // OpenObjectFloatHashMap<String> queryFreq = queryTermFreq(query, null);
+  // TransactionTree itemsets = convertResultToItemsetsInternal(rs,
+  // queryFreq,
+  // termIds,
+  // numItemsetsToConsider, DEAFULT_MAGIC_ALLOWED);
+  //
+  // if (itemsets.isTreeEmpty()) {
+  // return result;
+  // }
+  //
+  // List<String> terms = Lists.newArrayListWithCapacity(termIds.size());
+  // termIds.keysSortedByValue(terms);
+  //
+  // Set<String> querySet = Sets.newCopyOnWriteArraySet(queryFreq.keys());
+  // Set<Set<String>> queryPowerSet = Sets.powerSet(querySet);
+  //
+  // int capacity = queryPowerSet.size() * (terms.size() - queryFreq.size());
+  // OpenObjectFloatHashMap<Set<String>> subsetFreq = new OpenObjectFloatHashMap<Set<String>>(
+  // Math.max(0, capacity));
+  // OpenObjectFloatHashMap<String> termFreq = new OpenObjectFloatHashMap<String>(terms.size());
+  // float totalW = 0;
+  //
+  // Iterator<Pair<IntArrayList, Long>> itemsetIter = itemsets.iteratorClosed();
+  // while (itemsetIter.hasNext()) {
+  // Pair<IntArrayList, Long> patternPair = itemsetIter.next();
+  //
+  // float w = propagateISWeight ?
+  // (patternPair.getSecond().floatValue()
+  // / SCORE_PRECISION_MULTIPLIER) :
+  // 1;
+  // totalW += w;
+  //
+  // if (minXTermScoreOut != null && w < minXTermScoreOut.floatValue()) {
+  // minXTermScoreOut.setValue(w);
+  // }
+  //
+  // if (maxXTermScoreOut != null && w > maxXTermScoreOut.floatValue()) {
+  // maxXTermScoreOut.setValue(w);
+  // }
+  //
+  // IntArrayList pattern = patternPair.getFirst();
+  // int pSize = pattern.size();
+  // Set<String> fisTerms = Sets.newHashSet();
+  // for (int i = 0; i < pSize; ++i) {
+  // fisTerms.add(terms.get(pattern.getQuick(i)));
+  // }
+  //
+  // boolean weightNotAdded = true;
+  // for (String ft : fisTerms) {
+  // if (queryFreq.containsKey(ft)) {
+  // continue;
+  // }
+  // termFreq.put(ft, termFreq.get(ft) + w);
+  // for (Set<String> qSub : queryPowerSet) {
+  // if (qSub.isEmpty()) {
+  // continue;
+  // }
+  // if (!Sets.intersection(fisTerms, qSub).equals(qSub)) {
+  // // This query s
+  // continue;
+  // } else if (weightNotAdded) {
+  // subsetFreq.put(qSub, subsetFreq.get(qSub) + w);
+  // }
+  //
+  // Set<String> key = Sets.union(qSub, ImmutableSet.<String> of(ft));
+  // subsetFreq.put(key, subsetFreq.get(key) + w);
+  // }
+  // weightNotAdded = false;
+  // }
+  // }
+  //
+  // subsetFreq.put(ImmutableSet.<String> of(), totalW);
+  // for (String t : terms) {
+  // if (queryFreq.containsKey(t)) {
+  // continue;
+  // }
+  //
+  // float termCorpusQuality = 0;
+  // if (twitterCorpusModelWeight > 0) {
+  // // Collection metric FIXME use stemmed
+  // Term tTerm = new Term(TweetField.TEXT.name, t);
+  // float docFreqC = twtIxReader.docFreq(tTerm);
+  // if (docFreqC == 0) {
+  // continue;
+  // }
+  //
+  // // odds of the term (not log odds)
+  // termCorpusQuality = (termWeightSmoother + docFreqC) / twtIxReader.numDocs();
+  // termCorpusQuality = termCorpusQuality / (1 - termCorpusQuality);
+  // termCorpusQuality = (float) Math.log(termCorpusQuality);
+  //
+  // // IDF is has very large scale compared to probabilities
+  // // float termCorpusQuality = (float) (Math.log(twtIxReader.numDocs() / (float) (docFreqC +
+  // // 1)) + 1.0);
+  // }
+  //
+  // // Query metric
+  // Set<String> tAsSet = ImmutableSet.<String> of(t);
+  // subsetFreq.put(tAsSet, termFreq.get(t));
+  //
+  // LinkedHashMap<Set<String>, Float> termQueryQuality = Maps
+  // .<Set<String>, Float> newLinkedHashMap();
+  //
+  // for (Set<String> qSub : queryPowerSet) {
+  //
+  // float freqSub = subsetFreq.get(qSub);
+  //
+  // if (freqSub == 0) {
+  // continue;
+  // }
+  //
+  // Set<String> qSubExp = Sets.union(qSub, tAsSet);
+  // float jointFreq = subsetFreq.get(qSubExp);
+  //
+  // // //Mutual information No normalization:
+  // // if (jf != 0) {
+  // // float jp = jf / totalW;
+  // // numer += jp * (Math.log(jf / (ft1 * ft2)) + lnTotalW);
+  // // denim += jp * Math.log(jp);
+  // // }
+  // float pExp = jointFreq / freqSub;
+  //
+  // termQueryQuality.put(qSubExp, pExp);
+  // }
+  //
+  // float termQueryQualityAggr = 0;
+  // for (String qTerm : querySet) {
+  // // for (List<String> qtPair : Sets.cartesianProduct(tAsSet, querySet)) {
+  // float qTermReps = queryFreq.get(qTerm);
+  // List<String> qtPair = ImmutableList.<String> of(t, qTerm);
+  // termQueryQualityAggr += qTermReps * aggregateTermQueryQuality(termQueryQuality,
+  // Sets.newCopyOnWriteArraySet(qtPair),
+  // termQueryQuality.get(tAsSet));
+  // }
+  // if (termQueryQualityAggr >= 1) {
+  // // FIXME: This happens in case of repeated hashtag
+  // termQueryQualityAggr = (float) (1 - 1E-6);
+  // }
+  //
+  // termQueryQualityAggr /= (1 - termQueryQualityAggr);
+  // termQueryQualityAggr = (float) Math.log(termQueryQualityAggr);
+  //
+  // float score = (float) (twitterCorpusModelWeight * termCorpusQuality +
+  // (1 - twitterCorpusModelWeight) * termQueryQualityAggr);
+  // result.add(new ScoreIxObj<String>(t, score));
+  // }
+  //
+  // if (totalTermScoreOut != null) {
+  // totalTermScoreOut.setValue(totalW);
+  // }
+  // return result;
+  //
+  // }
+  //
   private float aggregateTermQueryQuality(LinkedHashMap<Set<String>, Float> termQueryQuality,
       Set<String> subset, float currP) {
     Iterator<Set<String>> iter = termQueryQuality.keySet().iterator();
@@ -3116,7 +3210,7 @@ public class FISQueryExpander {
     OpenObjectIntHashMap<String> termIds = new OpenObjectIntHashMap<String>();
     
     TransactionTree itemsets = convertResultToItemsetsInternal(rs,
-        queryTermFreq(query, null),
+        queryTermFreq(query, null, tweetNonStemmingAnalyzer, AssocField.ITEMSET.name),
         termIds,
         numResults, DEAFULT_MAGIC_ALLOWED);
     
@@ -3263,42 +3357,42 @@ public class FISQueryExpander {
     return result;
   }
   
-  public Query convertResultToBooleanQuery(OpenIntFloatHashMap rs, String query, int numResults)
-      throws IOException, org.apache.lucene.queryParser.ParseException {
-    BooleanQuery result = new BooleanQuery();
-    PriorityQueue<ScoreIxObj<List<String>>> itemsets = convertResultToItemsets(rs,
-        query,
-        numResults);
-    while (!itemsets.isEmpty()) {
-      ScoreIxObj<List<String>> is = itemsets.poll();
-      
-      Query itemsetQuer = twtQparser.parse(is.obj.toString().replaceAll(COLLECTION_STRING_CLEANER,
-          ""));
-      if (QUERY_SUBSET_BOOST_YESNO_DEFAULT)
-        itemsetQuer.setBoost(is.score);
-      result.add(itemsetQuer, Occur.SHOULD);
-    }
-    return result;
-  }
+  // public Query convertResultToBooleanQuery(OpenIntFloatHashMap rs, String query, int numResults)
+  // throws IOException, org.apache.lucene.queryParser.ParseException {
+  // BooleanQuery result = new BooleanQuery();
+  // PriorityQueue<ScoreIxObj<List<String>>> itemsets = convertResultToItemsets(rs,
+  // query,
+  // numResults);
+  // while (!itemsets.isEmpty()) {
+  // ScoreIxObj<List<String>> is = itemsets.poll();
+  //
+  // Query itemsetQuer = twtQparser.parse(is.obj.toString().replaceAll(COLLECTION_STRING_CLEANER,
+  // ""));
+  // if (QUERY_SUBSET_BOOST_YESNO_DEFAULT)
+  // itemsetQuer.setBoost(is.score);
+  // result.add(itemsetQuer, Occur.SHOULD);
+  // }
+  // return result;
+  // }
   
-  public List<Query> convertResultToQueries(OpenIntFloatHashMap rs,
-      String query, int numResults)
-      throws IOException, org.apache.lucene.queryParser.ParseException {
-    List<Query> result = Lists.<Query> newLinkedList();
-    PriorityQueue<ScoreIxObj<List<String>>> itemsets = convertResultToItemsets(rs,
-        query,
-        numResults);
-    while (!itemsets.isEmpty()) {
-      ScoreIxObj<List<String>> is = itemsets.poll();
-      
-      Query itemsetQuer = twtQparser.parse(is.obj.toString().replaceAll(COLLECTION_STRING_CLEANER,
-          ""));
-      if (QUERY_SUBSET_BOOST_YESNO_DEFAULT)
-        itemsetQuer.setBoost(is.score);
-      result.add(itemsetQuer);
-    }
-    return result;
-  }
+  // public List<Query> convertResultToQueries(OpenIntFloatHashMap rs,
+  // String query, int numResults)
+  // throws IOException, org.apache.lucene.queryParser.ParseException {
+  // List<Query> result = Lists.<Query> newLinkedList();
+  // PriorityQueue<ScoreIxObj<List<String>>> itemsets = convertResultToItemsets(rs,
+  // query,
+  // numResults);
+  // while (!itemsets.isEmpty()) {
+  // ScoreIxObj<List<String>> is = itemsets.poll();
+  //
+  // Query itemsetQuer = twtQparser.parse(is.obj.toString().replaceAll(COLLECTION_STRING_CLEANER,
+  // ""));
+  // if (QUERY_SUBSET_BOOST_YESNO_DEFAULT)
+  // itemsetQuer.setBoost(is.score);
+  // result.add(itemsetQuer);
+  // }
+  // return result;
+  // }
   
   public void close() throws IOException {
     if (fisSearcher != null)
@@ -3486,7 +3580,7 @@ public class FISQueryExpander {
     // Same as above technique but different coding.. should be faster
     // Only one query (a long one), of pairs of query and extra
     // Seems to be getting high precision pairs, and performs best
-    BooleanQuery query = new BooleanQuery(true);
+    BooleanQuery query = new BooleanQuery(); // true);
     for (ScoreIxObj<String> xterm : extraTerms) {
       assert !doneTerms.contains(xterm);
       ScoreIxObj<Query> xtermQuery = createTermQuery(xterm,
@@ -3500,6 +3594,7 @@ public class FISQueryExpander {
       for (String qterm : queryTermWeight.keys()) {
         
         BooleanQuery qxQuery = new BooleanQuery();
+        // FIXME: Is this filtering so much, or just preventing drift?
         TermQuery qTermQuery = new TermQuery(new Term(AssocField.ITEMSET.name, qterm));
         
         qxQuery.add(qTermQuery, Occur.MUST);
@@ -3559,10 +3654,11 @@ public class FISQueryExpander {
     
   }
   
-  public OpenObjectFloatHashMap<String> queryTermFreq(String query, MutableLong qLenOut)
-      throws IOException {
-    return queryTermFreq(query, qLenOut, ANALYZER, TweetField.TEXT.name);
-  }
+  // public OpenObjectFloatHashMap<String> queryTermFreq(String query, MutableLong qLenOut)
+  // throws IOException {
+  // return queryTermFreq(query, qLenOut,
+  // ANALYZER, TweetField.TEXT.name);
+  // }
   
   public OpenObjectFloatHashMap<String> queryTermFreq(String query, MutableLong qLenOut,
       Analyzer pAnalyzer, String pFieldName)
@@ -3590,63 +3686,64 @@ public class FISQueryExpander {
     return queryFreq;
   }
   
-  public Query parseQuery(String queryStr,
-      OpenObjectFloatHashMap<String> queryTermsOut,// = queryTermFreq(queryStr, qLen);
-      MutableLong qLenOut, // = new MutableLong(0);
-      QueryParser targetParser,
-      QueryParseMode mode, boolean boostQuerySubset)
-      throws IOException, org.apache.lucene.queryParser.ParseException {
-    
-    OpenObjectFloatHashMap<String> queryTermWeights = queryTermFreq(queryStr, qLenOut);
-    
-    Query result;
-    if (parseToTermQueries) {
-      result = parseQueryIntoTerms(queryTermWeights,
-          qLenOut.floatValue(),
-          targetParser,
-          mode,
-          boostQuerySubset);
-    } else {
-      LOG.warn("Parsing to phrase Query is not thoroughly tested!");
-      result = parseQueryIntoPhrase(queryStr, targetParser, mode);
-    }
-    
-    LOG.debug("Parsed \"{}\" into {}", queryStr, result);
-    
-    for (String key : queryTermWeights.keys())
-      queryTermsOut.put(key, queryTermWeights.get(key));
-    
-    return result;
-  }
+  // public Query parseQuery(String queryStr,
+  // OpenObjectFloatHashMap<String> queryTermsOut,// = queryTermFreq(queryStr, qLen);
+  // MutableLong qLenOut, // = new MutableLong(0);
+  // QueryParser targetParser,
+  // QueryParseMode mode, boolean boostQuerySubset)
+  // throws IOException, org.apache.lucene.queryParser.ParseException {
+  //
+  // OpenObjectFloatHashMap<String> queryTermWeights = queryTermFreq(queryStr, qLenOut);
+  //
+  // Query result;
+  // if (parseToTermQueries) {
+  // result = parseQueryIntoTerms(queryTermWeights,
+  // qLenOut.floatValue(),
+  // // targetParser,
+  // mode,
+  // boostQuerySubset);
+  // } else {
+  // throw new UnsupportedOperationException();
+  // // LOG.warn("Parsing to phrase Query is not thoroughly tested!");
+  // // result = parseQueryIntoPhrase(queryStr, targetParser, mode);
+  // }
+  //
+  // LOG.debug("Parsed \"{}\" into {}", queryStr, result);
+  //
+  // for (String key : queryTermWeights.keys())
+  // queryTermsOut.put(key, queryTermWeights.get(key));
+  //
+  // return result;
+  // }
+  //
+  // Query parseQueryIntoPhrase(String queryStr, QueryParser targetParser,
+  // QueryParseMode mode) throws org.apache.lucene.queryParser.ParseException {
+  // Operator op;
+  // switch (mode) {
+  // case CONJUNGTIVE:
+  // op = Operator.AND;
+  // break;
+  // case DISJUNCTIVE:
+  // op = Operator.OR;
+  // break;
+  // default:
+  // throw new IllegalArgumentException();
+  // }
+  // Operator origOp = targetParser.getDefaultOperator();
+  // targetParser.setDefaultOperator(op);
+  // Query result;
+  // try {
+  // result = targetParser.parse(queryStr);
+  // } finally {
+  // targetParser.setDefaultOperator(origOp);
+  // }
+  // return result;
+  // }
   
-  Query parseQueryIntoPhrase(String queryStr, QueryParser targetParser,
-      QueryParseMode mode) throws org.apache.lucene.queryParser.ParseException {
-    Operator op;
-    switch (mode) {
-    case CONJUNGTIVE:
-      op = Operator.AND;
-      break;
-    case DISJUNCTIVE:
-      op = Operator.OR;
-      break;
-    default:
-      throw new IllegalArgumentException();
-    }
-    Operator origOp = targetParser.getDefaultOperator();
-    targetParser.setDefaultOperator(op);
-    Query result;
-    try {
-      result = targetParser.parse(queryStr);
-    } finally {
-      targetParser.setDefaultOperator(origOp);
-    }
-    return result;
-  }
-  
-  BooleanQuery parseQueryIntoTerms(OpenObjectFloatHashMap<String> queryTermWeights,
+  public Query parseQueryIntoTerms(OpenObjectFloatHashMap<String> queryTermWeights,
       float qLen,
-      QueryParser targetParser,
-      QueryParseMode mode, boolean boostQuerySubsets)
+      // QueryParser targetParser,
+      QueryParseMode mode, boolean boostQuerySubsets, String targetField, IndexReader targetReader)
       throws IOException, org.apache.lucene.queryParser.ParseException {
     float totalIDF = 0;
     if (boostQuerySubsets)
@@ -3686,20 +3783,33 @@ public class FISQueryExpander {
         continue;
       }
       
-      Query subQuery = targetParser.parse(querySubSet.toString()
-          .replaceAll(COLLECTION_STRING_CLEANER, ""));
+      BooleanQuery subQuery = new BooleanQuery();
+      // targetParser.parse(querySubSet.toString()
+      // .replaceAll(COLLECTION_STRING_CLEANER, ""));
       
       float querySubSetW = 0;
+      
       for (String qTerm : querySubSet) {
+        subQuery.add(createTermQuery(new ScoreIxObj<String>(qTerm, 1),
+            targetField,
+            targetReader,
+            qLen,
+            totalIDF).obj,
+            Occur.MUST);
         querySubSetW += queryTermWeights.get(qTerm);
       }
       
-      if (boostQuerySubsets)
+      if (boostQuerySubsets) {
         if (boostQuerySubsetByIdf) {
-          subQuery.setBoost(querySubSetW / totalIDF);
+          querySubSetW /= totalIDF;
         } else {
-          subQuery.setBoost(querySubSetW / qLen);
+          querySubSetW /= qLen;
         }
+      } else {
+        querySubSetW = 1;
+      }
+      
+      subQuery.setBoost(querySubSetW);
       
       query.add(subQuery, Occur.SHOULD);
     }
@@ -3710,10 +3820,10 @@ public class FISQueryExpander {
     // query.add(subQuery, Occur.SHOULD);
     // }
     
-    return query;
+    return query.rewrite(targetReader);
   }
   
-  public FilteredQuery expandAndFilterQuery(OpenObjectFloatHashMap<String> origQueryTerms,
+  public Query expandAndFilterQuery(OpenObjectFloatHashMap<String> origQueryTerms,
       int origQueryLen,
       OpenObjectFloatHashMap<String>[] extraTerms,
       float[] minXTermScoreFloats, float[] maxXTermScoreFloats,
@@ -3779,7 +3889,7 @@ public class FISQueryExpander {
         mode);
   }
   
-  public FilteredQuery expandAndFilterQuery(OpenObjectFloatHashMap<String> origQueryTerms,
+  public Query expandAndFilterQuery(OpenObjectFloatHashMap<String> origQueryTerms,
       int origQueryLen,
       PriorityQueue<ScoreIxObj<String>>[] extraTerms,
       float[] minXTermScoreFloats, float[] maxXTermScoreFloats,
@@ -3788,31 +3898,37 @@ public class FISQueryExpander {
       MutableLong xQueryLenOut,
       ExpandMode mode) throws IOException,
       org.apache.lucene.queryParser.ParseException {
-    
-    BooleanQuery result = parseQueryIntoTerms(origQueryTerms,
+    if (origQueryTerms.isEmpty() && mode.equals(ExpandMode.FILTERING)) {
+      throw new IllegalArgumentException();
+    }
+    BooleanQuery result = new BooleanQuery();
+    result.add(parseQueryIntoTerms(origQueryTerms,
         origQueryLen,
-        twtQparser,
+        // twtQparser,
         QueryParseMode.DISJUNCTIVE,
-        QUERY_SUBSET_BOOST_YESNO_DEFAULT);
+        QUERY_SUBSET_BOOST_YESNO_DEFAULT,
+        (SEARCH_NON_STEMMED ? TweetField.TEXT.name : TweetField.STEMMED_EN.name),
+        // TweetField.STEMMED_EN.name,
+        twtIxReader),
+        ExpandMode.FILTERING.equals(mode) ? Occur.MUST : Occur.SHOULD);
     
     if (xQueryLenOut != null)
       xQueryLenOut.setValue(origQueryLen);
     
-    if (xQueryTermsOut != null)
+    if (xQueryTermsOut != null) {
       for (String oTerm : origQueryTerms.keys()) {
         float value = origQueryTerms.get(oTerm);
-        // Whatever I was doing earlier.. the term maps now store occurrence count I HOPE
+        // Whatever I was doing earlier.. the term maps now store occurrence count for orig query
         xQueryTermsOut.put(oTerm, value);
         if (xQueryLenOut != null)
           xQueryLenOut.add(value);
       }
+    }
     
-    // this will make the expansion act like a filter
-    // result.add(origQuery, Occur.MUST);
     Set<String> encounteredXTerms = Sets.newHashSet(origQueryTerms.keys());
     int t = 0;
     OpenIntHashSet emptyQueues = new OpenIntHashSet(extraTerms.length);
-    while (t < numTermsToAppend) {
+    while (t < numTermsToAppend && extraTerms.length > 0) {
       for (int c = 0; c < extraTerms.length; ++c) {
         if (extraTerms[c].isEmpty()) {
           if (!emptyQueues.contains(c)) {
@@ -3842,9 +3958,10 @@ public class FISQueryExpander {
           ++t;
         }
         
-        if (xQueryTermsOut != null)
-          // Whatever I was doing earlier.. the term maps now store occurrence count
-          xQueryTermsOut.put(xterm.obj, 1);
+        // Wholly shitt
+        // if (xQueryTermsOut != null)
+        // // Whatever I was doing earlier.. the term maps now store occurrence count
+        // xQueryTermsOut.put(xterm.obj, 1);
         
         if (xQueryLenOut != null)
           xQueryLenOut.add(1);
@@ -3863,19 +3980,31 @@ public class FISQueryExpander {
             qxQuery.add(qQuery, Occur.MUST);
             qxQuery.add(xtermQuery.obj, Occur.MUST);
             
-            if (QUERY_SUBSET_BOOST_YESNO_DEFAULT) {
-              // qxQuery.setBoost(origQueryTerms.get(qterm) * xtermQuery.score);
-              qQuery.setBoost(origQueryTerms.get(qterm));
-              qxQuery.setBoost(xtermQuery.score);
+            // // if (QUERY_SUBSET_BOOST_YESNO_DEFAULT) {
+            // // qxQuery.setBoost(origQueryTerms.get(qterm) * xtermQuery.score);
+            // qQuery.setBoost(origQueryTerms.get(qterm));
+            // qxQuery.setBoost(xtermQuery.score);
+            // // }
+            float score = (QUERY_SUBSET_BOOST_YESNO_DEFAULT ? origQueryTerms.get(qterm)
+                * xtermQuery.score : 1);
+            if (Float.isInfinite(score) || Float.isNaN(score)) {
+              score = 1E-6f;
             }
+            xQueryTermsOut.put(xterm.obj, score);
             
             result.add(qxQuery, Occur.SHOULD);
           }
         } else if (mode.equals(ExpandMode.DIVERSITY)) {
           
-          if (QUERY_SUBSET_BOOST_YESNO_DEFAULT) {
-            xtermQuery.obj.setBoost(xtermQuery.score);
+          // // if (QUERY_SUBSET_BOOST_YESNO_DEFAULT) {
+          // xtermQuery.obj.setBoost(xtermQuery.score);
+          // // }
+          
+          if (Float.isInfinite(xtermQuery.score) || Float.isNaN(xtermQuery.score)) {
+            xtermQuery.score = 1E-6f;
           }
+          xQueryTermsOut.put(xterm.obj, (QUERY_SUBSET_BOOST_YESNO_DEFAULT ? xtermQuery.score : 1));
+          
           result.add(xtermQuery.obj, Occur.SHOULD);
           
         }
@@ -3887,7 +4016,7 @@ public class FISQueryExpander {
     return filterQuery(result);
   }
   
-  public FilteredQuery expandAndFilterQuery(OpenObjectFloatHashMap<String> queryTerms,
+  public Query expandAndFilterQuery(OpenObjectFloatHashMap<String> queryTerms,
       int queryLen, PriorityQueue<ScoreIxObj<String>>[] clustersTerms,
       MutableFloat[] minXTermScores,
       MutableFloat[] maxXTermScores, int numTermsToAppend,
@@ -3931,7 +4060,7 @@ public class FISQueryExpander {
     return new ScoreIxObj<Query>(result, xtermWeight);
   }
   
-  public FilteredQuery filterQuery(Query q) {
+  public Query filterQuery(Query q) throws IOException {
     // No retweets
     BooleanQuery result = new BooleanQuery();
     result.add(q, Occur.MUST);
@@ -3945,7 +4074,7 @@ public class FISQueryExpander {
             true,
             true);
     
-    return new FilteredQuery(result, timeFilter);
+    return new FilteredQuery(result, timeFilter).rewrite(twtIxReader);
   }
   
   private static final boolean TERM_SCORE_PERCLUSTER = true;
@@ -4014,206 +4143,207 @@ public class FISQueryExpander {
     return insts;
   }
   
-  @SuppressWarnings("unchecked")
-  public PriorityQueue<ScoreIxObj<String>>[] convertResultToWeightedTermsByClusteringTerms(
-      OpenIntFloatHashMap rs, String query, boolean closedOnly,
-      List<MutableFloat> minXTermScoresOut, List<MutableFloat> maxXTermScoresOut,
-      List<MutableFloat> totalXTermScoresOut, boolean weightIDF) throws Exception {
-    
-    PriorityQueue<ScoreIxObj<String>>[] result = null;
-    
-    OpenObjectIntHashMap<String> termIdMap = new OpenObjectIntHashMap<String>();
-    Set<Set<String>> itemsets = Sets.newLinkedHashSet();
-    TransactionTree patternTree = new TransactionTree();
-    FastVector attrs = new FastVector();
-    
-    Instances insts = createTermTermMatrix(rs,
-        weightIDF,
-        termIdMap,
-        itemsets,
-        patternTree,
-        closedOnly,
-        attrs);
-    
-    if (patternTree.isTreeEmpty()) {
-      return result;
-    }
-    Iterator<Pair<IntArrayList, Long>> patternsIter = patternTree.iterator(closedOnly);
-    while (patternsIter.hasNext()) {
-      IntArrayList pattern = patternsIter.next().getFirst();
-      for (int i = 0; i < pattern.size(); ++i) {
-        Instance inst = insts.instance(pattern.getQuick(i));
-        for (int j = 0; j < pattern.size(); ++j) {
-          int cooccurId = pattern.getQuick(j);
-          if (i == cooccurId) {
-            inst.setMissing(cooccurId);
-          } else {
-            inst.setValue(cooccurId, inst.value(cooccurId) + 1);
-          }
-        }
-      }
-    }
-    
-    XMeans clusterer = new XMeans();
-    ((XMeans) clusterer).setDistanceF(new CosineDistance());
-    clusterer.buildClusterer(insts);
-    
-    LOG.info("Number of clusters: {}", clusterer.numberOfClusters());
-    
-    result = new PriorityQueue[clusterer.numberOfClusters()];
-    if (TERM_SCORE_PERCLUSTER) {
-      for (int c = 0; c < clusterer.numberOfClusters(); ++c) {
-        result[c] = new PriorityQueue<ScoreIxObj<String>>();
-        if (minXTermScoresOut != null) {
-          minXTermScoresOut.add(new MutableFloat(Float.MAX_VALUE));
-        }
-        if (maxXTermScoresOut != null) {
-          maxXTermScoresOut.add(new MutableFloat(Float.MIN_VALUE));
-        }
-        if (totalXTermScoresOut != null) {
-          totalXTermScoresOut.add(new MutableFloat(0));
-        }
-      }
-      
-      for (String term : termIdMap.keys()) {
-        int termId = termIdMap.get(term);
-        Instance inst = insts.instance(termId);
-        double[] distrib = clusterer.distributionForInstance(inst);
-        for (int c = 0; c < distrib.length; ++c) {
-          if (distrib[c] <= CLUSTER_MEMBERSHIP_THRESHOLD) {
-            continue;
-          }
-          
-          // Probability is meaningless as score because it comes as either 0 or 1
-          // float score = termDistrib[c];
-          
-          // Closeness to centroid
-          Instance centroid = clusterer.getClusterCenters().instance(c);
-          float score = 1 - (float) clusterer.getDistanceF().distance(centroid, inst);
-          
-          result[c].add(new ScoreIxObj<String>(term, score));
-          
-          if (minXTermScoresOut != null) {
-            if (score < minXTermScoresOut.get(c).floatValue()) {
-              minXTermScoresOut.get(c).setValue(score);
-            }
-          }
-          
-          if (maxXTermScoresOut != null) {
-            if (score > maxXTermScoresOut.get(c).floatValue()) {
-              maxXTermScoresOut.get(c).setValue(score);
-            }
-          }
-          
-          if (totalXTermScoresOut != null) {
-            totalXTermScoresOut.get(c).add(score);
-          }
-        }
-      }
-      
-    } else {
-      MutableFloat minScore = new MutableFloat(Float.MAX_VALUE);
-      MutableFloat maxScore = new MutableFloat(Float.MIN_VALUE);
-      MutableFloat totalScore = new MutableFloat(0);
-      PriorityQueue<ScoreIxObj<String>> termScores = convertResultToWeightedTermsKLDivergence(rs,
-          query,
-          -1,
-          false,
-          minScore,
-          maxScore,
-          totalScore);
-      // convertResultToWeightedTermsConditionalProb(rs,
-      // query,
-      // -1,
-      // false,
-      // minScore,
-      // maxScore,
-      // totalScore);
-      
-      for (int c = 0; c < result.length; ++c) {
-        result[c] = new PriorityQueue<ScoreIxObj<String>>();
-        if (minXTermScoresOut != null) {
-          minXTermScoresOut.add(minScore);
-        }
-        
-        if (maxXTermScoresOut != null) {
-          maxXTermScoresOut.add(maxScore);
-        }
-        
-        if (totalXTermScoresOut != null) {
-          totalXTermScoresOut.add(totalScore);
-        }
-        
-        PriorityQueue<ScoreIxObj<String>> termScoresClone = new PriorityQueue<ScoreIxObj<String>>();
-        while (!termScores.isEmpty()) {
-          ScoreIxObj<String> scoredTerm = termScores.poll();
-          termScoresClone.add(scoredTerm);
-          int termId = termIdMap.get(scoredTerm.obj);
-          Instance inst = insts.instance(termId);
-          double[] distrib = clusterer.distributionForInstance(inst);
-          if (distrib[c] > CLUSTER_MEMBERSHIP_THRESHOLD) {
-            result[c].add(scoredTerm);
-          }
-        }
-        termScores = termScoresClone;
-        
-      }
-    }
-    return result;
-  }
-  
-  public PriorityQueue<ScoreIxObj<String>> convertResultToWeightedTermsBySVDOfTerms(
-      AbstractIntFloatMap rs, boolean closedOnly, boolean weightInsts) throws Exception {
-    PriorityQueue<ScoreIxObj<String>> result = new PriorityQueue<ScoreIxObj<String>>();
-    
-    OpenObjectIntHashMap<String> termIdMap = new OpenObjectIntHashMap<String>();
-    Set<Set<String>> itemsets = Sets.newLinkedHashSet();
-    TransactionTree patternTree = new TransactionTree();
-    FastVector attrs = new FastVector();
-    
-    Instances insts = createTermTermMatrix(rs,
-        weightInsts,
-        termIdMap,
-        itemsets,
-        patternTree,
-        closedOnly,
-        attrs);
-    if (insts != null) {
-      // Removes attributes with only one distinct values (all of them), and so fails
-      // try {
-      // LatentSemanticAnalysis lsa = new LatentSemanticAnalysis();
-      // lsa.buildEvaluator(insts);
-      
-      // create matrix of attribute values and compute singular value decomposition
-      double[][] trainValues = new double[attrs.size()][insts.numInstances()];
-      for (int i = 0; i < attrs.size(); i++) {
-        trainValues[i] = insts.attributeToDoubleArray(i);
-      }
-      Matrix trainMatrix = new Matrix(trainValues);
-      // svd requires rows >= columns, so transpose data if necessary
-      if (attrs.size() < insts.numInstances()) {
-        trainMatrix = trainMatrix.transpose();
-      }
-      SingularValueDecomposition trainSVD = trainMatrix.svd();
-      Matrix s = trainSVD.getS(); // singular values
-      
-      Enumeration attrsEnum = attrs.elements();
-      int i = 0;
-      while (attrsEnum.hasMoreElements()) {
-        Attribute attr = (Attribute) attrsEnum.nextElement();
-        
-        // float score = (float) lsa.evaluateAttribute(i);
-        float score = (float) s.get(i, i);
-        result.add(new ScoreIxObj<String>(attr.name(), score));
-        i++;
-      }
-      // } catch (WekaException ingored) {
-      // LOG.error(ingored.getMessage(), ingored);
-      // }
-    }
-    return result;
-  }
-  
+  //
+  // @SuppressWarnings("unchecked")
+  // public PriorityQueue<ScoreIxObj<String>>[] convertResultToWeightedTermsByClusteringTerms(
+  // OpenIntFloatHashMap rs, String query, boolean closedOnly,
+  // List<MutableFloat> minXTermScoresOut, List<MutableFloat> maxXTermScoresOut,
+  // List<MutableFloat> totalXTermScoresOut, boolean weightIDF) throws Exception {
+  //
+  // PriorityQueue<ScoreIxObj<String>>[] result = null;
+  //
+  // OpenObjectIntHashMap<String> termIdMap = new OpenObjectIntHashMap<String>();
+  // Set<Set<String>> itemsets = Sets.newLinkedHashSet();
+  // TransactionTree patternTree = new TransactionTree();
+  // FastVector attrs = new FastVector();
+  //
+  // Instances insts = createTermTermMatrix(rs,
+  // weightIDF,
+  // termIdMap,
+  // itemsets,
+  // patternTree,
+  // closedOnly,
+  // attrs);
+  //
+  // if (patternTree.isTreeEmpty()) {
+  // return result;
+  // }
+  // Iterator<Pair<IntArrayList, Long>> patternsIter = patternTree.iterator(closedOnly);
+  // while (patternsIter.hasNext()) {
+  // IntArrayList pattern = patternsIter.next().getFirst();
+  // for (int i = 0; i < pattern.size(); ++i) {
+  // Instance inst = insts.instance(pattern.getQuick(i));
+  // for (int j = 0; j < pattern.size(); ++j) {
+  // int cooccurId = pattern.getQuick(j);
+  // if (i == cooccurId) {
+  // inst.setMissing(cooccurId);
+  // } else {
+  // inst.setValue(cooccurId, inst.value(cooccurId) + 1);
+  // }
+  // }
+  // }
+  // }
+  //
+  // XMeans clusterer = new XMeans();
+  // ((XMeans) clusterer).setDistanceF(new CosineDistance());
+  // clusterer.buildClusterer(insts);
+  //
+  // LOG.info("Number of clusters: {}", clusterer.numberOfClusters());
+  //
+  // result = new PriorityQueue[clusterer.numberOfClusters()];
+  // if (TERM_SCORE_PERCLUSTER) {
+  // for (int c = 0; c < clusterer.numberOfClusters(); ++c) {
+  // result[c] = new PriorityQueue<ScoreIxObj<String>>();
+  // if (minXTermScoresOut != null) {
+  // minXTermScoresOut.add(new MutableFloat(Float.MAX_VALUE));
+  // }
+  // if (maxXTermScoresOut != null) {
+  // maxXTermScoresOut.add(new MutableFloat(Float.MIN_VALUE));
+  // }
+  // if (totalXTermScoresOut != null) {
+  // totalXTermScoresOut.add(new MutableFloat(0));
+  // }
+  // }
+  //
+  // for (String term : termIdMap.keys()) {
+  // int termId = termIdMap.get(term);
+  // Instance inst = insts.instance(termId);
+  // double[] distrib = clusterer.distributionForInstance(inst);
+  // for (int c = 0; c < distrib.length; ++c) {
+  // if (distrib[c] <= CLUSTER_MEMBERSHIP_THRESHOLD) {
+  // continue;
+  // }
+  //
+  // // Probability is meaningless as score because it comes as either 0 or 1
+  // // float score = termDistrib[c];
+  //
+  // // Closeness to centroid
+  // Instance centroid = clusterer.getClusterCenters().instance(c);
+  // float score = 1 - (float) clusterer.getDistanceF().distance(centroid, inst);
+  //
+  // result[c].add(new ScoreIxObj<String>(term, score));
+  //
+  // if (minXTermScoresOut != null) {
+  // if (score < minXTermScoresOut.get(c).floatValue()) {
+  // minXTermScoresOut.get(c).setValue(score);
+  // }
+  // }
+  //
+  // if (maxXTermScoresOut != null) {
+  // if (score > maxXTermScoresOut.get(c).floatValue()) {
+  // maxXTermScoresOut.get(c).setValue(score);
+  // }
+  // }
+  //
+  // if (totalXTermScoresOut != null) {
+  // totalXTermScoresOut.get(c).add(score);
+  // }
+  // }
+  // }
+  //
+  // } else {
+  // MutableFloat minScore = new MutableFloat(Float.MAX_VALUE);
+  // MutableFloat maxScore = new MutableFloat(Float.MIN_VALUE);
+  // MutableFloat totalScore = new MutableFloat(0);
+  // PriorityQueue<ScoreIxObj<String>> termScores = convertResultToWeightedTermsKLDivergence(rs,
+  // query,
+  // -1,
+  // false,
+  // minScore,
+  // maxScore,
+  // totalScore);
+  // // convertResultToWeightedTermsConditionalProb(rs,
+  // // query,
+  // // -1,
+  // // false,
+  // // minScore,
+  // // maxScore,
+  // // totalScore);
+  //
+  // for (int c = 0; c < result.length; ++c) {
+  // result[c] = new PriorityQueue<ScoreIxObj<String>>();
+  // if (minXTermScoresOut != null) {
+  // minXTermScoresOut.add(minScore);
+  // }
+  //
+  // if (maxXTermScoresOut != null) {
+  // maxXTermScoresOut.add(maxScore);
+  // }
+  //
+  // if (totalXTermScoresOut != null) {
+  // totalXTermScoresOut.add(totalScore);
+  // }
+  //
+  // PriorityQueue<ScoreIxObj<String>> termScoresClone = new PriorityQueue<ScoreIxObj<String>>();
+  // while (!termScores.isEmpty()) {
+  // ScoreIxObj<String> scoredTerm = termScores.poll();
+  // termScoresClone.add(scoredTerm);
+  // int termId = termIdMap.get(scoredTerm.obj);
+  // Instance inst = insts.instance(termId);
+  // double[] distrib = clusterer.distributionForInstance(inst);
+  // if (distrib[c] > CLUSTER_MEMBERSHIP_THRESHOLD) {
+  // result[c].add(scoredTerm);
+  // }
+  // }
+  // termScores = termScoresClone;
+  //
+  // }
+  // }
+  // return result;
+  // }
+  //
+  // public PriorityQueue<ScoreIxObj<String>> convertResultToWeightedTermsBySVDOfTerms(
+  // AbstractIntFloatMap rs, boolean closedOnly, boolean weightInsts) throws Exception {
+  // PriorityQueue<ScoreIxObj<String>> result = new PriorityQueue<ScoreIxObj<String>>();
+  //
+  // OpenObjectIntHashMap<String> termIdMap = new OpenObjectIntHashMap<String>();
+  // Set<Set<String>> itemsets = Sets.newLinkedHashSet();
+  // TransactionTree patternTree = new TransactionTree();
+  // FastVector attrs = new FastVector();
+  //
+  // Instances insts = createTermTermMatrix(rs,
+  // weightInsts,
+  // termIdMap,
+  // itemsets,
+  // patternTree,
+  // closedOnly,
+  // attrs);
+  // if (insts != null) {
+  // // Removes attributes with only one distinct values (all of them), and so fails
+  // // try {
+  // // LatentSemanticAnalysis lsa = new LatentSemanticAnalysis();
+  // // lsa.buildEvaluator(insts);
+  //
+  // // create matrix of attribute values and compute singular value decomposition
+  // double[][] trainValues = new double[attrs.size()][insts.numInstances()];
+  // for (int i = 0; i < attrs.size(); i++) {
+  // trainValues[i] = insts.attributeToDoubleArray(i);
+  // }
+  // Matrix trainMatrix = new Matrix(trainValues);
+  // // svd requires rows >= columns, so transpose data if necessary
+  // if (attrs.size() < insts.numInstances()) {
+  // trainMatrix = trainMatrix.transpose();
+  // }
+  // SingularValueDecomposition trainSVD = trainMatrix.svd();
+  // Matrix s = trainSVD.getS(); // singular values
+  //
+  // Enumeration attrsEnum = attrs.elements();
+  // int i = 0;
+  // while (attrsEnum.hasMoreElements()) {
+  // Attribute attr = (Attribute) attrsEnum.nextElement();
+  //
+  // // float score = (float) lsa.evaluateAttribute(i);
+  // float score = (float) s.get(i, i);
+  // result.add(new ScoreIxObj<String>(attr.name(), score));
+  // i++;
+  // }
+  // // } catch (WekaException ingored) {
+  // // LOG.error(ingored.getMessage(), ingored);
+  // // }
+  // }
+  // return result;
+  // }
+  //
   // ////////////////////// PATTERN-TO-TERM ///////////////////////////////
   protected Instances createPatternTermMatrix(OpenIntFloatHashMap rs, boolean weightInsts,
       FastVector attrsOut, Map<IntArrayList, Instance> patternInstMapOut, boolean closedOnly,
@@ -4284,149 +4414,149 @@ public class FISQueryExpander {
     insts = Filter.useFilter(insts, replaceMissingFilter);
     return insts;
   }
-  
-  @SuppressWarnings("unchecked")
-  public PriorityQueue<ScoreIxObj<String>>[] convertResultToWeightedTermsByClusteringPatterns(
-      OpenIntFloatHashMap rs, String query, boolean closedOnly,
-      List<MutableFloat> minXTermScoresOut, List<MutableFloat> maxXTermScoresOut,
-      List<MutableFloat> totalXTermScoresOut, boolean weightInsts) throws Exception {
-    
-    PriorityQueue<ScoreIxObj<String>>[] result = null;
-    Map<IntArrayList, Instance> patternInstMap = Maps.newLinkedHashMap();
-    Set<Set<String>> itemsets = Sets.newLinkedHashSet();
-    FastVector attrs = new FastVector();
-    Instances insts = createPatternTermMatrix(rs,
-        weightInsts,
-        attrs,
-        patternInstMap,
-        closedOnly,
-        itemsets);
-    
-    XMeans clusterer = new XMeans();
-    clusterer.setDistanceF(new CosineDistance());
-    clusterer.buildClusterer(insts);
-    
-    LOG.info("Number of clusters: {}", clusterer.numberOfClusters());
-    
-    OpenObjectFloatHashMap<String>[] termWeights;
-    if (TERM_SCORE_PERCLUSTER) {
-      termWeights = new OpenObjectFloatHashMap[clusterer.numberOfClusters()];
-      
-      for (int c = 0; c < clusterer.numberOfClusters(); ++c) {
-        termWeights[c] = new OpenObjectFloatHashMap<String>();
-        
-        if (minXTermScoresOut != null) {
-          minXTermScoresOut.add(new MutableFloat(Float.MAX_VALUE));
-        }
-        if (maxXTermScoresOut != null) {
-          maxXTermScoresOut.add(new MutableFloat(Float.MIN_VALUE));
-        }
-        if (totalXTermScoresOut != null) {
-          totalXTermScoresOut.add(new MutableFloat(0));
-        }
-      }
-      
-      for (IntArrayList patternItems : patternInstMap.keySet()) {
-        Instance inst = patternInstMap.get(patternItems);
-        for (int i = 0; i < patternItems.size(); ++i) {
-          int termId = patternItems.getQuick(i);
-          String term = ((Attribute) attrs.elementAt(termId)).name();
-          double[] distrib = clusterer.distributionForInstance(inst);
-          for (int c = 0; c < distrib.length; ++c) {
-            if (distrib[c] <= CLUSTER_MEMBERSHIP_THRESHOLD) {
-              continue;
-            }
-            
-            // Closeness to centroid
-            Instance centroid = clusterer.getClusterCenters().instance(c);
-            float score = 1 - (float) clusterer.getDistanceF().distance(centroid, inst);
-            
-            score += termWeights[c].get(term);
-            termWeights[c].put(term, score);
-            
-            if (minXTermScoresOut != null) {
-              if (score < minXTermScoresOut.get(c).floatValue()) {
-                minXTermScoresOut.get(c).setValue(score);
-              }
-            }
-            
-            if (maxXTermScoresOut != null) {
-              if (score > maxXTermScoresOut.get(c).floatValue()) {
-                maxXTermScoresOut.get(c).setValue(score);
-              }
-            }
-            
-            if (totalXTermScoresOut != null) {
-              totalXTermScoresOut.get(c).add(score);
-            }
-          }
-        }
-      }
-    } else {
-      throw new UnsupportedOperationException();
-    }
-    
-    result = new PriorityQueue[clusterer.numberOfClusters()];
-    OpenObjectFloatHashMap<String> queryTerms = queryTermFreq(query, null);
-    for (int c = 0; c < clusterer.numberOfClusters(); ++c) {
-      result[c] = new PriorityQueue<ScoreIxObj<String>>();
-      for (String term : termWeights[c].keys()) {
-        if (queryTerms.containsKey(term)) {
-          continue;
-        }
-        result[c].add(new ScoreIxObj<String>(term, termWeights[c].get(term)));
-      }
-    }
-    return result;
-  }
-  
-  public PriorityQueue<ScoreIxObj<String>> convertResultToWeightedTermsBySVDOfPatternsMatrix(
-      OpenIntFloatHashMap rs, boolean closedOnly, boolean weightInsts) throws Exception {
-    PriorityQueue<ScoreIxObj<String>> result = new PriorityQueue<ScoreIxObj<String>>();
-    
-    Map<IntArrayList, Instance> patternInstMap = Maps.newLinkedHashMap();
-    Set<Set<String>> itemsets = Sets.newLinkedHashSet();
-    FastVector attrs = new FastVector();
-    Instances insts = createPatternTermMatrix(rs,
-        weightInsts,
-        attrs,
-        patternInstMap,
-        closedOnly,
-        itemsets);
-    if (insts != null) {
-      // Removes attributes with only one distinct values (all of them), and so fails
-      // try {
-      // LatentSemanticAnalysis lsa = new LatentSemanticAnalysis();
-      // lsa.buildEvaluator(insts);
-      
-      // create matrix of attribute values and compute singular value decomposition
-      double[][] trainValues = new double[attrs.size()][insts.numInstances()];
-      for (int i = 0; i < attrs.size(); i++) {
-        trainValues[i] = insts.attributeToDoubleArray(i);
-      }
-      Matrix trainMatrix = new Matrix(trainValues);
-      // svd requires rows >= columns, so transpose data if necessary
-      if (attrs.size() < insts.numInstances()) {
-        trainMatrix = trainMatrix.transpose();
-      }
-      SingularValueDecomposition trainSVD = trainMatrix.svd();
-      Matrix s = trainSVD.getS(); // singular values
-      
-      Enumeration attrsEnum = attrs.elements();
-      int i = 0;
-      while (attrsEnum.hasMoreElements()) {
-        Attribute attr = (Attribute) attrsEnum.nextElement();
-        
-        // float score = (float) lsa.evaluateAttribute(i);
-        float score = (float) s.get(i, i);
-        result.add(new ScoreIxObj<String>(attr.name(), score));
-        i++;
-      }
-      // } catch (WekaException ingored) {
-      // LOG.error(ingored.getMessage(), ingored);
-      // }
-    }
-    return result;
-  }
-  
+  //
+  // @SuppressWarnings("unchecked")
+  // public PriorityQueue<ScoreIxObj<String>>[] convertResultToWeightedTermsByClusteringPatterns(
+  // OpenIntFloatHashMap rs, String query, boolean closedOnly,
+  // List<MutableFloat> minXTermScoresOut, List<MutableFloat> maxXTermScoresOut,
+  // List<MutableFloat> totalXTermScoresOut, boolean weightInsts) throws Exception {
+  //
+  // PriorityQueue<ScoreIxObj<String>>[] result = null;
+  // Map<IntArrayList, Instance> patternInstMap = Maps.newLinkedHashMap();
+  // Set<Set<String>> itemsets = Sets.newLinkedHashSet();
+  // FastVector attrs = new FastVector();
+  // Instances insts = createPatternTermMatrix(rs,
+  // weightInsts,
+  // attrs,
+  // patternInstMap,
+  // closedOnly,
+  // itemsets);
+  //
+  // XMeans clusterer = new XMeans();
+  // clusterer.setDistanceF(new CosineDistance());
+  // clusterer.buildClusterer(insts);
+  //
+  // LOG.info("Number of clusters: {}", clusterer.numberOfClusters());
+  //
+  // OpenObjectFloatHashMap<String>[] termWeights;
+  // if (TERM_SCORE_PERCLUSTER) {
+  // termWeights = new OpenObjectFloatHashMap[clusterer.numberOfClusters()];
+  //
+  // for (int c = 0; c < clusterer.numberOfClusters(); ++c) {
+  // termWeights[c] = new OpenObjectFloatHashMap<String>();
+  //
+  // if (minXTermScoresOut != null) {
+  // minXTermScoresOut.add(new MutableFloat(Float.MAX_VALUE));
+  // }
+  // if (maxXTermScoresOut != null) {
+  // maxXTermScoresOut.add(new MutableFloat(Float.MIN_VALUE));
+  // }
+  // if (totalXTermScoresOut != null) {
+  // totalXTermScoresOut.add(new MutableFloat(0));
+  // }
+  // }
+  //
+  // for (IntArrayList patternItems : patternInstMap.keySet()) {
+  // Instance inst = patternInstMap.get(patternItems);
+  // for (int i = 0; i < patternItems.size(); ++i) {
+  // int termId = patternItems.getQuick(i);
+  // String term = ((Attribute) attrs.elementAt(termId)).name();
+  // double[] distrib = clusterer.distributionForInstance(inst);
+  // for (int c = 0; c < distrib.length; ++c) {
+  // if (distrib[c] <= CLUSTER_MEMBERSHIP_THRESHOLD) {
+  // continue;
+  // }
+  //
+  // // Closeness to centroid
+  // Instance centroid = clusterer.getClusterCenters().instance(c);
+  // float score = 1 - (float) clusterer.getDistanceF().distance(centroid, inst);
+  //
+  // score += termWeights[c].get(term);
+  // termWeights[c].put(term, score);
+  //
+  // if (minXTermScoresOut != null) {
+  // if (score < minXTermScoresOut.get(c).floatValue()) {
+  // minXTermScoresOut.get(c).setValue(score);
+  // }
+  // }
+  //
+  // if (maxXTermScoresOut != null) {
+  // if (score > maxXTermScoresOut.get(c).floatValue()) {
+  // maxXTermScoresOut.get(c).setValue(score);
+  // }
+  // }
+  //
+  // if (totalXTermScoresOut != null) {
+  // totalXTermScoresOut.get(c).add(score);
+  // }
+  // }
+  // }
+  // }
+  // } else {
+  // throw new UnsupportedOperationException();
+  // }
+  //
+  // result = new PriorityQueue[clusterer.numberOfClusters()];
+  // OpenObjectFloatHashMap<String> queryTerms = queryTermFreq(query, null);
+  // for (int c = 0; c < clusterer.numberOfClusters(); ++c) {
+  // result[c] = new PriorityQueue<ScoreIxObj<String>>();
+  // for (String term : termWeights[c].keys()) {
+  // if (queryTerms.containsKey(term)) {
+  // continue;
+  // }
+  // result[c].add(new ScoreIxObj<String>(term, termWeights[c].get(term)));
+  // }
+  // }
+  // return result;
+  // }
+  //
+  // public PriorityQueue<ScoreIxObj<String>> convertResultToWeightedTermsBySVDOfPatternsMatrix(
+  // OpenIntFloatHashMap rs, boolean closedOnly, boolean weightInsts) throws Exception {
+  // PriorityQueue<ScoreIxObj<String>> result = new PriorityQueue<ScoreIxObj<String>>();
+  //
+  // Map<IntArrayList, Instance> patternInstMap = Maps.newLinkedHashMap();
+  // Set<Set<String>> itemsets = Sets.newLinkedHashSet();
+  // FastVector attrs = new FastVector();
+  // Instances insts = createPatternTermMatrix(rs,
+  // weightInsts,
+  // attrs,
+  // patternInstMap,
+  // closedOnly,
+  // itemsets);
+  // if (insts != null) {
+  // // Removes attributes with only one distinct values (all of them), and so fails
+  // // try {
+  // // LatentSemanticAnalysis lsa = new LatentSemanticAnalysis();
+  // // lsa.buildEvaluator(insts);
+  //
+  // // create matrix of attribute values and compute singular value decomposition
+  // double[][] trainValues = new double[attrs.size()][insts.numInstances()];
+  // for (int i = 0; i < attrs.size(); i++) {
+  // trainValues[i] = insts.attributeToDoubleArray(i);
+  // }
+  // Matrix trainMatrix = new Matrix(trainValues);
+  // // svd requires rows >= columns, so transpose data if necessary
+  // if (attrs.size() < insts.numInstances()) {
+  // trainMatrix = trainMatrix.transpose();
+  // }
+  // SingularValueDecomposition trainSVD = trainMatrix.svd();
+  // Matrix s = trainSVD.getS(); // singular values
+  //
+  // Enumeration attrsEnum = attrs.elements();
+  // int i = 0;
+  // while (attrsEnum.hasMoreElements()) {
+  // Attribute attr = (Attribute) attrsEnum.nextElement();
+  //
+  // // float score = (float) lsa.evaluateAttribute(i);
+  // float score = (float) s.get(i, i);
+  // result.add(new ScoreIxObj<String>(attr.name(), score));
+  // i++;
+  // }
+  // // } catch (WekaException ingored) {
+  // // LOG.error(ingored.getMessage(), ingored);
+  // // }
+  // }
+  // return result;
+  // }
+  //
 }
