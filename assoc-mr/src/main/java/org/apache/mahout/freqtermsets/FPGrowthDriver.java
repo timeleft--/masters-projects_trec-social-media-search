@@ -223,7 +223,7 @@ public final class FPGrowthDriver extends AbstractJob {
     HadoopUtil.delete(conf, outputDir);
     
     int nThreads = Integer.parseInt(getOption(PARAM_NUM_THREADS, DEFAULT_NUM_THREADS));
-    if(nThreads != 1){
+    if(PFPGrowth.FPSTREAM && nThreads != 1){
       throw new UnsupportedOperationException("We use mining results from earlier windows. j = 1");
     }
     ExecutorService exec = Executors.newFixedThreadPool(nThreads);

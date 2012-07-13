@@ -20,6 +20,7 @@ package org.apache.mahout.freqtermsets;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
+import java.net.URL;
 import java.nio.charset.Charset;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -113,7 +114,7 @@ public final class PFPGrowth implements Callable<Void> {
   public static final String PARAM_WINDOW_SIZE = "windowSize";
   
   // TODO command line
-  private static final boolean FPSTREAM = true;
+  static final boolean FPSTREAM = false;
   public static final float FPSTREAM_LINEAR_DECAY_COEFF = 0.9f;
   // private static final double AVG_TOKENS_PER_DOC = 7;
   public static final String PARAM_MAX_PATTERN_LOAD_LAG = "maxLag";
@@ -691,7 +692,7 @@ public final class PFPGrowth implements Callable<Void> {
     // indexDirStr = FilenameUtils.concat(indexDirStr, startTime);
     // indexDirStr = FilenameUtils.concat(indexDirStr, endTime);
     // }
-    File indexDir = new File(indexDirStr);
+    File indexDir = FileUtils.toFile(new URL(indexDirStr));
     
     // clean up
     FileUtils.deleteQuietly(indexDir);
