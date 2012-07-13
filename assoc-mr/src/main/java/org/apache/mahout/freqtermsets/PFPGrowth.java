@@ -50,6 +50,7 @@ import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.hadoop.mapreduce.lib.input.SequenceFileInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.mapreduce.lib.output.SequenceFileOutputFormat;
+import org.apache.lucene.queryParser.ParseException;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.MMapDirectory;
 import org.apache.mahout.common.HadoopUtil;
@@ -621,10 +622,11 @@ public final class PFPGrowth implements Callable<Void> {
    *          parameters
    *          include minSupport(3), maxHeapSize(50), numGroups(1000)
    * @throws NoSuchAlgorithmException
+ * @throws ParseException 
    */
   public static void runPFPGrowth(Parameters params) throws IOException,
       InterruptedException,
-      ClassNotFoundException, NoSuchAlgorithmException {
+      ClassNotFoundException, NoSuchAlgorithmException, ParseException {
     Configuration conf = new Configuration();
     conf.set("io.serializations", "org.apache.hadoop.io.serializer.JavaSerialization,"
         + "org.apache.hadoop.io.serializer.WritableSerialization");

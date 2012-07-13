@@ -7,6 +7,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
@@ -36,18 +37,18 @@ import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.MultiReader;
 import org.apache.lucene.index.Term;
+import org.apache.lucene.index.TermFreqVector;
 import org.apache.lucene.queryParser.QueryParser;
 import org.apache.lucene.queryParser.QueryParser.Operator;
+import org.apache.lucene.search.Collector;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.Scorer;
 import org.apache.lucene.search.Similarity;
-import org.apache.lucene.search.Sort;
-import org.apache.lucene.search.SortField;
-import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.Directory;
-import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.LockObtainFailedException;
 import org.apache.lucene.store.MMapDirectory;
+import org.apache.lucene.store.NIOFSDirectory;
 import org.apache.lucene.util.Version;
 import org.apache.mahout.common.Pair;
 import org.apache.mahout.fpm.pfpgrowth.PFPGrowth;
@@ -59,10 +60,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import ca.uwaterloo.hadoop.util.CorpusReader;
-import ca.uwaterloo.twitter.TwitterIndexBuilder.TweetField;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 
 public class ItemSetIndexBuilder {
 	private static Logger LOG = LoggerFactory
@@ -88,7 +89,7 @@ public class ItemSetIndexBuilder {
 	private static final Analyzer ANALYZER = new PerFieldAnalyzerWrapper(
 			PLAIN_ANALYZER, ImmutableMap.<String, Analyzer> of(
 					AssocField.STEMMED_EN.name, ENGLISH_ANALYZER));
-	private static final boolean STATS = true;
+	private static final boolean STATS = false;
 
 	private static QueryParser twtQparser;
 	private static IndexSearcher twtSearcher;
@@ -99,10 +100,12 @@ public class ItemSetIndexBuilder {
 	 * @param args
 	 * @throws IOException
 	 * @throws NoSuchAlgorithmException
+	 * @throws org.apache.lucene.queryParser.ParseException
 	 */
 	@SuppressWarnings("static-access")
 	public static void main(String[] args) throws IOException,
-			NoSuchAlgorithmException {
+			NoSuchAlgorithmException,
+			org.apache.lucene.queryParser.ParseException {
 
 		Options options = new Options();
 		options.addOption(OptionBuilder.withArgName("path").hasArg()
@@ -174,10 +177,11 @@ public class ItemSetIndexBuilder {
 				Long.MAX_VALUE, null);
 	}
 
-	public static void buildIndex(Path inPath, File indexDir,
+	public static void buildIndex(Path inPath, File indexFile,
 			long intervalStartTime, long intervalEndTime, Directory earlierIndex)
 			throws CorruptIndexException, LockObtainFailedException,
-			IOException, NoSuchAlgorithmException {
+			IOException, NoSuchAlgorithmException,
+			org.apache.lucene.queryParser.ParseException {
 
 		FileSystem fs = FileSystem.get(new Configuration());
 		if (!fs.exists(inPath)) {
@@ -202,8 +206,8 @@ public class ItemSetIndexBuilder {
 			lengthStat = new SummaryStatistics();
 			supportStat = new SummaryStatistics();
 		}
-
-		IndexWriter writer = new IndexWriter(FSDirectory.open(indexDir), config);
+		Directory indexDir = NIOFSDirectory.open(indexFile);
+		IndexWriter writer = new IndexWriter(indexDir, config);
 		if (earlierIndex != null) {
 			// FIXME: this will delete the earlier index.. copy first.. and also
 			// maybe it's good to delete docs before adding
@@ -228,11 +232,11 @@ public class ItemSetIndexBuilder {
 							first.toString());
 					continue;
 				}
-				if (LOG.isTraceEnabled()){
+				if (LOG.isTraceEnabled()) {
 					LOG.trace("Indexing: " + first.toString() + "\t"
 							+ second.toString());
 				}
-				
+
 				for (Pair<List<String>, Long> patternPair : second
 						.getPatterns()) {
 
@@ -276,7 +280,7 @@ public class ItemSetIndexBuilder {
 				return;
 				// continue;
 			}
-			
+
 			closedPatterns = closedPatterns.getCompressedTree(true);
 
 			List<String> terms = Lists.newArrayListWithCapacity(termIds.size());
@@ -285,7 +289,7 @@ public class ItemSetIndexBuilder {
 			int rank = 0;
 
 			Iterator<Pair<IntArrayList, Long>> itemsetIter = closedPatterns
-					.iterator(); //already closed only when compressing
+					.iterator(); // already closed only when compressing
 			while (itemsetIter.hasNext()) {
 				Pair<IntArrayList, Long> patternPair = itemsetIter.next();
 				IntArrayList pattern = patternPair.getFirst();
@@ -424,6 +428,112 @@ public class ItemSetIndexBuilder {
 										"/u2/yaboulnaga/datasets/twitter-trec2011/assoc-mr_0607-2100/support-stats_index-closed.txt"),
 								supportStat.toString());
 			}
+
+			// Delete duplicates
+			writer.commit();
+			writer.close();
+			final IndexReader fisIxReader = IndexReader.open(indexDir);
+			final IndexSearcher fisSearcher = new IndexSearcher(fisIxReader);
+			final String COLLECTION_STRING_CLEANER = "[\\,\\[\\]]";
+			final QueryParser fisQparser = new QueryParser(Version.LUCENE_36,
+					ItemSetIndexBuilder.AssocField.ITEMSET.name, ANALYZER);
+			fisQparser.setDefaultOperator(Operator.AND);
+
+			// Deleting by docid is available only from reader
+			// final IntArrayList toDelete = new IntArrayList();
+			final List<String> toDelete = Lists.newLinkedList();
+			for (int d = 0; d < fisIxReader.maxDoc(); ++d) {
+				final TermFreqVector termVector = fisIxReader
+						.getTermFreqVector(d, AssocField.ITEMSET.name);
+				final int doc1 = d;
+				final Document document = fisIxReader.document(doc1);
+				final int supp1 = Integer.parseInt(document
+						.get(AssocField.SUPPORT.name));
+				// if (LOG.isTraceEnabled()) {
+				// LOG.debug("Looking for duplicates for itemset {} with support {}",
+				// termVector.getTerms(),
+				// supp1);
+				// }
+				Query query = fisQparser.parse(Arrays.toString(
+						termVector.getTerms()).replaceAll(
+						COLLECTION_STRING_CLEANER, ""));
+				fisSearcher.search(query, new Collector() {
+					IndexReader reader;
+					int docBase;
+					boolean deleted = false;
+
+					@Override
+					public void setScorer(Scorer scorer) throws IOException {
+
+					}
+
+					@Override
+					public void collect(int doc2) throws IOException {
+						if (doc2 == doc1 || deleted) {
+							return;
+						}
+						TermFreqVector tv2 = fisIxReader.getTermFreqVector(
+								doc2, AssocField.ITEMSET.name);
+						Set<String> tSet1 = Sets.newCopyOnWriteArraySet(Arrays
+								.asList(termVector.getTerms()));
+						Set<String> tSet2 = Sets.newCopyOnWriteArraySet(Arrays
+								.asList(tv2.getTerms()));
+						Set<String> interSet = Sets.intersection(tSet1, tSet2);
+
+						if (interSet.equals(tSet1)) {
+							// This will be checked when doc2 is processed: ||
+							// interSet.equals(tSet2)) {
+							int supp2 = Integer.parseInt(fisIxReader.document(
+									doc2).get(AssocField.SUPPORT.name));
+							LOG.debug(
+									"Itemset contained in another - itemset1: {}, itemset2: {}",
+									Arrays.toString(termVector.getTerms())
+											+ "/" + supp1,
+									Arrays.toString(tv2.getTerms()) + "/"
+											+ supp2);
+
+							// reader.deleteDocument(doc1);
+							// deleted = true;
+
+							// toDelete.add(doc1);
+							toDelete.add(document.get(AssocField.ID.name));
+
+						}
+						//
+						// if (tSet1.equals(tSet2)) {
+						// LOG.info("Identical document number {} with term vector {}",
+						// doc2, tv2);
+						// }
+						//
+						// Set<String> diff = Sets.difference(tSet1, tSet2);
+						// if()
+
+					}
+
+					@Override
+					public void setNextReader(IndexReader reader, int docBase)
+							throws IOException {
+						this.reader = reader;
+						this.docBase = docBase;
+					}
+
+					@Override
+					public boolean acceptsDocsOutOfOrder() {
+						return true;
+					}
+				});
+			}
+			fisIxReader.close();
+
+			config.setOpenMode(IndexWriterConfig.OpenMode.APPEND);
+			writer = new IndexWriter(indexDir, config);
+			for (String id : toDelete) {
+				writer.deleteDocuments(new Term(AssocField.ID.name, id));
+			}
+			writer.commit();
+
+			// Optimize is necessary for delete to have any effect.. even though
+			// it is deprecated.. and this is not documented.. WTF!
 			LOG.info("Optimizing index...");
 			writer.optimize();
 
