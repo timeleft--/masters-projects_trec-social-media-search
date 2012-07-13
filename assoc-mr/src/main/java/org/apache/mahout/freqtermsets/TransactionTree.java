@@ -112,6 +112,42 @@ public final class TransactionTree implements Writable, Iterable<Pair<IntArrayLi
     }
     return false;
   }
+  
+  public int addPatternUnique(IntArrayList myList, long addCount) {
+	    int temp = ROOTNODEID;
+	    int ret = 0;
+	    boolean addCountMode = true;
+	    int[] patternNodes = new int[myList.size()];
+	    for (int idx = 0; idx < myList.size(); idx++) {
+	      int attributeValue = myList.get(idx);
+	      int child;
+	      if (addCountMode) {
+	        child = childWithAttribute(temp, attributeValue);
+	        if (child == -1) {
+	          addCountMode = false;
+	        } else {
+	        	patternNodes[idx] = child;
+//	          addCount(child, addCount);
+	          temp = child;
+	        }
+	      }
+	      if (!addCountMode) {
+	        child = createNode(temp, attributeValue, addCount);
+	        patternNodes[idx] = -1;
+	        temp = child;
+	        ret++;
+	      }
+	    }
+	    if(!addCountMode){
+	    	for(int idx = 0; idx < patternNodes.length; ++idx){
+	    		if(patternNodes[idx] == -1){
+	    			break;
+	    		}
+	    		addCount(patternNodes[idx], addCount);
+	    	}
+	    }
+	    return ret;
+	  }
 
   public int addPattern(IntArrayList myList, long addCount) {
     int temp = ROOTNODEID;
@@ -191,9 +227,13 @@ public final class TransactionTree implements Writable, Iterable<Pair<IntArrayLi
     return frequencyList;
   }
   
-  public TransactionTree getCompressedTree() {
+  public TransactionTree getCompressedTree(){
+	  return getCompressedTree(false);
+  }
+  
+  public TransactionTree getCompressedTree(boolean closedOnly) {
     TransactionTree ctree = new TransactionTree();
-    Iterator<Pair<IntArrayList,Long>> it = iterator();
+    Iterator<Pair<IntArrayList,Long>> it = iterator(closedOnly);
     int node = 0;
     int size = 0;
     List<Pair<IntArrayList,Long>> compressedTransactionSet = Lists.newArrayList();
@@ -228,6 +268,9 @@ public final class TransactionTree implements Writable, Iterable<Pair<IntArrayLi
     if (this.isTreeEmpty() && !representedAsList) {
       throw new IllegalStateException("This is a bug. Please report this to mahout-user list");
     } else if (representedAsList) {
+    	if(onlyClosed){
+    		throw new IllegalArgumentException("I'm a list");
+    	}
       return transactionSet.iterator();
     } else {
       return new TransactionTreeIterator(this,onlyClosed);

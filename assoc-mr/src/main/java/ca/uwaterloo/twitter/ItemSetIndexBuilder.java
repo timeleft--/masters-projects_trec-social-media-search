@@ -267,7 +267,7 @@ public class ItemSetIndexBuilder {
 						patternInts.add(termInt);
 					}
 
-					closedPatterns.addPattern(patternInts,
+					closedPatterns.addPatternUnique(patternInts,
 							patternPair.getSecond());
 				}
 			}
@@ -276,6 +276,8 @@ public class ItemSetIndexBuilder {
 				return;
 				// continue;
 			}
+			
+			closedPatterns = closedPatterns.getCompressedTree(true);
 
 			List<String> terms = Lists.newArrayListWithCapacity(termIds.size());
 			termIds.keysSortedByValue(terms);
@@ -283,7 +285,7 @@ public class ItemSetIndexBuilder {
 			int rank = 0;
 
 			Iterator<Pair<IntArrayList, Long>> itemsetIter = closedPatterns
-					.iterator(true);
+					.iterator(); //already closed only when compressing
 			while (itemsetIter.hasNext()) {
 				Pair<IntArrayList, Long> patternPair = itemsetIter.next();
 				IntArrayList pattern = patternPair.getFirst();
