@@ -428,9 +428,13 @@ public class ItemSetIndexBuilder {
 										"/u2/yaboulnaga/datasets/twitter-trec2011/assoc-mr_0607-2100/support-stats_index-closed.txt"),
 								supportStat.toString());
 			}
-
+			// ////////////////////////////////////////////////////////
 			// Delete duplicates
-			writer.commit();
+			// writer.commit();
+			// Optimize is necessary for delete to have any effect.. even though
+			// it is deprecated.. and this is not documented.. WTF!
+			LOG.info("Optimizing index...");
+			writer.optimize();
 			writer.close();
 			final IndexReader fisIxReader = IndexReader.open(indexDir);
 			final IndexSearcher fisSearcher = new IndexSearcher(fisIxReader);
