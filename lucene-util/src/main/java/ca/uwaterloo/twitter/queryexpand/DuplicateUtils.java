@@ -1,13 +1,18 @@
 package ca.uwaterloo.twitter.queryexpand;
 
+import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Set;
 
 import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.document.Document;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.index.Term;
 import org.apache.lucene.index.TermFreqVector;
 import org.apache.lucene.queryParser.ParseException;
 import org.apache.lucene.queryParser.QueryParser;
@@ -18,6 +23,7 @@ import org.apache.lucene.search.Query;
 import org.apache.lucene.search.Scorer;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.MMapDirectory;
+import org.apache.lucene.store.NIOFSDirectory;
 import org.apache.lucene.util.Version;
 import org.apache.mahout.math.list.IntArrayList;
 import org.slf4j.Logger;
@@ -37,16 +43,14 @@ public class DuplicateUtils {
   
   private static final Analyzer ANALYZER = new TwitterAnalyzer();
   
-  private  IndexReader fisIxReader;
-  private  IndexSearcher fisSearcher;
-  private  ItemSetSimilarity fisSimilarity;
-  private  QueryParser fisQparser;
-  
-  
+  private IndexReader fisIxReader;
+  private IndexSearcher fisSearcher;
+  private ItemSetSimilarity fisSimilarity;
+  private QueryParser fisQparser;
   
   /**
    * @param args
-   * @throws CorruptIndexException 
+   * @throws CorruptIndexException
    * @throws IOException
    * @throws ParseException
    */
@@ -63,17 +67,17 @@ public class DuplicateUtils {
     fisQparser.setDefaultOperator(Operator.AND);
   }
   
-  public IntArrayList findDuplicates() throws IOException, ParseException{
+  public IntArrayList findDuplicates() throws IOException, ParseException {
     final IntArrayList toDelete = new IntArrayList();
     for (int d = 0; d < fisIxReader.maxDoc(); ++d) {
       final TermFreqVector termVector = fisIxReader.getTermFreqVector(d, AssocField.ITEMSET.name);
       final int doc1 = d;
       final int supp1 = Integer.parseInt(fisIxReader.document(doc1).get(AssocField.SUPPORT.name));
-//      if (LOG.isTraceEnabled()) {
-//        LOG.debug("Looking for duplicates for itemset {} with support {}",
-//            termVector.getTerms(),
-//            supp1);
-//      }
+      // if (LOG.isTraceEnabled()) {
+      // LOG.debug("Looking for duplicates for itemset {} with support {}",
+      // termVector.getTerms(),
+      // supp1);
+      // }
       Query query = fisQparser.parse(Arrays.toString(termVector.getTerms())
           .replaceAll(COLLECTION_STRING_CLEANER, ""));
       fisSearcher.search(query, new Collector() {
@@ -129,7 +133,32 @@ public class DuplicateUtils {
     return toDelete;
   }
   
+  public void close() throws IOException{
+    fisIxReader.close();
+  }
+  
   public static void main(String[] args) throws CorruptIndexException, IOException, ParseException {
-    new DuplicateUtils(new File("/u2/yaboulnaga/Shared/datasets/twitter-trec2011/assoc-mr_chuncks-15min_1day/1295740800000/1295741700000/index")).findDuplicates();
+    File indexDir = new File(args[0]);
+    DuplicateUtils du = new DuplicateUtils(indexDir);
+    
+    IntArrayList toDelete = du.findDuplicates();
+//    IndexWriterConfig config = new IndexWriterConfig(Version.LUCENE_36,
+//        du.ANALYZER);
+//    config.setSimilarity(du.fisSimilarity);
+//    config.setOpenMode(IndexWriterConfig.OpenMode.APPEND);
+//    IndexWriter writer = new IndexWriter(NIOFSDirectory.open(indexDir), config);
+//    for (int i = 0; i < toDelete.size(); ++i) {
+//      Document doc = du.fisIxReader.document(toDelete.getQuick(i));
+//      writer.deleteDocuments(new Term(AssocField.ID.name, doc.get(AssocField.ID.name)));
+//    }
+//    writer.commit();
+//    
+//    writer.optimize();
+//    writer.close();
+//    
+//    du.close();
+//    du = new DuplicateUtils(indexDir);
+//    
+//    toDelete = du.findDuplicates();
   }
 }
