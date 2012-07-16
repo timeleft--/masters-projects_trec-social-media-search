@@ -58,7 +58,7 @@ public class AggregatorReducer extends Reducer<Text, TopKStringPatterns, Text, T
     // YA get data to do more than freq merge
     int myMaxHeapSize = maxHeapSize;
     Configuration conf = context.getConfiguration();
-    FileSystem fs = FileSystem.getLocal(conf);
+    FileSystem fs = FileSystem.get(conf); //TODO: do I need?getLocal(conf);
     String cachePath = FilenameUtils.concat(FileUtils.getTempDirectory().toURI().toString(), Thread
         .currentThread().getName() + "_" + key.hashCode() + "_patterns");
     org.apache.hadoop.io.ArrayFile.Writer cacheWr = new ArrayFile.Writer(conf, fs, cachePath,

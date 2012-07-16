@@ -525,7 +525,7 @@ public final class PFPGrowth implements Callable<Void> {
   private static int cacheFList(Parameters params, Configuration conf, String countIn,
       int minSupport, int minFr, int prunePct) throws IOException {
     Path cachedPath = new Path(countIn, F_LIST);
-    FileSystem fs = FileSystem.get(conf);
+    FileSystem fs = FileSystem.getLocal(conf);
     int result;
     if (fs.exists(cachedPath)) {
       assert FPSTREAM;
@@ -656,7 +656,7 @@ public final class PFPGrowth implements Callable<Void> {
       if (FPSTREAM) {
         fListSize = -1;
         Path timeRoot = new Path(countIn).getParent().getParent();
-        FileSystem fs = FileSystem.get(conf);
+        FileSystem fs = FileSystem.getLocal(conf);
         final long currStartTime = startTime;
         for (FileStatus earlierWindow : fs.listStatus(timeRoot, new PathFilter() {
           @Override
@@ -703,7 +703,7 @@ public final class PFPGrowth implements Callable<Void> {
     Directory earlierIndex = null;
     if (FPSTREAM) {
       Path timeRoot = new Path(params.get(OUTPUT)).getParent().getParent();
-      FileSystem fs = FileSystem.get(conf);
+      FileSystem fs = FileSystem.getLocal(conf);
       
       long mostRecent = Long.MIN_VALUE;
       Path mostRecentPath = null;
@@ -723,9 +723,10 @@ public final class PFPGrowth implements Callable<Void> {
         // FIXME: as with anything that involves lucene.. won't work except on a local machine
         earlierIndex = new MMapDirectory(FileUtils.toFile(mostRecentPath.toUri().toURL()));
       } 
-    } 
-    ItemSetIndexBuilder.buildIndex(seqPath, indexDir,
-        startTime, Math.min(endTime, startTime + windowSize), earlierIndex);
+    }
+// FIXME: When we want to stream, we have to build the index of earlier window 
+//    ItemSetIndexBuilder.buildIndex(seqPath, indexDir,
+//        startTime, Math.min(endTime, startTime + windowSize), earlierIndex);
   }
   
   /**
@@ -809,8 +810,8 @@ public final class PFPGrowth implements Callable<Void> {
     job.setOutputKeyClass(Text.class);
     job.setOutputValueClass(LongWritable.class);
     
-    FileSystem fs = FileSystem.getLocal(conf);
-    PartitionByTimestamp.setInputPaths(job, params, fs);
+//    FileSystem fs = FileSystem.get(conf); //TODONE: do I need?getLocal(conf);
+    PartitionByTimestamp.setInputPaths(job, params, conf);
     // FileInputFormat.addInputPath(job, new Path(input));
     
     Path outPath = new Path(params.get(OUTPUT), PARALLEL_COUNTING);
@@ -869,8 +870,8 @@ public final class PFPGrowth implements Callable<Void> {
     job.setOutputKeyClass(Text.class);
     job.setOutputValueClass(TopKStringPatterns.class);
     
-    FileSystem fs = FileSystem.getLocal(conf);
-    PartitionByTimestamp.setInputPaths(job, params, fs);
+//    FileSystem fs = FileSystem.get(conf); //TODONE: do I need?getLocal(conf);
+    PartitionByTimestamp.setInputPaths(job, params, conf);
     // FileInputFormat.addInputPath(job, input);
     
     Path outPath = new Path(params.get(OUTPUT), FPGROWTH);

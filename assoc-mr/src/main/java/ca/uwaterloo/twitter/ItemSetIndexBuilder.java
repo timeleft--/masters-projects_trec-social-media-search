@@ -430,11 +430,9 @@ public class ItemSetIndexBuilder {
 			}
 			// ////////////////////////////////////////////////////////
 			// Delete duplicates
-			// writer.commit();
-			// Optimize is necessary for delete to have any effect.. even though
-			// it is deprecated.. and this is not documented.. WTF!
-			LOG.info("Optimizing index...");
-			writer.optimize();
+			writer.commit();
+			// LOG.info("Optimizing index...");
+			// writer.optimize();
 			writer.close();
 			final IndexReader fisIxReader = IndexReader.open(indexDir);
 			final IndexSearcher fisSearcher = new IndexSearcher(fisIxReader);
@@ -529,12 +527,14 @@ public class ItemSetIndexBuilder {
 			}
 			fisIxReader.close();
 
+			config = new IndexWriterConfig(Version.LUCENE_36, analyzer);
+			config.setSimilarity(similarity);
 			config.setOpenMode(IndexWriterConfig.OpenMode.APPEND);
 			writer = new IndexWriter(indexDir, config);
 			for (String id : toDelete) {
 				writer.deleteDocuments(new Term(AssocField.ID.name, id));
 			}
-			writer.commit();
+//			writer.commit();
 
 			// Optimize is necessary for delete to have any effect.. even though
 			// it is deprecated.. and this is not documented.. WTF!

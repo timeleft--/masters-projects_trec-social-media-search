@@ -1,4 +1,4 @@
-/u2/yaboulnaga/Programs/hadoop-1.0.3/bin/hadoop jar target/assoc-mr-0.0.2-SNAPSHOT-job.jar org.apache.mahout.freqtermsets.FPGrowthDriver --input file:///u2/yaboulnaga/Shared/datasets/twitter-trec2011/csv_hour-5min/ --output file:///u2/yaboulnaga/Shared/datasets/twitter-trec2011/assoc-mr_chuncks-15min_1day/ -mi -j 6 -mf 3 --minSupport 2 -pct 99 -g 256 -ws 900000  -st 1295740800000 -et 1295827200000
+/u2/yaboulnaga/Programs/hadoop-1.0.3/bin/hadoop jar target/assoc-mr-0.0.2-SNAPSHOT-job.jar org.apache.mahout.freqtermsets.FPGrowthDriver --input file:///u2/yaboulnaga/Shared/datasets/twitter-trec2011/csv_hour-5min/ --output file:///u2/yaboulnaga/Shared/datasets/twitter-trec2011/assoc-mr_chuncks-4hr_1day/ -mi -j 4 -mf 3 --minSupport 2 -pct 99 -g 256 -ws 14400000  -st 1295740800000 -et 1295827200000
 
 # file:///u2/yaboulnaga/Shared/datasets/twitter-trec2011/csv_hour-5min/
 # -st 1295740800000

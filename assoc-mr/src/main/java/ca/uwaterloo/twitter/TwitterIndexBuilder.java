@@ -144,7 +144,7 @@ public class TwitterIndexBuilder implements Callable<Void> {
     Future<Void> lastFuture = null;
     
     Configuration conf = new Configuration();
-    FileSystem fs = FileSystem.getLocal(conf);
+    FileSystem fs = FileSystem.get(conf); //TODO: do I need? getLocal(conf);
     
     List<Path> startFoldersList = Lists.<Path> newLinkedList();
     // would have sorted the listStati right away, but the documentation for its compareTo

@@ -243,7 +243,11 @@ public final class FPGrowthDriver extends AbstractJob {
 //        Long.toString(Long.MAX_VALUE)));
     long windowSize = Long.parseLong(params.get(PFPGrowth.PARAM_WINDOW_SIZE,
         Long.toString(endTime - startTime)));
-    while (startTime < endTime) {
+//int numJobs = 0;    
+while (startTime < endTime) {
+//	if(++numJobs % 100 == 0){
+//Thread.sleep(60000);
+//}
       params.set(PFPGrowth.PARAM_INTERVAL_START, Long.toString(startTime));
             
       if (hasOption(PFPGrowth.GROUP_FIS_IN)) {
@@ -268,7 +272,9 @@ public final class FPGrowthDriver extends AbstractJob {
       lastFuture = exec.submit(new PFPGrowth(params));
       
       startTime += windowSize;
-    }
+   
+Thread.sleep(10000);
+ }
     
     lastFuture.get();
     exec.shutdown();

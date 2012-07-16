@@ -7,7 +7,7 @@ import org.apache.commons.lang.StringEscapeUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.io.Text;
+import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.mapreduce.InputSplit;
 import org.apache.hadoop.mapreduce.RecordReader;
 import org.apache.hadoop.mapreduce.TaskAttemptContext;
@@ -16,11 +16,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import edu.umd.cloud9.io.pair.PairOfLongs;
-import edu.umd.cloud9.io.pair.PairOfStringLong;
 import edu.umd.cloud9.io.pair.PairOfStrings;
 
 public class CSVTweetRecordReader extends RecordReader<PairOfLongs, PairOfStrings> {
-//  private static final Logger LOG = LoggerFactory.getLogger(CSVTweetRecordReader.class);
+  private static final Logger LOG = LoggerFactory.getLogger(CSVTweetRecordReader.class);
   private static final Pattern tabSplit = Pattern.compile("\\t");
   
   private FSDataInputStream reader;
@@ -43,7 +42,9 @@ public class CSVTweetRecordReader extends RecordReader<PairOfLongs, PairOfString
     if (currFile >= split.getNumPaths()) {
       return false;
     }
-    reader = fs.open(split.getPath(currFile++));
+    Path p = split.getPath(currFile++);
+    LOG.info("Opening path: {}, qualified: {}", p, fs.makeQualified(p));
+    reader = fs.open(fs.makeQualified(p));
     reader.readLine();
     return true;
   }
