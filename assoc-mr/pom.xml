@@ -7,7 +7,7 @@
 <!-- 	<packaging>jar</packaging> -->
 	<properties>
 		<mahout.skip.example>true</mahout.skip.example>
-		<mahout.version>0.7-SNAPSHOT</mahout.version>
+		<mahout.version>0.7</mahout.version>
 	</properties>
 
 	<build>

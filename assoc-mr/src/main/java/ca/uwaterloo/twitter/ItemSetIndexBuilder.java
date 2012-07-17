@@ -5,8 +5,10 @@ import java.io.IOException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.apache.commons.cli.CommandLine;
@@ -16,7 +18,6 @@ import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.OptionBuilder;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
-import org.apache.commons.io.FileUtils;
 import org.apache.commons.math.stat.descriptive.SummaryStatistics;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
@@ -47,7 +48,6 @@ import org.apache.lucene.search.Scorer;
 import org.apache.lucene.search.Similarity;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.LockObtainFailedException;
-import org.apache.lucene.store.MMapDirectory;
 import org.apache.lucene.store.NIOFSDirectory;
 import org.apache.lucene.util.Version;
 import org.apache.mahout.common.Pair;
@@ -89,13 +89,51 @@ public class ItemSetIndexBuilder {
 	private static final Analyzer ANALYZER = new PerFieldAnalyzerWrapper(
 			PLAIN_ANALYZER, ImmutableMap.<String, Analyzer> of(
 					AssocField.STEMMED_EN.name, ENGLISH_ANALYZER));
-	private static final boolean STATS = false;
+	private static final boolean STATS = true;
 
-	private static QueryParser twtQparser;
-	private static IndexSearcher twtSearcher;
-	private static MultiReader twtIxReader;
-	private static Similarity twtSimilarity;
+	private  QueryParser twtQparser;
+	private  IndexSearcher twtSearcher;
+	private MultiReader twtIxReader;
+	private  Similarity twtSimilarity;
 
+	public ItemSetIndexBuilder() {
+		// List<IndexReader> ixRds = Lists.newLinkedList();
+		// File twtIncIxLoc = new File(
+		// "/u2/yaboulnaga/datasets/twitter-trec2011/index-stemmed_8hr-incremental");
+		//
+		// long now = System.currentTimeMillis();
+		//
+		// long incrEndTime = openTweetIndexesBeforeQueryTime(twtIncIxLoc,
+		// true,
+		// false,
+		// Long.MIN_VALUE,
+		// ixRds, now);
+		// File[] twtChunkIxLocs = new File(
+		// "/u2/yaboulnaga/datasets/twitter-trec2011/index-stemmed_chunks").listFiles();
+		// if (twtChunkIxLocs != null) {
+		// int i = 0;
+		// long prevChunkEndTime = incrEndTime;
+		// while (i < twtChunkIxLocs.length - 1) {
+		// prevChunkEndTime =
+		// openTweetIndexesBeforeQueryTime(twtChunkIxLocs[i++],
+		// false,
+		// false,
+		// prevChunkEndTime,
+		// ixRds, now);
+		// }
+		// openTweetIndexesBeforeQueryTime(twtChunkIxLocs[i], false, true,
+		// prevChunkEndTime, ixRds, now);
+		// }
+		// twtIxReader = new MultiReader(ixRds.toArray(new IndexReader[0]));
+		// twtSearcher = new IndexSearcher(twtIxReader);
+		// twtSimilarity = new TwitterSimilarity();
+		// twtSearcher.setSimilarity(twtSimilarity);
+		//
+		// twtQparser = new QueryParser(Version.LUCENE_36, TweetField.TEXT.name,
+		// ANALYZER);
+		// twtQparser.setDefaultOperator(Operator.AND);
+
+	}
 	/**
 	 * @param args
 	 * @throws IOException
@@ -137,52 +175,17 @@ public class ItemSetIndexBuilder {
 		seqPath += File.separator + PFPGrowth.FREQUENT_PATTERNS; // "frequentpatterns";
 		LOG.info("Indexing " + seqPath);
 
-		// List<IndexReader> ixRds = Lists.newLinkedList();
-		// File twtIncIxLoc = new File(
-		// "/u2/yaboulnaga/datasets/twitter-trec2011/index-stemmed_8hr-incremental");
-		//
-		// long now = System.currentTimeMillis();
-		//
-		// long incrEndTime = openTweetIndexesBeforeQueryTime(twtIncIxLoc,
-		// true,
-		// false,
-		// Long.MIN_VALUE,
-		// ixRds, now);
-		// File[] twtChunkIxLocs = new File(
-		// "/u2/yaboulnaga/datasets/twitter-trec2011/index-stemmed_chunks").listFiles();
-		// if (twtChunkIxLocs != null) {
-		// int i = 0;
-		// long prevChunkEndTime = incrEndTime;
-		// while (i < twtChunkIxLocs.length - 1) {
-		// prevChunkEndTime =
-		// openTweetIndexesBeforeQueryTime(twtChunkIxLocs[i++],
-		// false,
-		// false,
-		// prevChunkEndTime,
-		// ixRds, now);
-		// }
-		// openTweetIndexesBeforeQueryTime(twtChunkIxLocs[i], false, true,
-		// prevChunkEndTime, ixRds, now);
-		// }
-		// twtIxReader = new MultiReader(ixRds.toArray(new IndexReader[0]));
-		// twtSearcher = new IndexSearcher(twtIxReader);
-		// twtSimilarity = new TwitterSimilarity();
-		// twtSearcher.setSimilarity(twtSimilarity);
-		//
-		// twtQparser = new QueryParser(Version.LUCENE_36, TweetField.TEXT.name,
-		// ANALYZER);
-		// twtQparser.setDefaultOperator(Operator.AND);
-
-		buildIndex(new Path(seqPath), indexLocation, Long.MIN_VALUE,
+	ItemSetIndexBuilder builder = new ItemSetIndexBuilder();
+		Map<String, SummaryStatistics> stats = builder.buildIndex(new Path(seqPath), indexLocation, Long.MIN_VALUE,
 				Long.MAX_VALUE, null);
 	}
 
-	public static void buildIndex(Path inPath, File indexFile,
-			long intervalStartTime, long intervalEndTime, Directory earlierIndex)
-			throws CorruptIndexException, LockObtainFailedException,
-			IOException, NoSuchAlgorithmException,
+	public Map<String, SummaryStatistics> buildIndex(Path inPath,
+			File indexFile, long intervalStartTime, long intervalEndTime,
+			Directory earlierIndex) throws CorruptIndexException,
+			LockObtainFailedException, IOException, NoSuchAlgorithmException,
 			org.apache.lucene.queryParser.ParseException {
-
+		HashMap<String, SummaryStatistics> result = new HashMap<String, SummaryStatistics>();
 		FileSystem fs = FileSystem.get(new Configuration());
 		if (!fs.exists(inPath)) {
 			LOG.error("Error: " + inPath + " does not exist!");
@@ -205,6 +208,8 @@ public class ItemSetIndexBuilder {
 		if (STATS) {
 			lengthStat = new SummaryStatistics();
 			supportStat = new SummaryStatistics();
+			result.put("length", lengthStat);
+			result.put("support", supportStat);
 		}
 		Directory indexDir = NIOFSDirectory.open(indexFile);
 		IndexWriter writer = new IndexWriter(indexDir, config);
@@ -277,7 +282,7 @@ public class ItemSetIndexBuilder {
 			}
 
 			if (closedPatterns.isTreeEmpty()) {
-				return;
+				return result;
 				// continue;
 			}
 
@@ -416,18 +421,7 @@ public class ItemSetIndexBuilder {
 
 			LOG.info(String.format("Total of %s itemsets indexed", cnt));
 
-			if (STATS) {
-				FileUtils
-						.writeStringToFile(
-								new File(
-										"/u2/yaboulnaga/datasets/twitter-trec2011/assoc-mr_0607-2100/length-stats_index-closed.txt"),
-								lengthStat.toString());
-				FileUtils
-						.writeStringToFile(
-								new File(
-										"/u2/yaboulnaga/datasets/twitter-trec2011/assoc-mr_0607-2100/support-stats_index-closed.txt"),
-								supportStat.toString());
-			}
+		
 			// ////////////////////////////////////////////////////////
 			// Delete duplicates
 			writer.commit();
@@ -534,7 +528,7 @@ public class ItemSetIndexBuilder {
 			for (String id : toDelete) {
 				writer.deleteDocuments(new Term(AssocField.ID.name, id));
 			}
-//			writer.commit();
+			// writer.commit();
 
 			// Optimize is necessary for delete to have any effect.. even though
 			// it is deprecated.. and this is not documented.. WTF!
@@ -551,76 +545,8 @@ public class ItemSetIndexBuilder {
 			writer.close();
 			stream.close();
 		}
-	}
 
-	private static long openTweetIndexesBeforeQueryTime(File twtIndexLocation,
-			boolean pIncremental, boolean exceedTime, long windowStart,
-			List<IndexReader> ixReadersOut, long queryTime) throws IOException {
-		assert !(pIncremental && exceedTime) : "Those are mutually exclusive modes";
-		long result = -1;
-		File[] startFolders = twtIndexLocation.listFiles();
-		Arrays.sort(startFolders);
-		int minIx = -1;
-		int maxIx = -1;
-		for (int i = 0; i < startFolders.length; ++i) {
-			long folderStartTime = Long.parseLong(startFolders[i].getName());
-			if (minIx == -1 && folderStartTime >= windowStart) {
-				minIx = i;
-			}
-			if (folderStartTime < queryTime) {
-				maxIx = i;
-			} else {
-				break;
-			}
-		}
-		// if (minIx == maxIx) {
-		// startFolders = new File[] { startFolders[minIx] };
-		// } else {
-		// startFolders = Arrays.copyOfRange(startFolders, minIx, maxIx);
-		// }
-		if (minIx == -1) {
-			// This chunk ended where it should have started
-			return windowStart;
-		}
-		startFolders = Arrays.copyOfRange(startFolders, minIx, maxIx + 1);
-		for (File startFolder : startFolders) {
-			boolean lastOne = false;
-			File incrementalFolder = null;
-			File[] endFolderArr = startFolder.listFiles();
-			Arrays.sort(endFolderArr);
-			for (File endFolder : endFolderArr) {
-				if (Long.parseLong(endFolder.getName()) > queryTime) {
-					if (pIncremental) {
-						break;
-					} else {
-						if (exceedTime) {
-							lastOne = true;
-						} else {
-							break;
-						}
-					}
-				}
-				if (pIncremental) {
-					incrementalFolder = endFolder;
-				} else {
-					Directory twtdir = new MMapDirectory(endFolder);
-					ixReadersOut.add(IndexReader.open(twtdir));
-					result = Long.parseLong(endFolder.getName());
-				}
-				if (lastOne) {
-					assert !pIncremental;
-					break;
-				}
-			}
-			if (incrementalFolder != null) {
-				assert pIncremental;
-				assert startFolders.length == 1;
-				Directory twtdir = new MMapDirectory(incrementalFolder);
-				ixReadersOut.add(IndexReader.open(twtdir));
-				result = Long.parseLong(incrementalFolder.getName());
-				break; // shouldn't be needed
-			}
-		}
 		return result;
 	}
+
 }
