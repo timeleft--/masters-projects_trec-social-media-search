@@ -247,11 +247,11 @@ public class ItemSetIndexBuilder {
           if (termSet.size() < 2) {
             continue;
           }
-          if (termSet.get(1).charAt(0) == '_') {
-            // metadata
-            // TODO: read probabilities of languages of patterns
-            continue;
-          }
+//          if (termSet.get(1).charAt(0) == AggregatorReducer.METADATA_PREFIX) {
+//            // metadata
+//            // TODO: read probabilities of languages of patterns
+//            continue;
+//          }
           
           ++cnt;
           if (cnt % 10000 == 0) {
