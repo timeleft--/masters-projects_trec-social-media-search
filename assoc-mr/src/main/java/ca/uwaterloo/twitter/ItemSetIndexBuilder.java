@@ -53,6 +53,7 @@ import org.apache.lucene.store.NIOFSDirectory;
 import org.apache.lucene.util.Version;
 import org.apache.mahout.common.Pair;
 import org.apache.mahout.fpm.pfpgrowth.PFPGrowth;
+import org.apache.mahout.freqtermsets.AggregatorReducer;
 import org.apache.mahout.freqtermsets.TransactionTree;
 import org.apache.mahout.freqtermsets.convertors.string.TopKStringPatterns;
 import org.apache.mahout.math.list.IntArrayList;
@@ -247,11 +248,12 @@ public class ItemSetIndexBuilder {
           if (termSet.size() < 2) {
             continue;
           }
-//          if (termSet.get(1).charAt(0) == AggregatorReducer.METADATA_PREFIX) {
-//            // metadata
-//            // TODO: read probabilities of languages of patterns
-//            continue;
-//          }
+          if (termSet.get(1).charAt(0) == AggregatorReducer.METADATA_PREFIX) {
+            // Will never happen now that it's space
+            // metadata
+            // TODONOT: read probabilities of languages of patterns
+            continue;
+          }
           
           ++cnt;
           if (cnt % 10000 == 0) {

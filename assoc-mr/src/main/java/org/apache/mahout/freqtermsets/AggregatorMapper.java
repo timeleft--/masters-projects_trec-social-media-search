@@ -40,6 +40,7 @@ public class AggregatorMapper extends Mapper<Text,TopKStringPatterns,Text,TopKSt
     for (Pair<List<String>,Long> pattern : values.getPatterns()) {
       for (String item : pattern.getFirst()) {
         if(item.charAt(0) == AggregatorReducer.METADATA_PREFIX){
+       // Will never happen now that it's space
           continue;
         }
         List<Pair<List<String>,Long>> patternSingularList = Lists.newArrayList();

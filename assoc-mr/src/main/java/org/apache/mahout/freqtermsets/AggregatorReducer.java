@@ -41,7 +41,7 @@ import org.apache.mahout.math.map.OpenObjectLongHashMap;
  * 
  */
 public class AggregatorReducer extends Reducer<Text, TopKStringPatterns, Text, TopKStringPatterns> {
-//  public static final char METADATA_PREFIX = '_';
+  public static final char METADATA_PREFIX = ' '; //'_';
   public static final String MUTUAL_INFO_FLAG = "mutualInfo";
   private int maxHeapSize = 50;
   private final OpenObjectLongHashMap<String> fMap = new OpenObjectLongHashMap<String>();
@@ -77,7 +77,7 @@ public class AggregatorReducer extends Reducer<Text, TopKStringPatterns, Text, T
           continue; // just like their merge
         }
         for (String other : pattern.getFirst()) {
-          if(other.charAt(0) == ' '){ //METADATA_PREFIX){
+          if(other.charAt(0) == METADATA_PREFIX){
             // Keep metadata out of merge
             vPatterns.remove(p);
             
