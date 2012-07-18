@@ -450,6 +450,12 @@ public class ItemSetIndexBuilder {
       for (int d = 0; d < fisIxReader.maxDoc(); ++d) {
         final TermFreqVector termVector = fisIxReader
             .getTermFreqVector(d, AssocField.ITEMSET.name);
+        if(termVector == null){
+          LOG.error("Null term vector for document {} out of {}", d, fisIxReader.maxDoc());
+          fisIxReader.deleteDocument(d);
+          deleted.add(d);
+          continue;
+        }
         final Set<String> tSet1 = Sets.newCopyOnWriteArraySet(Arrays
             .asList(termVector.getTerms()));
         final int doc1 = d;
@@ -462,8 +468,7 @@ public class ItemSetIndexBuilder {
         // termVector.getTerms(),
         // supp1);
         // }
-        Query query = fisQparser.parse(Arrays.toString(
-            termVector.getTerms()).replaceAll(
+        Query query = fisQparser.parse(tSet1.toString().replaceAll(
             COLLECTION_STRING_CLEANER, ""));
         Collector duplicateDeletionCollector = new Collector() {
           // IndexReader reader;
