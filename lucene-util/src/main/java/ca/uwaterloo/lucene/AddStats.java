@@ -42,6 +42,8 @@ public class AddStats implements Callable<Void> {
   private static final String STEMMED = TweetField.STEMMED_EN.name;
   private static final int NUM_THREADS = 3;
   
+  private static final boolean REPARSE_IF_MISSING = false;
+  
   /**
    * @param args
    * @throws IOException
@@ -129,7 +131,7 @@ public class AddStats implements Callable<Void> {
     
     for (int d = 0; d < ixReader.maxDoc(); ++d) {
       TermFreqVector tfv = ixReader.getTermFreqVector(d, NON_STEMMED);
-      if (tfv == null) {
+      if (tfv == null && REPARSE_IF_MISSING) {
         Document doc = ixReader.document(d);
         String text = doc.get(NON_STEMMED);
         if (text == null || text.isEmpty()) {
@@ -144,7 +146,7 @@ public class AddStats implements Callable<Void> {
           termFreqInDocRaw);
       
       tfv = ixReader.getTermFreqVector(d, STEMMED);
-      if (tfv == null) {
+      if (tfv == null && REPARSE_IF_MISSING) {
         Document doc = ixReader.document(d);
         String text = doc.get(STEMMED);
         if (text == null || text.isEmpty()) {
