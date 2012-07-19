@@ -224,7 +224,7 @@ public class TwitterIndexBuilder implements Callable<Void> {
             }
             if (incremental) {
               // prevIndexDir = new MMapDirectory(indexFile);
-              prevIndexDir = NIOFSDirectory.open(new File(indexFile, "index"));
+              prevIndexDir = NIOFSDirectory.open(indexFile);
             }
           } else {
             LOG.warn("No files for window: {} - {}", windowStart, windowStart + winLen);
