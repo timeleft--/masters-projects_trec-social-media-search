@@ -18,6 +18,7 @@ import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.OptionBuilder;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
+import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
@@ -38,7 +39,10 @@ import org.apache.lucene.search.Similarity;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.MMapDirectory;
+import org.apache.lucene.store.NIOFSDirectory;
+import org.apache.lucene.store.SimpleFSDirectory;
 import org.apache.lucene.util.Version;
+import org.codehaus.jackson.map.ser.impl.SimpleFilterProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -74,11 +78,19 @@ public class TwitterIndexBuilder implements Callable<Void> {
   private static final String END_TIME_OPTION = "end";
   private static final String WINDOW_LEN_OPTION = "win";
   private static final String WINDOW_LEN_DEFAULT = "3600000";
+  private static final boolean INCREMENTAL_DEFAULT = true;
+  // /u2/yaboulnaga/datasets/twitter-trec2011/indexes/stemmed-stored_8hr-increments/1295740800000/1296633600000/index
+  // start 1296604800000
   
   private static final Analyzer PLAIN_ANALYZER = new TwitterAnalyzer(); // Version.LUCENE_36);
   private static final Analyzer ENGLISH_ANALYZER = new TwitterEnglishAnalyzer();
   private static final Analyzer ANALYZER = new PerFieldAnalyzerWrapper(PLAIN_ANALYZER,
       ImmutableMap.<String, Analyzer> of(TweetField.STEMMED_EN.name, ENGLISH_ANALYZER));
+  
+  private static final boolean APPEND = false;
+  private static final boolean TRUST_LUCENE_ADD_INDEX = true;
+  private static final TermVector STORE_UNSTEMMED_TERMVECTOR = TermVector.NO;
+  private static final TermVector STORE_STEMMED_TERMVECTOR = TermVector.YES;
   
   /**
    * @param args
@@ -92,7 +104,7 @@ public class TwitterIndexBuilder implements Callable<Void> {
       InterruptedException, ExecutionException {
     
     // TODO from commandline
-    boolean incremental = false;
+    boolean incremental = INCREMENTAL_DEFAULT;
     
     Options options = new Options();
     options.addOption(OptionBuilder.withArgName("path").hasArg()
@@ -130,7 +142,7 @@ public class TwitterIndexBuilder implements Callable<Void> {
     
     // LOG.info("Deleting {}", indexRoot);
     // FileUtils.deleteQuietly(indexRoot);
-    if (indexRoot.exists()) {
+    if (!APPEND && indexRoot.exists()) {
       LOG.error("Output folder already exists: {}", indexRoot);
       return;
     }
@@ -144,7 +156,7 @@ public class TwitterIndexBuilder implements Callable<Void> {
     Future<Void> lastFuture = null;
     
     Configuration conf = new Configuration();
-    FileSystem fs = FileSystem.get(conf); //TODO: do I need? getLocal(conf);
+    FileSystem fs = FileSystem.get(conf); // TODO: do I need? getLocal(conf);
     
     List<Path> startFoldersList = Lists.<Path> newLinkedList();
     // would have sorted the listStati right away, but the documentation for its compareTo
@@ -204,10 +216,15 @@ public class TwitterIndexBuilder implements Callable<Void> {
           indexFile = new File(indexFile, Long.toString(windowStart + winLen));
           
           if (tweetFiles.size() > 0) {
-            lastFuture = exec.submit(new TwitterIndexBuilder(tweetFiles.toArray(new Path[0]),
-                indexFile, conf, prevIndexDir));
+            if (APPEND && indexFile.exists()) {
+              // do nothing
+            } else {
+              lastFuture = exec.submit(new TwitterIndexBuilder(tweetFiles.toArray(new Path[0]),
+                  indexFile, conf, prevIndexDir));
+            }
             if (incremental) {
-              prevIndexDir = new MMapDirectory(indexFile);
+              // prevIndexDir = new MMapDirectory(indexFile);
+              prevIndexDir = NIOFSDirectory.open(new File(indexFile, "index"));
             }
           } else {
             LOG.warn("No files for window: {} - {}", windowStart, windowStart + winLen);
@@ -240,8 +257,12 @@ public class TwitterIndexBuilder implements Callable<Void> {
         indexFile = new File(indexRoot, Long.toString(windowStart));
       }
       indexFile = new File(indexFile, Long.toString(windowStart + winLen));
-      lastFuture = exec.submit(new TwitterIndexBuilder(tweetFiles.toArray(new Path[0]),
-          indexFile, conf, prevIndexDir));
+      if (APPEND && indexFile.exists()) {
+        // do nothing
+      } else {
+        lastFuture = exec.submit(new TwitterIndexBuilder(tweetFiles.toArray(new Path[0]),
+            indexFile, conf, prevIndexDir));
+      }
     }
     
     lastFuture.get();
@@ -283,12 +304,25 @@ public class TwitterIndexBuilder implements Callable<Void> {
     Similarity similarity = new TwitterSimilarity();
     IndexWriterConfig config = new IndexWriterConfig(Version.LUCENE_36, analyzer);
     config.setSimilarity(similarity);
-    config.setOpenMode(IndexWriterConfig.OpenMode.CREATE); // Overwrite existing.
     
-    IndexWriter writer = new IndexWriter(FSDirectory.open(indexDir), config);
+    FileUtils.deleteQuietly(indexDir);
+    IndexWriter writer;
+    
+    if (!TRUST_LUCENE_ADD_INDEX && prevIndexDir != null) {
+      
+      config.setOpenMode(IndexWriterConfig.OpenMode.APPEND); // leave existing.
+      
+      FileUtils.copyDirectory(((FSDirectory) prevIndexDir).getDirectory(), indexDir);
+      
+    } else {
+      config.setOpenMode(IndexWriterConfig.OpenMode.CREATE); // Overwrite existing.
+    }
+    
+    writer = new IndexWriter(FSDirectory.open(indexDir), config);
+    
     try {
       
-      if (prevIndexDir != null) {
+      if (TRUST_LUCENE_ADD_INDEX && prevIndexDir != null) {
         writer.addIndexes(prevIndexDir);
       }
       
@@ -311,9 +345,9 @@ public class TwitterIndexBuilder implements Callable<Void> {
         doc.add(new NumericField(TweetField.TIMESTAMP.name, Store.YES, true)
             .setLongValue(timestamp));
         doc.add(new Field(TweetField.TEXT.name, tweet, Store.YES,
-            Index.ANALYZED, TermVector.NO));
+            Index.ANALYZED, STORE_STEMMED_TERMVECTOR));
         doc.add(new Field(TweetField.STEMMED_EN.name, tweet, Store.NO,
-            Index.ANALYZED, TermVector.YES));
+            Index.ANALYZED, STORE_UNSTEMMED_TERMVECTOR));
         
         writer.addDocument(doc);
         if (++cnt % 10000 == 0) {
