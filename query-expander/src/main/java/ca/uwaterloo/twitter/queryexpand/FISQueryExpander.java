@@ -60,6 +60,7 @@ import org.apache.lucene.search.Similarity;
 import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.MMapDirectory;
+import org.apache.lucene.store.NIOFSDirectory;
 import org.apache.lucene.util.Version;
 import org.apache.mahout.common.Pair;
 import org.apache.mahout.freqtermsets.TransactionTree;
@@ -83,6 +84,7 @@ import weka.core.matrix.Matrix;
 import weka.core.matrix.SingularValueDecomposition;
 import weka.filters.Filter;
 import weka.filters.unsupervised.attribute.ReplaceMissingValues;
+import ca.uwaterloo.timeseries.IncrementalChuncksParallelHiers;
 import ca.uwaterloo.twitter.ItemSetIndexBuilder;
 import ca.uwaterloo.twitter.ItemSetIndexBuilder.AssocField;
 import ca.uwaterloo.twitter.ItemSetSimilarity;
@@ -222,7 +224,7 @@ public class FISQueryExpander {
       OpenObjectFloatHashMap<String> termRSFreq = new OpenObjectFloatHashMap<String>();
       float totalRSFreq = 0;
       List<String> idTermMap = Lists.newArrayList();
-//      List<Term> stemmedList = Lists.newArrayList();
+      // List<Term> stemmedList = Lists.newArrayList();
       LinkedHashSet<Set<String>> itemsetsSet = new LinkedHashSet<Set<String>>();
       FastVector attrs = new FastVector();
       
@@ -242,8 +244,8 @@ public class FISQueryExpander {
             docLen,
             tweetStemmingAnalyzer,
             TweetField.STEMMED_EN.name);
-//            tweetNonStemmingAnalyzer,
-//            TweetField.TEXT.name);
+        // tweetNonStemmingAnalyzer,
+        // TweetField.TEXT.name);
         itemsetsSet.add(Sets.newCopyOnWriteArraySet(termDocFreq.keys()));
         
         if (termDocFreq.size() < MIN_ITEMSET_SIZE) { // no repetition .containsKey(termSet)) {
@@ -259,20 +261,20 @@ public class FISQueryExpander {
             termIdMap.put(term, termId);
             idTermMap.add(term);
             bWordDocTemp.add(new OpenIntFloatHashMap());
-//            String fieldname = TweetField.STEMMED_EN.name;
-//            stemmedList.add();
+            // String fieldname = TweetField.STEMMED_EN.name;
+            // stemmedList.add();
             attrs.addElement(new Attribute(term));
           }
           termId = termIdMap.get(term);
           
-//          Term stemmed = stemmedList.get(termId);
+          // Term stemmed = stemmedList.get(termId);
           Term stemmed = new Term(TweetField.STEMMED_EN.name, term);
           
           // /// HEY THESE ARE MY OWN APPROXIMATIONSS >>> HOPE FOR THE BESTT!!!!!
           float globalTi;
           // TODO revise smoothing
-            globalTi = (target.termWeightSmoother + target.twtIxReader.docFreq(stemmed))
-                / (target.termWeightSmoother + TWITTER_CORPUS_LENGTH_IN_TERMS);
+          globalTi = (target.termWeightSmoother + target.twtIxReader.docFreq(stemmed))
+              / (target.termWeightSmoother + TWITTER_CORPUS_LENGTH_IN_TERMS);
           
           bWordDocTemp.get(termId).put(rank, globalTi);
           
@@ -297,8 +299,9 @@ public class FISQueryExpander {
           bPWD[w][d] = bWordDocTemp.get(w).get(d);
           float rsIDF = termRSFreq.get(idTermMap.get(w)) / totalRSFreq;
           float corpusIDF;
-            corpusIDF = 1.0f * target.twtIxReader.docFreq(new Term(TweetField.STEMMED_EN.name,idTermMap.get(w)))
-                / target.twtIxReader.numDocs();
+          corpusIDF = 1.0f
+              * target.twtIxReader.docFreq(new Term(TweetField.STEMMED_EN.name, idTermMap.get(w)))
+              / target.twtIxReader.numDocs();
           if (corpusIDF == 0) {
             // shit happens!!!
             bPWD[w][d] = 0;
@@ -466,7 +469,8 @@ public class FISQueryExpander {
       
       for (String term : termFreq.keys()) {
         Term stemmed = new Term(TweetField.STEMMED_EN.name,
-            target.queryTermFreq(term, null, tweetStemmingAnalyzer, TweetField.STEMMED_EN.name).keys()
+            target.queryTermFreq(term, null, tweetStemmingAnalyzer, TweetField.STEMMED_EN.name)
+                .keys()
                 .get(0));
         float docFreq = target.twtIxReader.docFreq(stemmed);
         float idfGlobal = 1.0f * docFreq / target.twtIxReader.numDocs();
@@ -616,7 +620,8 @@ public class FISQueryExpander {
   
   private static final String RETWEET_TERM = "rt";
   
-  private static final float ITEMSET_LEN_AVG_DEFAULT = 5;// FIXME: there is a correct number in FISCollector
+  private static final float ITEMSET_LEN_AVG_DEFAULT = 5;// FIXME: there is a correct number in
+                                                         // FISCollector
   
   private static final float ITEMSET_LEN_WEIGHT_DEFAULT = 0.33f;
   
@@ -2672,22 +2677,27 @@ public class FISQueryExpander {
     fisQparser.setDefaultOperator(Operator.AND);
     
     List<IndexReader> ixRds = Lists.newLinkedList();
-    long incrEndTime = openTweetIndexesBeforeQueryTime(twtIncIxLoc,
-        true,
-        false,
-        Long.MIN_VALUE,
-        ixRds);
-    if (twtChunkIxLocs != null) {
-      int i = 0;
-      long prevChunkEndTime = incrEndTime;
-      while (i < twtChunkIxLocs.length - 1) {
-        prevChunkEndTime = openTweetIndexesBeforeQueryTime(twtChunkIxLocs[i++],
-            false,
-            false,
-            prevChunkEndTime,
-            ixRds);
-      }
-      openTweetIndexesBeforeQueryTime(twtChunkIxLocs[i], false, true, prevChunkEndTime, ixRds);
+    // long incrEndTime = openTweetIndexesBeforeQueryTime(twtIncIxLoc,
+    // true,
+    // false,
+    // Long.MIN_VALUE,
+    // ixRds);
+    // if (twtChunkIxLocs != null) {
+    // int i = 0;
+    // long prevChunkEndTime = incrEndTime;
+    // while (i < twtChunkIxLocs.length - 1) {
+    // prevChunkEndTime = openTweetIndexesBeforeQueryTime(twtChunkIxLocs[i++],
+    // false,
+    // false,
+    // prevChunkEndTime,
+    // ixRds);
+    // }
+    // openTweetIndexesBeforeQueryTime(twtChunkIxLocs[i], false, true, prevChunkEndTime, ixRds);
+    // }
+    for (File ixLoc : IncrementalChuncksParallelHiers.getPathsBefore(twtIncIxLoc,
+        twtChunkIxLocs,
+        queryTime)) {
+      ixRds.add(IndexReader.open(NIOFSDirectory.open(new File(ixLoc, "index"))));
     }
     twtIxReader = new MultiReader(ixRds.toArray(new IndexReader[0]));
     twtSearcher = new IndexSearcher(twtIxReader);
@@ -2698,76 +2708,6 @@ public class FISQueryExpander {
     twtQparser.setDefaultOperator(Operator.AND);
     
     BooleanQuery.setMaxClauseCount(fisNumHits * fisNumHits);
-  }
-  
-  private long openTweetIndexesBeforeQueryTime(File twtIndexLocation, boolean pIncremental,
-      boolean exceedTime, long windowStart, List<IndexReader> ixReadersOut) throws IOException {
-    assert !(pIncremental && exceedTime) : "Those are mutually exclusive modes";
-    long result = -1;
-    File[] startFolders = twtIndexLocation.listFiles();
-    Arrays.sort(startFolders);
-    int minIx = -1;
-    int maxIx = -1;
-    for (int i = 0; i < startFolders.length; ++i) {
-      long folderStartTime = Long.parseLong(startFolders[i].getName());
-      if (minIx == -1 && folderStartTime >= windowStart) {
-        minIx = i;
-      }
-      if (folderStartTime < queryTime) {
-        maxIx = i;
-      } else {
-        break;
-      }
-    }
-    // if (minIx == maxIx) {
-    // startFolders = new File[] { startFolders[minIx] };
-    // } else {
-    // startFolders = Arrays.copyOfRange(startFolders, minIx, maxIx);
-    // }
-    if (minIx == -1) {
-      // This chunk ended where it should have started
-      return windowStart;
-    }
-    startFolders = Arrays.copyOfRange(startFolders, minIx, maxIx + 1);
-    for (File startFolder : startFolders) {
-      boolean lastOne = false;
-      File incrementalFolder = null;
-      File[] endFolderArr = startFolder.listFiles();
-      Arrays.sort(endFolderArr);
-      for (File endFolder : endFolderArr) {
-        if (Long.parseLong(endFolder.getName()) > queryTime) {
-          if (pIncremental) {
-            break;
-          } else {
-            if (exceedTime) {
-              lastOne = true;
-            } else {
-              break;
-            }
-          }
-        }
-        if (pIncremental) {
-          incrementalFolder = endFolder;
-        } else {
-          Directory twtdir = new MMapDirectory(endFolder);
-          ixReadersOut.add(IndexReader.open(twtdir));
-          result = Long.parseLong(endFolder.getName());
-        }
-        if (lastOne) {
-          assert !pIncremental;
-          break;
-        }
-      }
-      if (incrementalFolder != null) {
-        assert pIncremental;
-        assert startFolders.length == 1;
-        Directory twtdir = new MMapDirectory(incrementalFolder);
-        ixReadersOut.add(IndexReader.open(twtdir));
-        result = Long.parseLong(incrementalFolder.getName());
-        break; // shouldn't be needed
-      }
-    }
-    return result;
   }
   
   public OpenIntFloatHashMap relatedItemsets(String queryStr, float minScore)

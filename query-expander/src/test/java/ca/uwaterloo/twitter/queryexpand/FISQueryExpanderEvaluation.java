@@ -52,31 +52,32 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   
   public static final int MAX_RESULTS = 10100;
   private File fisIncIxLocation = new File(
-      "/u2/yaboulnaga/datasets/twitter-trec2011/assoc-mr_0608-0530/index-closed_stemmed-stored");
+      "/u2/yaboulnaga/datasets/twitter-trec2011/fis/assoc-mr_0607-2100/index-closed_stemmed-stored");
+//      "/u2/yaboulnaga/datasets/twitter-trec2011/fis/assoc-mr_0608-0530/index-closed_stemmed-stored");
   
   private File twtIncIxLoc = new File(
-      "/u2/yaboulnaga/datasets/twitter-trec2011/" +
+      "/u2/yaboulnaga/datasets/twitter-trec2011/indexes/" +
           // "trash/index-stemmed_8hr-incremental");
           "stemmed-stored_8hr-increments");
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-stemmed_8hr-incremental");
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-tweets_8hr-increments");
   
-  private static final String TWT_CHUNKS_ROOT = "/u2/yaboulnaga/datasets/twitter-trec2011/"
+  private static final String TWT_CHUNKS_ROOT = "/u2/yaboulnaga/datasets/twitter-trec2011/indexes/"
       // + "trash/index-stemmed_chunks";
       + "stemmed-stored_chunks";
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-stemmed_chunks";
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-tweets_chunks";
-  private static final String RESULT_PATH = "/u2/yaboulnaga/datasets/twitter-trec2011/runs/trec2012";
+  private static final String RESULT_PATH = "/u2/yaboulnaga/datasets/twitter-trec2011/runs";
   private static final String TOPICS_XML_PATH =
       "/u2/yaboulnaga/datasets/twitter-trec2011/"
-           + "2012.topics.MB51-110.xml";
-//          + "2011.topics.MB1-50.xml";
+//           + "2012.topics.MB51-110.xml";
+          + "2011.topics.MB1-50.xml";
   private static final String QREL_PATH = null;
   // "/u2/yaboulnaga/datasets/twitter-trec2011/microblog11-qrels.txt";
   
   private int numItemsetsToConsider = 100;
   private int numTermsToAppend = 10;
-  private final boolean trecEvalFormat = false;
+  private final boolean trecEvalFormat = true;
   private boolean paramNormalize = false;
   private boolean paramClosedOnly = true;
   private boolean paramPropagateItemSetScores = true;
@@ -96,7 +97,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   // And hopefully increase the MAP without decreasing recall (requires paramNormalize = true)
   private static final float SCORE_THRESHOLD = Float.MIN_VALUE;
 
-  private static final boolean SORT_RESULTS_REVERSE_CHRONOLOGICALLY = true;
+  private static final boolean SORT_RESULTS_REVERSE_CHRONOLOGICALLY = false;
   
   private static final String TAG_BASELINE = "baseline";
   private static final String TAG_FREQ_PATTERNS = "freqPatterns";
@@ -270,7 +271,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     resultWriters = Maps.newHashMap();
     resultFiles = Maps.newHashMap();
     
-    openWriterForTag(TAG_BASELINE);
+//    openWriterForTag(TAG_BASELINE);
 //    openWriterForTag(TAG_FROM_TWEETS);
     // openWriterForTag(TAG_FREQ_PATTERNS);
     // openWriterForTag(TAG_FREQ_PATTERNS + 50);
@@ -281,7 +282,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     // openWriterForTag(TAG_QUERY_CONDPROB);
     // openWriterForTag(TAG_KL_DIVER);
     openWriterForTag(TAG_CLUSTER_PATTERNS);
-    openWriterForTag(TAG_CLUSTER_TWEETS);
+//    openWriterForTag(TAG_CLUSTER_TWEETS);
     // openWriterForTag(TAG_CLUSTER_TERMS);
     // openWriterForTag(TAG_MARKOV);
     // openWriterForTag(TAG_SVD_PATTERN);

@@ -5,6 +5,11 @@
 	<artifactId>query-expander</artifactId>
 	<version>0.0.2-SNAPSHOT</version>
 	<dependencies>
+	   <dependency>
+	     <groupId>yaboulna-thesis</groupId>
+      <artifactId>timeseries-util</artifactId>
+      <version>0.0.1-SNAPSHOT</version>
+     </dependency>
 <!-- 		<dependency> -->
 <!-- 			<groupId>trec2012</groupId> -->
 <!-- 			<artifactId>hadoop-util</artifactId> -->
