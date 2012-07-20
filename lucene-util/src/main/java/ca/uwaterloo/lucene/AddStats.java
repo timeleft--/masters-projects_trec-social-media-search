@@ -42,7 +42,8 @@ public class AddStats implements Callable<Void> {
   private static final String STEMMED = TweetField.STEMMED_EN.name;
   private static final int NUM_THREADS = 3;
   
-  private static final boolean REPARSE_IF_MISSING = false;
+  private static final boolean REPARSE_IF_MISSING = true;
+  private static final boolean STEMMED_STATS = false;
   
   /**
    * @param args
@@ -79,6 +80,7 @@ public class AddStats implements Callable<Void> {
     while (!exec.isTerminated()) {
       Thread.sleep(1000);
     }
+    System.out.println("Done all: " + timeRoot);
   }
   
   public Void call() throws IOException {
@@ -88,6 +90,7 @@ public class AddStats implements Callable<Void> {
       }
       FileUtils.writeStringToFile(new File(statsPath, e.getKey()), e.getValue().toString());
     }
+    System.out.println("Done: "  + indexRoot);
     return null;
   }
   
@@ -145,20 +148,22 @@ public class AddStats implements Callable<Void> {
           docLenUniqueRaw,
           termFreqInDocRaw);
       
-      tfv = ixReader.getTermFreqVector(d, STEMMED);
-      if (tfv == null && REPARSE_IF_MISSING) {
-        Document doc = ixReader.document(d);
-        String text = doc.get(STEMMED);
-        if (text == null || text.isEmpty()) {
-          nullTweetsStemmed.addValue(d);
-        } else {
-          tfv = Parse.createTermFreqVector(text, null, ANALYZER, STEMMED);
+      if (STEMMED_STATS) {
+        tfv = ixReader.getTermFreqVector(d, STEMMED);
+        if (tfv == null && REPARSE_IF_MISSING) {
+          Document doc = ixReader.document(d);
+          String text = doc.get(STEMMED);
+          if (text == null || text.isEmpty()) {
+            nullTweetsStemmed.addValue(d);
+          } else {
+            tfv = Parse.createTermFreqVector(text, null, ANALYZER, STEMMED);
+          }
         }
+        addValues(tfv,
+            docLenTotalStemmed,
+            docLenUniqueStemmed,
+            termFreqInDocStemmed);
       }
-      addValues(tfv,
-          docLenTotalStemmed,
-          docLenUniqueStemmed,
-          termFreqInDocStemmed);
     }
     
     Map<String, SummaryStatistics> result = new HashMap<String, SummaryStatistics>();
