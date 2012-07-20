@@ -46,7 +46,7 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
   public boolean clarityScore = false;
   public boolean binaryFtd = true;
   
-  private static TwitterEnglishAnalyzer stemmingAnalyzer = new TwitterEnglishAnalyzer();
+  // private static TwitterEnglishAnalyzer stemmingAnalyzer = new TwitterEnglishAnalyzer();
   public final boolean stemmedIDF;
   
   /**
@@ -71,11 +71,11 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
   protected IndexReader reader;
   protected int docBase;
   protected final OpenObjectFloatHashMap<String> queryTerms;
-  protected final float queryLen;
+  protected float queryLen;
   protected final TreeMap<ScoreIxObj<K>, V> resultSet;
   protected float maxScore = Float.MIN_VALUE;
   protected float minScore = Float.MAX_VALUE;
-  protected final String queryStr;
+//  protected final String queryStr;
   protected final FISQueryExpander target;
   protected final int maxResults;
   protected final String docTextField;
@@ -84,14 +84,14 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
   private boolean stemmedField;
   
   public BM25Collector(FISQueryExpander pTarget, String pDocTextField,
-      String pQueryStr, OpenObjectFloatHashMap<String> pQueryTerms, float pQueryLen,
+     /*String pQueryStr,*/ OpenObjectFloatHashMap<String> pQueryTerms, float pQueryLen,
       int addNEnglishStopWordsToQueryTerms, int pMaxResults,
       Class<? extends Comparator<ScoreIxObj<K>>> comparatorClazz, boolean pStemmedIDF)
       throws IOException, IllegalArgumentException, SecurityException, InstantiationException,
       IllegalAccessException, InvocationTargetException {
     
     target = pTarget;
-    queryStr = pQueryStr;
+//    queryStr = pQueryStr;
     docTextField = pDocTextField;
     stemmedIDF = pStemmedIDF;
     stemmedField = pDocTextField.startsWith("stemmed");
@@ -99,11 +99,29 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
       throw new IllegalArgumentException("It will be stemmed.. can't avoid it!");
     }
     if (stemmedIDF) {
-      MutableLong qLenOut = new MutableLong();
-      queryTerms = target.queryTermFreq(queryStr,
-          qLenOut,
-          stemmingAnalyzer, docTextField);
-      queryLen = qLenOut.floatValue();
+//      MutableLong qLenOut = new MutableLong();
+//      queryTerms = target.queryTermFreq(queryStr,
+//          qLenOut,
+//          FISQueryExpander.tweetStemmingAnalyzer, docTextField);
+//      queryLen = qLenOut.floatValue();
+      // This might loose some of the query terms because of stemming them into the same one
+      // but that's fine.. the value should be .. duh duh.. TODO!
+      queryTerms = new OpenObjectFloatHashMap<String>();
+      for(String qTerm: pQueryTerms.keys()){
+        String stemmed;
+        if(FISQueryExpander.SEARCH_NON_STEMMED){
+          stemmed = qTerm;
+        } else {
+          stemmed = target.queryTermFreq(qTerm,
+              null,
+              FISQueryExpander.tweetStemmingAnalyzer, docTextField).keys().get(0);
+        }
+        
+        float value = pQueryTerms.get(qTerm) + queryTerms.get(stemmed);
+        queryTerms.put(stemmed, value);
+        queryLen += value;
+      }
+      
     } else {
       queryTerms = (OpenObjectFloatHashMap<String>) pQueryTerms.clone();
       queryLen = pQueryLen;
@@ -146,7 +164,7 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
     // float score = scorer.score();
     
     if (encounteredDocs.contains(docId)) {
-      LOG.trace("Duplicate document {} for query {}", docId, queryStr);
+      LOG.trace("Duplicate document {} for query {}", docId, queryTerms);//queryStr);
       return;
     } else {
       encounteredDocs.add(docId);
@@ -167,7 +185,7 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
         return;
       }
       MutableLong docLen = new MutableLong();
-      docTerms = target.queryTermFreq(tweet, docLen, stemmingAnalyzer, docTextField);
+      docTerms = target.queryTermFreq(tweet, docLen, target.tweetStemmingAnalyzer, docTextField);
       ld = docLen.floatValue();
     } else {
       TermFreqVector docTermsVector = reader.getTermFreqVector(docId,
@@ -189,8 +207,18 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
               docId + docBase);
           return;
         }
-        docTerms = target.queryTermFreq(tweet, docLen);
-        
+        if (stemmedIDF) {
+          docTerms = target.queryTermFreq(tweet,
+              docLen,
+              FISQueryExpander.tweetStemmingAnalyzer,
+              TweetField.STEMMED_EN.name);
+        } else {
+          
+          docTerms = target.queryTermFreq(tweet,
+              docLen,
+              FISQueryExpander.tweetNonStemmingAnalyzer,
+              TweetField.TEXT.name);
+        }
         ld = docLen.floatValue();
       }
     }
@@ -231,7 +259,7 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
       }
       
       if (clarityScore) {
-        score += idf;
+        score += queryTerms.get(tStr) * idf;
       } else {
         // score += (queryTerms.get(tStr) * ftd * (getK1() + 1) * idf)
         // / ((getK1() * ((1 - getB()) + (getB() * ld / getLAVG()))) + ftd);
