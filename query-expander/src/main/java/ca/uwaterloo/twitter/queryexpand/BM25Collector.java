@@ -110,11 +110,11 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
       for(String qTerm: pQueryTerms.keys()){
         String stemmed;
         if(FISQueryExpander.SEARCH_NON_STEMMED){
-          stemmed = qTerm;
-        } else {
           stemmed = target.queryTermFreq(qTerm,
               null,
               FISQueryExpander.tweetStemmingAnalyzer, docTextField).keys().get(0);
+        } else {
+          stemmed = qTerm;
         }
         
         float value = pQueryTerms.get(qTerm) + queryTerms.get(stemmed);
