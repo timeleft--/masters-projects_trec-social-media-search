@@ -105,7 +105,8 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   private static final String TAG_TOPN = "nFromTopPatterns";
   private static final String TAG_QUERY_CONDPROB = "qCondProb";
   private static final String TAG_KL_DIVER = "klDiver";
-  private static final String TAG_CLUSTER_PATTERNS = "clusterPatterns";
+  private static final String TAG_CLUSTER_PATTERNS_DISTANCE = "clusterPatternsDistance";
+  private static final String TAG_CLUSTER_PATTERNS_CLOSENESS = "clusterPatternsCloseness";
   private static final String TAG_CLUSTER_TWEETS = "clusterTweets";
   private static final String TAG_CLUSTER_TERMS = "clusTerm";
   private static final String TAG_MARKOV = "markov";
@@ -285,7 +286,8 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     openWriterForTag(TAG_TOPN);
     // openWriterForTag(TAG_QUERY_CONDPROB);
     // openWriterForTag(TAG_KL_DIVER);
-    openWriterForTag(TAG_CLUSTER_PATTERNS);
+    openWriterForTag(TAG_CLUSTER_PATTERNS_DISTANCE);
+    openWriterForTag(TAG_CLUSTER_PATTERNS_CLOSENESS);
 //    openWriterForTag(TAG_CLUSTER_TWEETS);
     // openWriterForTag(TAG_CLUSTER_TERMS);
     // openWriterForTag(TAG_MARKOV);
@@ -873,7 +875,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
       // }
       //
       // ///////////////////////////////////////////////////////
-      if (resultWriters.containsKey(TAG_CLUSTER_PATTERNS)) {
+      if (resultWriters.containsKey(TAG_CLUSTER_PATTERNS_DISTANCE)) {
         List<MutableFloat> minXTermScores = Lists.newArrayList();
         List<MutableFloat> maxXTermScores = Lists.newArrayList();
         List<MutableFloat> totalXTermScores = Lists.newArrayList();
@@ -884,7 +886,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
             minXTermScores,
             maxXTermScores,
             totalXTermScores,
-            paramMarkovProbDocFromTwitter);
+            paramMarkovProbDocFromTwitter, true);
         xQueryTerms = new OpenObjectFloatHashMap<String>();
         xQueryLen = new MutableLong(0);
         timedQuery = target.expandAndFilterQuery(queryTerms,
@@ -896,7 +898,37 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
             xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
         
         collector = new TrecResultFileCollector(target, topicIds.get(i),
-            TAG_CLUSTER_PATTERNS, //queryStr,
+            TAG_CLUSTER_PATTERNS_DISTANCE, //queryStr,
+            xQueryTerms, xQueryLen.intValue());
+        target.twtSearcher.search(timedQuery, collector);
+        collector.writeResults();
+      }
+      
+   // ///////////////////////////////////////////////////////
+      if (resultWriters.containsKey(TAG_CLUSTER_PATTERNS_CLOSENESS)) {
+        List<MutableFloat> minXTermScores = Lists.newArrayList();
+        List<MutableFloat> maxXTermScores = Lists.newArrayList();
+        List<MutableFloat> totalXTermScores = Lists.newArrayList();
+        
+        PriorityQueue<ScoreIxObj<String>>[] clusters = target.weightedTermsClusterPatterns(fis,
+            queryStr,
+            numItemsetsToConsider,
+            minXTermScores,
+            maxXTermScores,
+            totalXTermScores,
+            paramMarkovProbDocFromTwitter, false);
+        xQueryTerms = new OpenObjectFloatHashMap<String>();
+        xQueryLen = new MutableLong(0);
+        timedQuery = target.expandAndFilterQuery(queryTerms,
+            queryLen.intValue(),
+            clusters,
+            minXTermScores.toArray(new MutableFloat[0]),
+            maxXTermScores.toArray(new MutableFloat[0]),
+            numTermsToAppend,
+            xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
+        
+        collector = new TrecResultFileCollector(target, topicIds.get(i),
+            TAG_CLUSTER_PATTERNS_CLOSENESS, //queryStr,
             xQueryTerms, xQueryLen.intValue());
         target.twtSearcher.search(timedQuery, collector);
         collector.writeResults();

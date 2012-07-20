@@ -895,7 +895,8 @@ public class FISQueryExpander {
                 .weightedTermsByClusteringTerms(fisRs, query.toString(), 100, null, null, null);
           } else if (TermWeigting.CLUSTERING_PATTERNS.equals(termWeighting)) {
             clusterTerms = qEx
-                .weightedTermsClusterPatterns(fisRs, query.toString(), 100, null, null, null, false);
+                .weightedTermsClusterPatterns(fisRs, query.toString(), 100, null, null, null, false,
+                    false);
           }
           int i = 0;
           OpenIntHashSet empty = new OpenIntHashSet();
@@ -1914,7 +1915,7 @@ public class FISQueryExpander {
       int numItemsetsToUse, // boolean propagateSupport,
       List<MutableFloat> minXTermScoresOut, List<MutableFloat> maxXTermScoresOut,
       List<MutableFloat> totalXTermScoresOut,
-      boolean pdwFromTwitter)
+      boolean pdwFromTwitter, boolean oneMinusInTheEnd)
       throws Exception {
     
     if (numItemsetsToUse <= 0) {
@@ -2064,19 +2065,23 @@ public class FISQueryExpander {
         int termId = termIdMap.get(item);
         String term = ((Attribute) attrs.elementAt(termId)).name();
         double[] distrib = clusterer.distributionForInstance(inst);
-        // int clusterMembershipCount = 0;
+        int clusterMembershipCount = 0;
         for (int c = 0; c < distrib.length; ++c) {
           if (distrib[c] <= CLUSTER_MEMBERSHIP_THRESHOLD) {
             continue;
           }
-          // ++clusterMembershipCount;
+          ++clusterMembershipCount;
           
           // Closeness to centroid
           Instance centroid = clusterer.getClusterCenters().instance(c);
-          float score = 1 - (float) clusterer.getDistanceF().distance(centroid, inst);
+          float score;
+          if (oneMinusInTheEnd) {
+            // // "1 -" is the last thing to do.. sucker!!!!!
+            score = (float) clusterer.getDistanceF().distance(centroid, inst);
+          } else {
+            score = 1 - (float) clusterer.getDistanceF().distance(centroid, inst);
+          }
           
-          // // "1 -" is the last thing to do.. sucker!!!!!
-          // float score = (float) clusterer.getDistanceF().distance(centroid, inst);
           score += termWeights[c].get(term);
           
           // if (maxDistance < score) {
@@ -2084,46 +2089,18 @@ public class FISQueryExpander {
           // }
           
           termWeights[c].put(term, score);
-          // }
-          // for (int c = 0; c < distrib.length; ++c) {
-          // termWeights[c].put(term, termWeights[c].get(term) / clusterMembershipCount);
-          // }
-          // }
-          // }
-          //
-          // PriorityQueue<ScoreIxObj<String>>[] result = new
-          // PriorityQueue[clusterer.numberOfClusters()];
-          // OpenObjectFloatHashMap<String> queryTerms = queryTermFreq(query,
-          // null,
-          // tweetNonStemmingAnalyzer,
-          // TweetField.TEXT.name);
-          // for (int c = 0; c < clusterer.numberOfClusters(); ++c) {
-          // result[c] = new PriorityQueue<ScoreIxObj<String>>();
-          // for (String term : termWeights[c].keys()) {
-          // if (queryTerms.containsKey(term) || !termWeights[c].containsKey(term)) {
-          // continue;
-          // }
-          // float score = termWeights[c].get(term);
-          // score = 1 - score;
           
-          if (minXTermScoresOut != null) {
-            if (score < minXTermScoresOut.get(c).floatValue()) {
-              minXTermScoresOut.get(c).setValue(score);
-            }
-          }
-          
-          if (maxXTermScoresOut != null) {
-            if (score > maxXTermScoresOut.get(c).floatValue()) {
-              maxXTermScoresOut.get(c).setValue(score);
-            }
-          }
-          
-          if (totalXTermScoresOut != null) {
-            totalXTermScoresOut.get(c).add(score);
+        }
+        // Don't penalize words that pertain to more than one topic..
+        // (and I think these should be very few)
+        if (clusterMembershipCount > 0) { // in all cases, don't penalize &&oneMinusInTheEnd) {
+          for (int c = 0; c < distrib.length; ++c) {
+            termWeights[c].put(term, termWeights[c].get(term) / clusterMembershipCount);
           }
         }
       }
     }
+    
     PriorityQueue<ScoreIxObj<String>>[] result = new PriorityQueue[clusterer.numberOfClusters()];
     OpenObjectFloatHashMap<String> queryTerms = queryTermFreq(query, null,
         (FISQueryExpander.SEARCH_NON_STEMMED ? FISQueryExpander.tweetNonStemmingAnalyzer
@@ -2133,9 +2110,30 @@ public class FISQueryExpander {
       result[c] = new PriorityQueue<ScoreIxObj<String>>();
       for (String term : termWeights[c].keys()) {
         float score = termWeights[c].get(term);
+        
         if (queryTerms.containsKey(term) || score == 0) {
           continue;
         }
+        
+        if (oneMinusInTheEnd) {
+          score = 1 - score;
+        }
+        if (minXTermScoresOut != null) {
+          if (score < minXTermScoresOut.get(c).floatValue()) {
+            minXTermScoresOut.get(c).setValue(score);
+          }
+        }
+        
+        if (maxXTermScoresOut != null) {
+          if (score > maxXTermScoresOut.get(c).floatValue()) {
+            maxXTermScoresOut.get(c).setValue(score);
+          }
+        }
+        
+        if (totalXTermScoresOut != null) {
+          totalXTermScoresOut.get(c).add(score);
+        }
+        
         result[c].add(new ScoreIxObj<String>(term, score));
       }
     }
@@ -3908,7 +3906,7 @@ public class FISQueryExpander {
         
         ScoreIxObj<String> xterm = extraTerms[c].poll();
         
-        if(!FISQueryExpander.SEARCH_NON_STEMMED){
+        if (!FISQueryExpander.SEARCH_NON_STEMMED) {
           xterm.obj = queryTermFreq(xterm.obj,
               null,
               FISQueryExpander.tweetStemmingAnalyzer, TweetField.STEMMED_EN.name).keys().get(0);
