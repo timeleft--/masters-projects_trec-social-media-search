@@ -634,6 +634,13 @@ public final class PFPGrowth implements Callable<Void> {
     long startTime = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_START));
     long endTime = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_END));
     long windowSize = Long.parseLong(params.get(PFPGrowth.PARAM_WINDOW_SIZE));
+    int minSupport = Integer.valueOf(params.get(MIN_SUPPORT, "3"));
+    String countIn = params.get(COUNT_IN);
+    if (countIn == null) {
+      countIn = params.get(OUTPUT);
+    }
+    int minFr = params.getInt(MIN_FREQ, MIN_FREQ_DEFAULT);
+    int prunePct = params.getInt(PRUNE_PCTILE, PRUNE_PCTILE_DEFAULT);
     
     if (params.get(COUNT_IN) == null) {
       startParallelCounting(params, conf);
@@ -643,13 +650,6 @@ public final class PFPGrowth implements Callable<Void> {
       // save feature list to dcache
       // List<Pair<String, Long>> fList = readFList(params);
       // saveFList(fList, params, conf);
-      int minSupport = Integer.valueOf(params.get(MIN_SUPPORT, "3"));
-      String countIn = params.get(COUNT_IN);
-      if (countIn == null) {
-        countIn = params.get(OUTPUT);
-      }
-      int minFr = params.getInt(MIN_FREQ, MIN_FREQ_DEFAULT);
-      int prunePct = params.getInt(PRUNE_PCTILE, PRUNE_PCTILE_DEFAULT);
       
       int fListSize = cacheFList(params, conf, countIn, minSupport, minFr, prunePct);
       
@@ -684,6 +684,8 @@ public final class PFPGrowth implements Callable<Void> {
       // fList = null;
       
       startParallelFPGrowth(params, conf);
+    }else {
+      cacheFList(params, conf, countIn, minSupport, minFr, prunePct);
     }
     startAggregating(params, conf);
     
