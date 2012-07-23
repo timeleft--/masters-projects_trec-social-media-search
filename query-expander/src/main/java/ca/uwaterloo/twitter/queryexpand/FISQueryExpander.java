@@ -895,7 +895,13 @@ public class FISQueryExpander {
                 .weightedTermsByClusteringTerms(fisRs, query.toString(), 100, null, null, null);
           } else if (TermWeigting.CLUSTERING_PATTERNS.equals(termWeighting)) {
             clusterTerms = qEx
-                .weightedTermsClusterPatterns(fisRs, query.toString(), 100, null, null, null, false,
+                .weightedTermsClusterPatterns(fisRs,
+                    query.toString(),
+                    100,
+                    null,
+                    null,
+                    null,
+                    false,
                     false);
           }
           int i = 0;
@@ -2091,9 +2097,9 @@ public class FISQueryExpander {
           termWeights[c].put(term, score);
           
         }
-        // Don't penalize words that pertain to more than one topic..
-        // (and I think these should be very few)
-        if (clusterMembershipCount > 0) { // in all cases, don't penalize &&oneMinusInTheEnd) {
+        // Don't penalize words that pertain to more than one topic.. if not oneMinus, this would
+        // actually result in a higher score. Anyway I "think" these should be very few TODO: verify
+        if (clusterMembershipCount > 0 && oneMinusInTheEnd) {
           for (int c = 0; c < distrib.length; ++c) {
             termWeights[c].put(term, termWeights[c].get(term) / clusterMembershipCount);
           }
@@ -3850,10 +3856,10 @@ public class FISQueryExpander {
   }
   
   public Query expandAndFilterQuery(OpenObjectFloatHashMap<String> origQueryTerms,
-      int origQueryLen,
+      float origQueryLen,
       PriorityQueue<ScoreIxObj<String>>[] extraTerms,
       float[] minXTermScoreFloats, float[] maxXTermScoreFloats,
-      int numTermsToAppend,
+      float numTermsToAppend,
       OpenObjectFloatHashMap<String> xQueryTermsOut,
       MutableLong xQueryLenOut,
       ExpandMode mode) throws IOException,
@@ -3936,7 +3942,7 @@ public class FISQueryExpander {
             TweetField.TEXT.name,
             twtIxReader,
             minXTermScoreFloats[c],
-            maxXTermScoreFloats[c], numTermsToAppend);
+            maxXTermScoreFloats[c], origQueryLen / numTermsToAppend);
         
         if (mode.equals(ExpandMode.FILTERING)) {
           for (String qterm : origQueryTerms.keys()) {
@@ -4010,17 +4016,17 @@ public class FISQueryExpander {
   }
   
   ScoreIxObj<Query> createTermQuery(ScoreIxObj<String> xterm, String field,
-      IndexReader targetReader, float minXTermScore, float maxXTermScore, float numXtermsToAppend)
+      IndexReader targetReader, float minXTermScore, float maxXTermScore, float xtermWeightFactor)
       throws IOException {
-    float xtermWeight;
+    float xtermWeight = xtermWeightFactor;
+    // This will be done by the IDF scoring
     // if (QUERY_SUBSET_BOOST_IDF) {
-    // xtermWeight = twtSimilarity.idf(twtIxReader.docFreq(new Term(TweetField.TEXT.name,
+    // xtermWeight *= twtSimilarity.idf(twtIxReader.docFreq(new Term(TweetField.TEXT.name,
     // xterm.obj)), twtIxReader.numDocs());
     // } else {
     
-    // Will always use this weight so it must be something well thought
-    // xtermWeight = (xterm.score - minXTermScore) / (maxXTermScore - minXTermScore);
-    xtermWeight = 1.0f / numXtermsToAppend;
+    // Will always use this weight so it must be something well thought, the score is meaningless
+    // xtermWeight *= (xterm.score - minXTermScore) / (maxXTermScore - minXTermScore);
     Term t = new Term(field, xterm.obj);
     Query result;
     if (fuzzyHashtag && xterm.obj.charAt(0) == '#') {
