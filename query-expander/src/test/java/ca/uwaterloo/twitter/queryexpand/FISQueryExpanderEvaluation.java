@@ -76,6 +76,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   
   private int numItemsetsToConsider = 100;
   private int numTermsToAppend = 10;
+  private final boolean paramAppendPerQueryTerm = true;
   private final boolean trecEvalFormat = true;
   private boolean paramNormalize = false;
   private boolean paramClosedOnly = true;
@@ -302,8 +303,8 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
 //    openWriterForTag(TAG_CLUSTER_PATTERNS_CLOSENESS);
     // openWriterForTag(TAG_CLUSTER_TWEETS);
     // openWriterForTag(TAG_CLUSTER_TERMS);
-    // openWriterForTag(TAG_MARKOV);
-    // openWriterForTag(TAG_SVD_PATTERN);
+//     openWriterForTag(TAG_MARKOV);
+//     openWriterForTag(TAG_SVD_PATTERN);
     // openWriterForTag(TAG_MUTUALINF);
     // openWriterForTag(TAG_CONDENTR);
     openWriterForTag(TAG_PAGERANK_TERMS);
@@ -456,7 +457,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
               new OpenObjectFloatHashMap[] { extraTerms },
               new float[] { minXTermScore.intValue() },
               new float[] { maxXTermScore.intValue() },
-              numTermsToAppend,
+              numTermsToAppend * (paramAppendPerQueryTerm? queryLen.intValue(): 1),
               xQueryTerms, xQueryLen, ExpandMode.DIVERSITY); // FILTERING
           
           collector = new TrecResultFileCollector(target, topicIds.get(i),
@@ -485,7 +486,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
               clusters,
               minXTermScores.toArray(new MutableFloat[0]),
               maxXTermScores.toArray(new MutableFloat[0]),
-              numTermsToAppend,
+              numTermsToAppend * (paramAppendPerQueryTerm? queryLen.intValue(): 1),
               xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
           
           collector = new TrecResultFileCollector(target, topicIds.get(i),
@@ -519,7 +520,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
             new OpenObjectFloatHashMap[] { extraTerms },
             new float[] { minXTermScore.intValue() },
             new float[] { maxXTermScore.intValue() },
-            numTermsToAppend,
+            numTermsToAppend * (paramAppendPerQueryTerm? queryLen.intValue(): 1),
             xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
         
         collector = new TrecResultFileCollector(target, topicIds.get(i),
@@ -625,7 +626,7 @@ if (resultWriters.containsKey(TAG_PAGERANK_PATTERNS_TOPN)) {
             minXTermScore,
             maxXTermScore,
             null,
-            numTermsToAppend,
+            numTermsToAppend * (paramAppendPerQueryTerm? queryLen.intValue(): 1),
             paramPageRankDaming,
             paramPageRankMaxIters,
             paramPageRankMinDelta);
@@ -637,7 +638,7 @@ if (resultWriters.containsKey(TAG_PAGERANK_PATTERNS_TOPN)) {
             new OpenObjectFloatHashMap[] { extraTerms },
             new float[] { minXTermScore.intValue() },
             new float[] { maxXTermScore.intValue() },
-            numTermsToAppend,
+            numTermsToAppend * (paramAppendPerQueryTerm? queryLen.intValue(): 1),
             xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
         
         collector = new TrecResultFileCollector(target, topicIds.get(i),
@@ -670,7 +671,7 @@ if (resultWriters.containsKey(TAG_PAGERANK_PATTERNS_TOPN)) {
             new OpenObjectFloatHashMap[] { extraTerms },
             new float[] { minXTermScore.intValue() },
             new float[] { maxXTermScore.intValue() },
-            numTermsToAppend,
+            numTermsToAppend * (paramAppendPerQueryTerm? queryLen.intValue(): 1),
             xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
         
         collector = new TrecResultFileCollector(target, topicIds.get(i),
@@ -702,7 +703,7 @@ if (resultWriters.containsKey(TAG_PAGERANK_PATTERNS_TOPN)) {
             new OpenObjectFloatHashMap[] { extraTerms },
             new float[] { minXTermScore.intValue() },
             new float[] { maxXTermScore.intValue() },
-            numTermsToAppend,
+            numTermsToAppend * (paramAppendPerQueryTerm? queryLen.intValue(): 1),
             xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
         
         collector = new TrecResultFileCollector(target, topicIds.get(i),
@@ -719,7 +720,7 @@ if (resultWriters.containsKey(TAG_PAGERANK_PATTERNS_TOPN)) {
         
         OpenObjectFloatHashMap<String> extraTerms = target.weightedTermsByPatternRank(fis,
             queryStr,
-            numTermsToAppend,// not numItemsetsToConsider
+            numTermsToAppend * (paramAppendPerQueryTerm? queryLen.intValue(): 1),// not numItemsetsToConsider
             minXTermScore,
             maxXTermScore,
             null);
@@ -731,7 +732,7 @@ if (resultWriters.containsKey(TAG_PAGERANK_PATTERNS_TOPN)) {
             new OpenObjectFloatHashMap[] { extraTerms },
             new float[] { minXTermScore.intValue() },
             new float[] { maxXTermScore.intValue() },
-            numTermsToAppend,
+            numTermsToAppend * (paramAppendPerQueryTerm? queryLen.intValue(): 1),
             xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
         
         collector = new TrecResultFileCollector(target, topicIds.get(i),
@@ -967,7 +968,7 @@ if (resultWriters.containsKey(TAG_PAGERANK_PATTERNS_TOPN)) {
             new OpenObjectFloatHashMap[] { extraTerms },
             new float[] { minXTermScore.intValue() },
             new float[] { maxXTermScore.intValue() },
-            numTermsToAppend,
+            numTermsToAppend * (paramAppendPerQueryTerm? queryLen.intValue(): 1),
             xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
         
         collector = new TrecResultFileCollector(target, topicIds.get(i),
@@ -997,7 +998,7 @@ if (resultWriters.containsKey(TAG_PAGERANK_PATTERNS_TOPN)) {
             new OpenObjectFloatHashMap[] { extraTerms },
             new float[] { minXTermScore.intValue() },
             new float[] { maxXTermScore.intValue() },
-            numTermsToAppend,
+            numTermsToAppend * (paramAppendPerQueryTerm? queryLen.intValue(): 1),
             xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
         
         collector = new TrecResultFileCollector(target, topicIds.get(i),
@@ -1026,7 +1027,7 @@ if (resultWriters.containsKey(TAG_PAGERANK_PATTERNS_TOPN)) {
             new OpenObjectFloatHashMap[] { extraTerms },
             new float[] { minXTermScore.intValue() },
             new float[] { maxXTermScore.intValue() },
-            numTermsToAppend,
+            numTermsToAppend * (paramAppendPerQueryTerm? queryLen.intValue(): 1),
             xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
         
         collector = new TrecResultFileCollector(target, topicIds.get(i),
@@ -1056,7 +1057,7 @@ if (resultWriters.containsKey(TAG_PAGERANK_PATTERNS_TOPN)) {
             new OpenObjectFloatHashMap[] { extraTerms },
             new float[] { minXTermScore.intValue() },
             new float[] { maxXTermScore.intValue() },
-            numTermsToAppend,
+            numTermsToAppend * (paramAppendPerQueryTerm? queryLen.intValue(): 1),
             xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
         
         collector = new TrecResultFileCollector(target, topicIds.get(i),
@@ -1075,7 +1076,7 @@ if (resultWriters.containsKey(TAG_PAGERANK_PATTERNS_TOPN)) {
         OpenObjectFloatHashMap<String> extraTerms = target.weightedTermsByConditionalEntropy(fis,
             queryStr,
             numItemsetsToConsider,
-            numTermsToAppend,
+            numTermsToAppend * (paramAppendPerQueryTerm? queryLen.intValue(): 1),
             minXTermScore,
             maxXTermScore,
             null, false);
@@ -1087,7 +1088,7 @@ if (resultWriters.containsKey(TAG_PAGERANK_PATTERNS_TOPN)) {
             new OpenObjectFloatHashMap[] { extraTerms },
             new float[] { minXTermScore.intValue() },
             new float[] { maxXTermScore.intValue() },
-            numTermsToAppend,
+            numTermsToAppend * (paramAppendPerQueryTerm? queryLen.intValue(): 1),
             xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
         
         collector = new TrecResultFileCollector(target, topicIds.get(i),
@@ -1106,7 +1107,7 @@ if (resultWriters.containsKey(TAG_PAGERANK_PATTERNS_TOPN)) {
         OpenObjectFloatHashMap<String> extraTerms = target.weightedTermsByConditionalEntropy(fis,
             queryStr,
             numItemsetsToConsider,
-            numTermsToAppend,
+            numTermsToAppend * (paramAppendPerQueryTerm? queryLen.intValue(): 1),
             minXTermScore,
             maxXTermScore,
             null, true);
@@ -1118,7 +1119,7 @@ if (resultWriters.containsKey(TAG_PAGERANK_PATTERNS_TOPN)) {
             new OpenObjectFloatHashMap[] { extraTerms },
             new float[] { minXTermScore.intValue() },
             new float[] { maxXTermScore.intValue() },
-            numTermsToAppend,
+            numTermsToAppend * (paramAppendPerQueryTerm? queryLen.intValue(): 1),
             xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
         
         collector = new TrecResultFileCollector(target, topicIds.get(i),
@@ -1151,7 +1152,7 @@ if (resultWriters.containsKey(TAG_PAGERANK_PATTERNS_TOPN)) {
       // new PriorityQueue[] { extraTerms },
       // new float[] { minXTermScore.intValue() },
       // new float[] { maxXTermScore.intValue() },
-      // numTermsToAppend,
+      // numTermsToAppend * (paramAppendPerQueryTerm? queryLen.intValue(): 1),
       // xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
       //
       // collector = new TrecResultFileCollector(target, topicIds.get(i),
@@ -1179,7 +1180,7 @@ if (resultWriters.containsKey(TAG_PAGERANK_PATTERNS_TOPN)) {
       // new PriorityQueue[] { extraTerms },
       // new float[] { minXTermScore.intValue() },
       // new float[] { maxXTermScore.intValue() },
-      // numTermsToAppend,
+      // numTermsToAppend * (paramAppendPerQueryTerm? queryLen.intValue(): 1),
       // xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
       //
       // collector = new TrecResultFileCollector(target, topicIds.get(i),
@@ -1208,7 +1209,7 @@ if (resultWriters.containsKey(TAG_PAGERANK_PATTERNS_TOPN)) {
             clusters,
             minXTermScores.toArray(new MutableFloat[0]),
             maxXTermScores.toArray(new MutableFloat[0]),
-            numTermsToAppend,
+            numTermsToAppend * (paramAppendPerQueryTerm? queryLen.intValue(): 1),
             xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
         
         collector = new TrecResultFileCollector(target, topicIds.get(i),
@@ -1238,7 +1239,7 @@ if (resultWriters.containsKey(TAG_PAGERANK_PATTERNS_TOPN)) {
             clusters,
             minXTermScores.toArray(new MutableFloat[0]),
             maxXTermScores.toArray(new MutableFloat[0]),
-            numTermsToAppend,
+            numTermsToAppend * (paramAppendPerQueryTerm? queryLen.intValue(): 1),
             xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
         
         collector = new TrecResultFileCollector(target, topicIds.get(i),
@@ -1270,7 +1271,7 @@ if (resultWriters.containsKey(TAG_PAGERANK_PATTERNS_TOPN)) {
             clustersTerms,
             minXTermScores.toArray(new MutableFloat[0]),
             maxXTermScores.toArray(new MutableFloat[0]),
-            numTermsToAppend,
+            numTermsToAppend * (paramAppendPerQueryTerm? queryLen.intValue(): 1),
             xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
         
         collector = new TrecResultFileCollector(target, topicIds.get(i),
