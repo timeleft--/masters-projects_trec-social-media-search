@@ -2252,7 +2252,7 @@ public class FISQueryExpander {
     for (int i = 0; i < numPages; ++i) {
       r1.put(i, 1);
     }
-    float maxDelta = Float.MAX_VALUE;
+    float maxDelta = Float.MIN_VALUE;
     
     int iters = 0;
     while (iters++ < maxIters) {
