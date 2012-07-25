@@ -72,6 +72,8 @@ public class ItemSetIndexBuilder {
   private static Logger LOG = LoggerFactory
       .getLogger(ItemSetIndexBuilder.class);
   
+  private static final double LOG2 = Math.log(2);
+  
   public static enum AssocField {
     ID("id"), ITEMSET("itemset"), STEMMED_EN("stemmed"), RANK("rank"), SUPPORT(
         "support"), WINDOW_STARTTIME("window_start_time"), WINDOW_ENDTIME(
@@ -93,6 +95,11 @@ public class ItemSetIndexBuilder {
       PLAIN_ANALYZER, ImmutableMap.<String, Analyzer> of(
           AssocField.STEMMED_EN.name, ENGLISH_ANALYZER));
   private static final boolean STATS = true;
+  
+  private static final float MIN_UNI_SUPP_RATIO = 0.05f;
+  private static final float MAX_UNI_SUPP_RATIO = 0.95f;
+
+  private static final float ORIG_SUPPORT = 3;
   
   private QueryParser twtQparser;
   private IndexSearcher twtSearcher;
@@ -245,10 +252,10 @@ public class ItemSetIndexBuilder {
             .getPatterns()) {
           
           List<String> termSet = patternPair.getFirst();
-          if (termSet.size() < 2) {
-            continue;
-          }
-          if (termSet.get(1).charAt(0) == AggregatorReducer.METADATA_PREFIX) {
+          // if (termSet.size() < 2) {
+          // continue;
+          // }
+          if (termSet.size() > 1 && termSet.get(1).charAt(0) == AggregatorReducer.METADATA_PREFIX) {
             // Will never happen now that it's space
             // metadata
             // TODONOT: read probabilities of languages of patterns
@@ -291,12 +298,24 @@ public class ItemSetIndexBuilder {
       
       int rank = 0;
       cnt = 0;
+      
+      float totalUnigramSupport = 0;
+      float maxUnigramSupport = Float.MIN_VALUE;
       Iterator<Pair<IntArrayList, Long>> itemsetIter = closedPatterns
           .iterator(); // already closed only when compressing
       while (itemsetIter.hasNext()) {
         Pair<IntArrayList, Long> patternPair = itemsetIter.next();
         IntArrayList pattern = patternPair.getFirst();
         int pSize = pattern.size();
+        
+        if (pSize == 1) {
+          Long supp = patternPair.getSecond();
+          totalUnigramSupport += supp;
+          if (supp > maxUnigramSupport) {
+            maxUnigramSupport = supp;
+          }
+        }
+        
         StringBuilder items = new StringBuilder();
         for (int i = 0; i < pSize; ++i) {
           String term = terms.get(pattern.getQuick(i));
@@ -430,6 +449,9 @@ public class ItemSetIndexBuilder {
       // writer.optimize();
       writer.close();
       
+      int minUniSuppThreshold = Math.round(((ORIG_SUPPORT / maxUnigramSupport) + MIN_UNI_SUPP_RATIO) * maxUnigramSupport);
+      int maxUniSuppThreshold = Math.round(MAX_UNI_SUPP_RATIO * maxUnigramSupport);
+      
       final SummaryStatistics lengthStat;
       final SummaryStatistics supportStat;
       if (STATS) {
@@ -452,7 +474,7 @@ public class ItemSetIndexBuilder {
       for (int d = 0; d < fisIxReader.maxDoc(); ++d) {
         final TermFreqVector termVector = fisIxReader
             .getTermFreqVector(d, AssocField.ITEMSET.name);
-        if(termVector == null){
+        if (termVector == null) {
           LOG.error("Null term vector for document {} out of {}", d, fisIxReader.maxDoc());
           fisIxReader.deleteDocument(d);
           deleted.add(d);
@@ -460,10 +482,28 @@ public class ItemSetIndexBuilder {
         }
         final Set<String> tSet1 = Sets.newCopyOnWriteArraySet(Arrays
             .asList(termVector.getTerms()));
+        
         final int doc1 = d;
         final Document document = fisIxReader.document(doc1);
         final int supp1 = Integer.parseInt(document
             .get(AssocField.SUPPORT.name));
+        
+        if (tSet1.size() == 1) {
+          // double entropy = supp1 / totalUnigramSupport;
+          // entropy = -entropy * Math.log(entropy) / LOG2;
+          if (supp1 >= maxUniSuppThreshold || supp1 <= minUniSuppThreshold) {
+            if (LOG.isDebugEnabled())
+              LOG.debug(
+                  "Unigram Itemset with support out of acceptable range {} - range: {}",
+                  supp1, minUniSuppThreshold + " to " + maxUniSuppThreshold);
+            
+            fisIxReader.deleteDocument(doc1);
+            // doc1Deleted.setValue(true);
+            deleted.add(doc1);
+            continue;
+          }
+        }
+        
         final MutableBoolean doc1Deleted = new MutableBoolean(false);
         // if (LOG.isTraceEnabled()) {
         // LOG.debug("Looking for duplicates for itemset {} with support {}",
@@ -475,7 +515,6 @@ public class ItemSetIndexBuilder {
         Collector duplicateDeletionCollector = new Collector() {
           // IndexReader reader;
           int docBase;
-          
           
           @Override
           public void setScorer(Scorer scorer) throws IOException {
@@ -511,7 +550,7 @@ public class ItemSetIndexBuilder {
               doc1Deleted.setValue(true);
               deleted.add(doc1);
               
-            } 
+            }
             
             //
             // if (tSet1.equals(tSet2)) {
