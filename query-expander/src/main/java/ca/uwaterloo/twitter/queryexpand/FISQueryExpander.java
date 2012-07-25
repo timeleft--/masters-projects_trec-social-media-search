@@ -7,6 +7,7 @@ import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.io.StringReader;
 import java.lang.reflect.InvocationTargetException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Date;
@@ -100,6 +101,8 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.common.collect.Sets.SetView;
 import com.ibm.icu.text.SimpleDateFormat;
+
+import edu.umd.cloud9.io.pair.PairOfInts;
 
 public class FISQueryExpander {
   
@@ -630,7 +633,7 @@ public class FISQueryExpander {
   // // EnglishAnalyzer(Version.LUCENE_36);
   private static final boolean CHAR_BY_CHAR = false;
   
-  private static final int MIN_ITEMSET_SIZE = 2;
+  private static final int MIN_ITEMSET_SIZE = 1;
   
   private static final String RETWEET_TERM = "rt";
   
@@ -2147,6 +2150,140 @@ public class FISQueryExpander {
     return result;
   }
   
+  @SuppressWarnings("unchecked")
+  public OpenObjectFloatHashMap<String> weightedTermsByPageRankPatterns(
+      OpenIntFloatHashMap rs, String query, int numItemsetsToConsider,
+      MutableFloat minXTermScoresOut, MutableFloat maxXTermScoresOut,
+      MutableFloat totalXTermScoresOut, int nFromTopPatterns, float damping, int maxIters,
+      float minDelta) throws Exception {
+    
+    OpenObjectFloatHashMap<String> result = new OpenObjectFloatHashMap<String>();
+    
+    Map<IntArrayList, Instance> patternInstMap = Maps.newLinkedHashMap();
+    LinkedHashSet<Set<String>> itemsets = Sets.newLinkedHashSet();
+    FastVector attrs = new FastVector();
+    Instances insts = createPatternTermMatrix(rs,
+        true,
+        attrs,
+        patternInstMap,
+        true,
+        itemsets);
+    if (insts == null || insts.numInstances() == 0) {
+      return result;
+    }
+    
+    OpenObjectFloatHashMap<PairOfInts> edges = new OpenObjectFloatHashMap<PairOfInts>();
+    int[] out = new int[insts.numInstances()];
+    // TODO sinks??
+    for (int i = 0; i < insts.numInstances(); ++i) {
+      Instance insti = insts.instance(i);
+      for (int j = 0; j < insts.numAttributes(); ++j) {
+        if(insti.value(j) == 0){
+          continue;
+        }
+        double[] sharedTerms = insts.attributeToDoubleArray(j);
+        for (int k = 0; k < sharedTerms.length; ++k) {
+          if (i == k || sharedTerms[k] == 0) {
+            continue;
+          }
+          ++out[i];
+          edges.put(new PairOfInts(i, j), (float) insti.weight());
+        }
+      }
+    }
+    OpenIntFloatHashMap rank = pageRank(edges,
+        out,
+        insts.numInstances(),
+        damping,
+        maxIters,
+        minDelta);
+    
+    if (minXTermScoresOut != null) {
+      minXTermScoresOut.setValue(Float.MAX_VALUE);
+    }
+    if (maxXTermScoresOut != null) {
+      maxXTermScoresOut.setValue(Float.MIN_VALUE);
+    }
+    if (totalXTermScoresOut != null) {
+      totalXTermScoresOut.setValue(0);
+    }
+    
+    ArrayList<Set<String>> itemSetArr = Lists.newArrayList(itemsets);
+    IntArrayList rankedIx = new IntArrayList();
+    rank.keysSortedByValue(rankedIx);
+    int n = 0;
+    for (int i = rankedIx.size() - 1; i >= 0; --i) {
+      Set<String> fis = itemSetArr.get(i);
+      float s = rank.get(i);
+      for (String t : fis) {
+        float score;
+        if (nFromTopPatterns > 0) {
+          if (result.containsKey(t)) {
+            continue;
+          }
+          score = s;
+          result.put(t, s);
+          if (++n == nFromTopPatterns) {
+            break;
+          }
+        } else {
+          score = result.get(t) + s;
+          result.put(t, score);
+        }
+        
+        if (minXTermScoresOut != null && minXTermScoresOut.floatValue() > score) {
+          minXTermScoresOut.setValue(score);
+        }
+        if (maxXTermScoresOut != null && maxXTermScoresOut.floatValue() < score) {
+          maxXTermScoresOut.setValue(score);
+        }
+        if (totalXTermScoresOut != null) {
+          totalXTermScoresOut.add(score);
+        }
+      }
+    }
+    return result;
+  }
+  
+  public static OpenIntFloatHashMap pageRank(OpenObjectFloatHashMap<PairOfInts> edges,
+      int[] out, int numPages, float damping, int maxIters, float minDelta) {
+    
+    OpenIntFloatHashMap r1 = new OpenIntFloatHashMap(numPages);
+    for (int i = 0; i < numPages; ++i) {
+      r1.put(i, 1);
+    }
+    float maxDelta = Float.MAX_VALUE;
+    
+    int iters = 0;
+    while (iters++ < maxIters) {
+      float[] r2 = new float[numPages];
+      for (int i = 0; i < r2.length; ++i) {
+        r2[i] = (1 - damping);
+      }
+      for (PairOfInts e : edges.keys()) {
+        int i = e.getLeftElement();
+        int j = e.getRightElement();
+        r2[j] += (damping / out[i]) * r1.get(i) * edges.get(e);
+      }
+      float s = numPages;
+      for (int i = 0; i < numPages; ++i) {
+        s -= r2[i];
+      }
+      for (int i = 0; i < numPages; ++i) {
+        float delta = r1.get(i);
+        r1.put(i, r2[i] + s / numPages);
+        delta = r1.get(i) - delta;
+        if (delta > maxDelta) {
+          maxDelta = delta;
+        }
+      }
+      if (maxDelta < minDelta) {
+        break;
+      }
+    }
+    return r1;
+  }
+  
   // ////////////////////// TERM-TO-TERM ALL TERMS FEATURES //////////////////////////////
   
   protected Instances termCooccurrenceInstances(AbstractIntFloatMap rs,
@@ -2630,6 +2767,81 @@ public class FISQueryExpander {
     return result;
   }
   
+  @SuppressWarnings("unchecked")
+  public OpenObjectFloatHashMap<String> weightedTermsByPageRankTerms(
+      OpenIntFloatHashMap rs, String query, int numItemsetsToConsider,
+      MutableFloat minXTermScoresOut, MutableFloat maxXTermScoresOut,
+      MutableFloat totalXTermScoresOut, float damping, int maxIters, float minDelta)
+      throws Exception {
+    
+    OpenObjectFloatHashMap<String> result = new OpenObjectFloatHashMap<String>();
+    
+    OpenObjectIntHashMap<String> termIdMap = new OpenObjectIntHashMap<String>();
+    LinkedHashMap<Set<String>, Float> itemsets = Maps.newLinkedHashMap();
+    // FastVector attrs = new FastVector();
+    OpenIntFloatHashMap termSupport = new OpenIntFloatHashMap();
+    MutableFloat totalSupport = new MutableFloat();
+    
+    Instances insts = termCooccurrenceInstances(rs, numItemsetsToConsider,
+        termIdMap,
+        itemsets,
+        termSupport,
+        totalSupport, true);
+    
+    OpenObjectFloatHashMap<PairOfInts> edges = new OpenObjectFloatHashMap<PairOfInts>();
+    int[] out = new int[insts.numInstances()];
+    // TODO sinks??
+    for (int i = 0; i < insts.numInstances(); ++i) {
+      Instance inst = insts.instance(i);
+      boolean isSink = true;
+      for (int j = 0; j < insts.numAttributes(); ++j) {
+        
+        if (inst.isMissing(j)) {
+          continue;
+        }
+        ++out[i];
+        isSink = false;
+        edges.put(new PairOfInts(i, j), (float) inst.value(j));
+      }
+    }
+    
+    OpenIntFloatHashMap rank = pageRank(edges,
+        out,
+        insts.numInstances(),
+        damping,
+        maxIters,
+        minDelta);
+    
+    if (minXTermScoresOut != null) {
+      minXTermScoresOut.setValue(Float.MAX_VALUE);
+    }
+    if (maxXTermScoresOut != null) {
+      maxXTermScoresOut.setValue(Float.MIN_VALUE);
+    }
+    if (totalXTermScoresOut != null) {
+      totalXTermScoresOut.setValue(0);
+    }
+    
+    List<String> terms = Lists.newArrayListWithCapacity(termIdMap.size());
+    termIdMap.keysSortedByValue(terms);
+    int i = 0;
+    for (String t : terms) {
+      float score = rank.get(i++);
+      result.put(t, score);
+      if (minXTermScoresOut != null && minXTermScoresOut.floatValue() > score) {
+        minXTermScoresOut.setValue(score);
+      }
+      if (maxXTermScoresOut != null && maxXTermScoresOut.floatValue() < score) {
+        maxXTermScoresOut.setValue(score);
+      }
+      if (totalXTermScoresOut != null) {
+        totalXTermScoresOut.add(score);
+      }
+    }
+    
+    return result;
+  }
+  
   private final String timeFormatted;
   
   private String getTimeFormatted() {
@@ -2651,7 +2863,7 @@ public class FISQueryExpander {
   
   // final int twtNumHits = NUM_HITS_DEFAULT;
   
-  final Similarity twtSimilarity;
+  final TwitterSimilarity twtSimilarity;
   
   float itemsetLenghtAvg = ITEMSET_LEN_AVG_DEFAULT;
   
@@ -4329,7 +4541,7 @@ public class FISQueryExpander {
   // ////////////////////// PATTERN-TO-TERM ///////////////////////////////
   protected Instances createPatternTermMatrix(OpenIntFloatHashMap rs, boolean weightInsts,
       FastVector attrsOut, Map<IntArrayList, Instance> patternInstMapOut, boolean closedOnly,
-      Set<Set<String>> itemsetsOut) throws Exception {
+      LinkedHashSet<Set<String>> itemsetsOut) throws Exception {
     
     OpenObjectIntHashMap<String> termIdMap = new OpenObjectIntHashMap<String>();
     
@@ -4405,7 +4617,7 @@ public class FISQueryExpander {
     
     PriorityQueue<ScoreIxObj<String>>[] result = null;
     Map<IntArrayList, Instance> patternInstMap = Maps.newLinkedHashMap();
-    Set<Set<String>> itemsets = Sets.newLinkedHashSet();
+    LinkedHashSet<Set<String>> itemsets = Sets.newLinkedHashSet();
     FastVector attrs = new FastVector();
     Instances insts = createPatternTermMatrix(rs,
         weightInsts,
@@ -4502,7 +4714,7 @@ public class FISQueryExpander {
     PriorityQueue<ScoreIxObj<String>> result = new PriorityQueue<ScoreIxObj<String>>();
     
     Map<IntArrayList, Instance> patternInstMap = Maps.newLinkedHashMap();
-    Set<Set<String>> itemsets = Sets.newLinkedHashSet();
+    LinkedHashSet<Set<String>> itemsets = Sets.newLinkedHashSet();
     FastVector attrs = new FastVector();
     Instances insts = createPatternTermMatrix(rs,
         weightInsts,

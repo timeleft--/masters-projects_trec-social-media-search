@@ -88,6 +88,9 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   private int paramNumEnglishStopWords = 0;
   private boolean paramBM25StemmedIDF = true;
   private boolean paramMarkovProbDocFromTwitter = false;
+  private float paramPageRankDaming = 0.75f;
+  private int paramPageRankMaxIters = 1000;
+  private float paramPageRankMinDelta = 1E-3f;
   
   private static final int LOG_TOP_COUNT = 30;
   private static final boolean SORT_TOPICS_CHRONOLOGICALLY = false;
@@ -112,6 +115,10 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   private static final String TAG_SVD_PATTERN = "svd-pattern";
   private static final String TAG_MUTUALINF = "mutualInf";
   private static final String TAG_CONDENTR = "condEntr";
+  private static final String TAG_PAGERANK_TERMS = "pagerankTerms";
+  private static final String TAG_PAGERANK_PATTERNS_NOTOP = "pageRankPatternsNoTop";
+  private static final String TAG_PAGERANK_PATTERNS_TOPN = "pageRankPatternsTopN";
+  
   
   private static File[] twtChunkIxLocs;
   
@@ -282,13 +289,13 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     // openWriterForTag(TAG_FREQ_PATTERNS + 100);
     // openWriterForTag(TAG_FREQ_PATTERNS + 333);
 //    openWriterForTag(TAG_TOPN);
-    openWriterForTag(TAG_TOPN + "3ql");
-    openWriterForTag(TAG_TOPN + "7ql");
-    openWriterForTag(TAG_TOPN + "10ql");
-    openWriterForTag(TAG_TOPN + "33ql");
-    openWriterForTag(TAG_TOPN + "3abs" );
-    openWriterForTag(TAG_TOPN + "33abs");
-    openWriterForTag(TAG_TOPN + "100abs");
+//    openWriterForTag(TAG_TOPN + "3ql");
+//    openWriterForTag(TAG_TOPN + "7ql");
+//    openWriterForTag(TAG_TOPN + "10ql");
+//    openWriterForTag(TAG_TOPN + "33ql");
+//    openWriterForTag(TAG_TOPN + "3abs" );
+//    openWriterForTag(TAG_TOPN + "33abs");
+//    openWriterForTag(TAG_TOPN + "100abs");
     // openWriterForTag(TAG_QUERY_CONDPROB);
     // openWriterForTag(TAG_KL_DIVER);
 //    openWriterForTag(TAG_CLUSTER_PATTERNS_DISTANCE);
@@ -299,7 +306,9 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     // openWriterForTag(TAG_SVD_PATTERN);
     // openWriterForTag(TAG_MUTUALINF);
     // openWriterForTag(TAG_CONDENTR);
-    
+    openWriterForTag(TAG_PAGERANK_TERMS);
+    openWriterForTag(TAG_PAGERANK_PATTERNS_NOTOP);
+    openWriterForTag(TAG_PAGERANK_PATTERNS_TOPN);    
   }
   
   private void openWriterForTag(String runTag) throws IOException {
@@ -604,7 +613,104 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
         target.twtSearcher.search(timedQuery, collector);
         collector.writeResults();
       }
-      
+   // /////////////////////////////////////////////////////////////
+if (resultWriters.containsKey(TAG_PAGERANK_PATTERNS_TOPN)) {
+        
+        MutableFloat minXTermScore = new MutableFloat();
+        MutableFloat maxXTermScore = new MutableFloat();
+        
+        OpenObjectFloatHashMap<String> extraTerms = target.weightedTermsByPageRankPatterns(fis,
+            queryStr,
+            numItemsetsToConsider,
+            minXTermScore,
+            maxXTermScore,
+            null,
+            numTermsToAppend,
+            paramPageRankDaming,
+            paramPageRankMaxIters,
+            paramPageRankMinDelta);
+        
+        OpenObjectFloatHashMap<String> xQueryTerms = new OpenObjectFloatHashMap<String>();
+        MutableLong xQueryLen = new MutableLong(0);
+        timedQuery = target.expandAndFilterQuery(queryTerms,
+            queryLen.intValue(),
+            new OpenObjectFloatHashMap[] { extraTerms },
+            new float[] { minXTermScore.intValue() },
+            new float[] { maxXTermScore.intValue() },
+            numTermsToAppend,
+            xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
+        
+        collector = new TrecResultFileCollector(target, topicIds.get(i),
+            TAG_PAGERANK_PATTERNS_TOPN, // queryStr,
+            xQueryTerms, xQueryLen.intValue());
+        target.twtSearcher.search(timedQuery, collector);
+        collector.writeResults();
+      }
+      // /////////////////////////////////////////////////////////////
+      if (resultWriters.containsKey(TAG_PAGERANK_PATTERNS_NOTOP)) {
+        
+        MutableFloat minXTermScore = new MutableFloat();
+        MutableFloat maxXTermScore = new MutableFloat();
+        
+        OpenObjectFloatHashMap<String> extraTerms = target.weightedTermsByPageRankPatterns(fis,
+            queryStr,
+            numItemsetsToConsider,
+            minXTermScore,
+            maxXTermScore,
+            null,
+            0,
+            paramPageRankDaming,
+            paramPageRankMaxIters,
+            paramPageRankMinDelta);
+        
+        OpenObjectFloatHashMap<String> xQueryTerms = new OpenObjectFloatHashMap<String>();
+        MutableLong xQueryLen = new MutableLong(0);
+        timedQuery = target.expandAndFilterQuery(queryTerms,
+            queryLen.intValue(),
+            new OpenObjectFloatHashMap[] { extraTerms },
+            new float[] { minXTermScore.intValue() },
+            new float[] { maxXTermScore.intValue() },
+            numTermsToAppend,
+            xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
+        
+        collector = new TrecResultFileCollector(target, topicIds.get(i),
+            TAG_PAGERANK_PATTERNS_NOTOP, // queryStr,
+            xQueryTerms, xQueryLen.intValue());
+        target.twtSearcher.search(timedQuery, collector);
+        collector.writeResults();
+      }
+      // /////////////////////////////////////////////////////////////
+      if (resultWriters.containsKey(TAG_PAGERANK_TERMS)) {
+        
+        MutableFloat minXTermScore = new MutableFloat();
+        MutableFloat maxXTermScore = new MutableFloat();
+        
+        OpenObjectFloatHashMap<String> extraTerms = target.weightedTermsByPageRankTerms(fis,
+            queryStr,
+            numItemsetsToConsider,
+            minXTermScore,
+            maxXTermScore,
+            null,
+            paramPageRankDaming,
+            paramPageRankMaxIters,
+            paramPageRankMinDelta);
+        
+        OpenObjectFloatHashMap<String> xQueryTerms = new OpenObjectFloatHashMap<String>();
+        MutableLong xQueryLen = new MutableLong(0);
+        timedQuery = target.expandAndFilterQuery(queryTerms,
+            queryLen.intValue(),
+            new OpenObjectFloatHashMap[] { extraTerms },
+            new float[] { minXTermScore.intValue() },
+            new float[] { maxXTermScore.intValue() },
+            numTermsToAppend,
+            xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
+        
+        collector = new TrecResultFileCollector(target, topicIds.get(i),
+            TAG_PAGERANK_TERMS, // queryStr,
+            xQueryTerms, xQueryLen.intValue());
+        target.twtSearcher.search(timedQuery, collector);
+        collector.writeResults();
+      }
       // /////////////////////////////////////////////////////////////
       if (resultWriters.containsKey(TAG_TOPN)) {
         
