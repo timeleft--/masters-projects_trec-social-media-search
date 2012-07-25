@@ -558,7 +558,7 @@ public final class PFPGrowth implements Callable<Void> {
   }
   
   public static int getGroupFromHash(int attrHash, int numGroups) {
-    //TODO save log(2) as a constant and devide by it.. this function is SLOW
+    // TODO save log(2) as a constant and devide by it.. this function is SLOW
     int maskLen = (int) MathUtils.log(2, numGroups - 1) + 1;
     int mask = (int) Math.pow(2, maskLen) - 1;
     int result = 0;
@@ -622,7 +622,7 @@ public final class PFPGrowth implements Callable<Void> {
    *          parameters
    *          include minSupport(3), maxHeapSize(50), numGroups(1000)
    * @throws NoSuchAlgorithmException
- * @throws ParseException 
+   * @throws ParseException
    */
   public static void runPFPGrowth(Parameters params) throws IOException,
       InterruptedException,
@@ -633,7 +633,8 @@ public final class PFPGrowth implements Callable<Void> {
     
     long startTime = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_START));
     long endTime = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_END));
-    long windowSize = Long.parseLong(params.get(PFPGrowth.PARAM_WINDOW_SIZE));
+    long windowSize = Long.parseLong(params.get(PFPGrowth.PARAM_WINDOW_SIZE,
+        Long.toString(endTime - startTime)));
     int minSupport = Integer.valueOf(params.get(MIN_SUPPORT, "3"));
     String countIn = params.get(COUNT_IN);
     if (countIn == null) {
@@ -684,7 +685,7 @@ public final class PFPGrowth implements Callable<Void> {
       // fList = null;
       
       startParallelFPGrowth(params, conf);
-    }else {
+    } else {
       cacheFList(params, conf, countIn, minSupport, minFr, prunePct);
     }
     startAggregating(params, conf);
@@ -721,14 +722,14 @@ public final class PFPGrowth implements Callable<Void> {
       if (mostRecentPath != null) {
         mostRecentPath = fs.listStatus(mostRecentPath)[0].getPath();
         mostRecentPath = new Path(mostRecentPath, "index");
-//        earlierIndex = new Directory[1];
+        // earlierIndex = new Directory[1];
         // FIXME: as with anything that involves lucene.. won't work except on a local machine
         earlierIndex = new MMapDirectory(FileUtils.toFile(mostRecentPath.toUri().toURL()));
-      } 
+      }
     }
-// FIXME: When we want to stream, we have to build the index of earlier window 
-//    ItemSetIndexBuilder.buildIndex(seqPath, indexDir,
-//        startTime, Math.min(endTime, startTime + windowSize), earlierIndex);
+    // FIXME: When we want to stream, we have to build the index of earlier window
+    // ItemSetIndexBuilder.buildIndex(seqPath, indexDir,
+    // startTime, Math.min(endTime, startTime + windowSize), earlierIndex);
   }
   
   /**
@@ -812,7 +813,7 @@ public final class PFPGrowth implements Callable<Void> {
     job.setOutputKeyClass(Text.class);
     job.setOutputValueClass(LongWritable.class);
     
-//    FileSystem fs = FileSystem.get(conf); //TODONE: do I need?getLocal(conf);
+    // FileSystem fs = FileSystem.get(conf); //TODONE: do I need?getLocal(conf);
     PartitionByTimestamp.setInputPaths(job, params, conf);
     // FileInputFormat.addInputPath(job, new Path(input));
     
@@ -872,7 +873,7 @@ public final class PFPGrowth implements Callable<Void> {
     job.setOutputKeyClass(Text.class);
     job.setOutputValueClass(TopKStringPatterns.class);
     
-//    FileSystem fs = FileSystem.get(conf); //TODONE: do I need?getLocal(conf);
+    // FileSystem fs = FileSystem.get(conf); //TODONE: do I need?getLocal(conf);
     PartitionByTimestamp.setInputPaths(job, params, conf);
     // FileInputFormat.addInputPath(job, input);
     
