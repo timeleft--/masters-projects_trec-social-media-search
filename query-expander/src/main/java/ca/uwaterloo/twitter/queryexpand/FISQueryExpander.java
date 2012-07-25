@@ -2175,6 +2175,7 @@ public class FISQueryExpander {
     OpenObjectFloatHashMap<PairOfInts> edges = new OpenObjectFloatHashMap<PairOfInts>();
     int[] out = new int[insts.numInstances()];
     // TODO sinks??
+    double totalWeight = 0;
     for (int i = 0; i < insts.numInstances(); ++i) {
       Instance insti = insts.instance(i);
       for (int j = 0; j < insts.numAttributes(); ++j) {
@@ -2187,13 +2188,16 @@ public class FISQueryExpander {
             continue;
           }
           ++out[i];
-          edges.put(new PairOfInts(i, k), (float) insti.weight());
+          double w =  insti.weight(); // propagate? : 1
+          edges.put(new PairOfInts(i, k), (float)w);
+          totalWeight += w;
         }
       }
     }
     OpenIntFloatHashMap rank = pageRank(edges,
         out,
         insts.numInstances(),
+        (float)totalWeight,
         damping,
         maxIters,
         minDelta);
@@ -2245,15 +2249,15 @@ public class FISQueryExpander {
     return result;
   }
   
+  
+  public static final boolean PAGERANK_WEIGHT = false;
   public static OpenIntFloatHashMap pageRank(OpenObjectFloatHashMap<PairOfInts> edges,
-      int[] out, int numPages, float damping, int maxIters, float minDelta) {
+      int[] out, int numPages, float totalWeight, float damping, int maxIters, float minDelta) {
     
     OpenIntFloatHashMap r1 = new OpenIntFloatHashMap(numPages);
     for (int i = 0; i < numPages; ++i) {
       r1.put(i, 1);
     }
-    float maxDelta = Float.MIN_VALUE;
-    
     int iters = 0;
     while (iters++ < maxIters) {
       float[] r2 = new float[numPages];
@@ -2263,17 +2267,18 @@ public class FISQueryExpander {
       for (PairOfInts e : edges.keys()) {
         int i = e.getLeftElement();
         int j = e.getRightElement();
-        r2[j] += (damping / out[i]) * r1.get(i) * edges.get(e);
+        r2[j] += (damping / out[i]) * r1.get(i) * (PAGERANK_WEIGHT?edges.get(e):1);
       }
-      float s = numPages;
+      float s = PAGERANK_WEIGHT?totalWeight:numPages;
       for (int i = 0; i < numPages; ++i) {
         s -= r2[i];
       }
+      float maxDelta = Float.MIN_VALUE;
       for (int i = 0; i < numPages; ++i) {
         float delta = r1.get(i);
-        r1.put(i, r2[i] + s / numPages);
+        r1.put(i, r2[i] + s / (PAGERANK_WEIGHT?totalWeight:numPages));
         delta = r1.get(i) - delta;
-        if (delta > maxDelta) {
+        if (delta >= 0 && delta > maxDelta) {
           maxDelta = delta;
         }
       }
@@ -2791,6 +2796,7 @@ public class FISQueryExpander {
     OpenObjectFloatHashMap<PairOfInts> edges = new OpenObjectFloatHashMap<PairOfInts>();
     int[] out = new int[insts.numInstances()];
     // TODO sinks??
+    double totalWeight = 0;
     for (int i = 0; i < insts.numInstances(); ++i) {
       Instance inst = insts.instance(i);
       boolean isSink = true;
@@ -2801,13 +2807,16 @@ public class FISQueryExpander {
         }
         ++out[i];
         isSink = false;
-        edges.put(new PairOfInts(i, j), (float) inst.value(j));
+        double w = inst.value(j);
+        edges.put(new PairOfInts(i, j), (float) w);
+        totalWeight += w;
       }
     }
     
     OpenIntFloatHashMap rank = pageRank(edges,
         out,
         insts.numInstances(),
+        (float) totalWeight, 
         damping,
         maxIters,
         minDelta);
