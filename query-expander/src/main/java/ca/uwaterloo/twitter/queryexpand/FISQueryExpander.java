@@ -2167,7 +2167,7 @@ public class FISQueryExpander {
         attrs,
         patternInstMap,
         true,
-        itemsets);
+        itemsets, false);
     if (insts == null || insts.numInstances() == 0) {
       return result;
     }
@@ -2178,16 +2178,16 @@ public class FISQueryExpander {
     for (int i = 0; i < insts.numInstances(); ++i) {
       Instance insti = insts.instance(i);
       for (int j = 0; j < insts.numAttributes(); ++j) {
-        if(insti.value(j) == 0){
+        if (insti.isMissing(j) || insti.value(j) == 0) {
           continue;
         }
         double[] sharedTerms = insts.attributeToDoubleArray(j);
         for (int k = 0; k < sharedTerms.length; ++k) {
-          if (i == k || sharedTerms[k] == 0) {
+          if (i == k || sharedTerms[k] == 0 || Double.isNaN(sharedTerms[k])) {
             continue;
           }
           ++out[i];
-          edges.put(new PairOfInts(i, j), (float) insti.weight());
+          edges.put(new PairOfInts(i, k), (float) insti.weight());
         }
       }
     }
@@ -4541,7 +4541,7 @@ public class FISQueryExpander {
   // ////////////////////// PATTERN-TO-TERM ///////////////////////////////
   protected Instances createPatternTermMatrix(OpenIntFloatHashMap rs, boolean weightInsts,
       FastVector attrsOut, Map<IntArrayList, Instance> patternInstMapOut, boolean closedOnly,
-      LinkedHashSet<Set<String>> itemsetsOut) throws Exception {
+      LinkedHashSet<Set<String>> itemsetsOut, boolean replaceMissing) throws Exception {
     
     OpenObjectIntHashMap<String> termIdMap = new OpenObjectIntHashMap<String>();
     
@@ -4576,7 +4576,8 @@ public class FISQueryExpander {
         pattern.add(termIdMap.get(term));
       }
       
-      patternTree.addPattern(pattern, 1); // TODO: use pattern support????????
+      patternTree.addPattern(pattern,
+          Integer.parseInt(fisIxReader.document(hit).get(AssocField.SUPPORT.name)));
     }
     if (patternTree.isTreeEmpty()) {
       return null;
@@ -4584,7 +4585,8 @@ public class FISQueryExpander {
     
     Instances insts = new Instances("pattern-term", attrsOut, itemsetsOut.size());
     
-    Iterator<Pair<IntArrayList, Long>> patternsIter = patternTree.iterator(closedOnly);
+    patternTree = patternTree.getCompressedTree(closedOnly);
+    Iterator<Pair<IntArrayList, Long>> patternsIter = patternTree.iterator();
     while (patternsIter.hasNext()) {
       Pair<IntArrayList, Long> pattern = patternsIter.next();
       Instance inst = new Instance(attrsOut.size());
@@ -4597,15 +4599,21 @@ public class FISQueryExpander {
       for (int i = 0; i < patternItems.size(); ++i) {
         inst.setValue(patternItems.getQuick(i), 1);
       }
+      if(replaceMissing){
+        for (int i = 0; i < attrsOut.size(); ++i) {
+          inst.setValue(i,0);
+        }
+      }
       
       insts.add(inst);
       patternInstMapOut.put(patternItems, inst);// do I need the actual???
                                                 // insts.instance(insts.numInstances() - 1));
     }
     
-    ReplaceMissingValues replaceMissingFilter = new ReplaceMissingValues();
-    replaceMissingFilter.setInputFormat(insts);
-    insts = Filter.useFilter(insts, replaceMissingFilter);
+    // This put the mean which is 1.. ya ahbal
+//    ReplaceMissingValues replaceMissingFilter = new ReplaceMissingValues();
+//    replaceMissingFilter.setInputFormat(insts);
+//    insts = Filter.useFilter(insts, replaceMissingFilter);
     return insts;
   }
   
@@ -4624,7 +4632,7 @@ public class FISQueryExpander {
         attrs,
         patternInstMap,
         closedOnly,
-        itemsets);
+        itemsets, true);
     if (insts == null || insts.numInstances() == 0) {
       return new PriorityQueue[0];
     }
@@ -4721,7 +4729,7 @@ public class FISQueryExpander {
         attrs,
         patternInstMap,
         closedOnly,
-        itemsets);
+        itemsets, true);
     if (insts != null) {
       // Removes attributes with only one distinct values (all of them), and so fails
       // try {
