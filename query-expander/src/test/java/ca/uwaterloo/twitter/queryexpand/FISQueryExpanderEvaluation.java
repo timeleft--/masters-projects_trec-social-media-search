@@ -51,7 +51,8 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   
   public static final int MAX_RESULTS = 10000;
   private File fisIncIxLocation = new File(
-      "/u2/yaboulnaga/datasets/twitter-trec2011/fis/assoc-mr_0607-2100/index-closed_stemmed-stored");
+      "/u2/yaboulnaga/Shared/datasets/twitter-trec2011/assoc-mr_supp_17days/index_closed_stemmed-stored");
+//      "/u2/yaboulnaga/datasets/twitter-trec2011/fis/assoc-mr_0607-2100/index-closed_stemmed-stored");
   // "/u2/yaboulnaga/datasets/twitter-trec2011/fis/assoc-mr_0608-0530/index-closed_stemmed-stored");
   
   private File twtIncIxLoc = new File(

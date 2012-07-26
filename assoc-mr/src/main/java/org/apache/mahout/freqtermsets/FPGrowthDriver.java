@@ -107,6 +107,7 @@ public final class FPGrowthDriver extends AbstractJob {
     addOption(PFPGrowth.PRUNE_PCTILE,
         "pct",
         "The percentile of frequencies that will be considered; any token with a higher frequency will be pruned");
+    addFlag("shift", "shift", "If set (and window must be set) it shifts the window by half");
     addFlag(TokenIterator.PARAM_REPEAT_HASHTAG,
         "rht",
         "If set, each hashtag is repeated, removing the # sign from the second token returned for the same hashtag");
@@ -118,9 +119,9 @@ public final class FPGrowthDriver extends AbstractJob {
         "j",
         "The number of PFP jobs, because in case of intervals resources are under utilized");
     
-//    addOption(PFPGrowth.INDEX_OUT,
-//        "ix",
-//        "The local folder to which the frequent itemset index will be written");
+    // addOption(PFPGrowth.INDEX_OUT,
+    // "ix",
+    // "The local folder to which the frequent itemset index will be written");
     
     if (parseArguments(args) == null) {
       return -1;
@@ -161,17 +162,17 @@ public final class FPGrowthDriver extends AbstractJob {
     // params.set(PFPGrowth.USE_FPG2, "true");
     // }
     
-//    if (hasOption(PFPGrowth.COUNT_IN)) {
-//      params.set(PFPGrowth.COUNT_IN, getOption(PFPGrowth.COUNT_IN));
-//    }
+    // if (hasOption(PFPGrowth.COUNT_IN)) {
+    // params.set(PFPGrowth.COUNT_IN, getOption(PFPGrowth.COUNT_IN));
+    // }
     
     // if(hasOption(PFPGrowth.PSEUDO)){
     // params.set(PFPGrowth.PSEUDO, "true");
     // }
     
-//    if (hasOption(PFPGrowth.GROUP_FIS_IN)) {
-//      params.set(PFPGrowth.GROUP_FIS_IN, getOption(PFPGrowth.GROUP_FIS_IN));
-//    }
+    // if (hasOption(PFPGrowth.GROUP_FIS_IN)) {
+    // params.set(PFPGrowth.GROUP_FIS_IN, getOption(PFPGrowth.GROUP_FIS_IN));
+    // }
     
     if (hasOption(AggregatorReducer.MUTUAL_INFO_FLAG)) {
       params.set(AggregatorReducer.MUTUAL_INFO_FLAG, "true");
@@ -201,17 +202,19 @@ public final class FPGrowthDriver extends AbstractJob {
       params.set(PFPGrowth.PARAM_WINDOW_SIZE, getOption(PFPGrowth.PARAM_WINDOW_SIZE));
     }
     
-//    if (hasOption(PFPGrowth.PARAM_INTERVAL_START)) {
-//      params.set(PFPGrowth.PARAM_INTERVAL_START, getOption(PFPGrowth.PARAM_INTERVAL_START));
-//    }
+    // if (hasOption(PFPGrowth.PARAM_INTERVAL_START)) {
+    // params.set(PFPGrowth.PARAM_INTERVAL_START, getOption(PFPGrowth.PARAM_INTERVAL_START));
+    // }
     
-//    if (hasOption(PFPGrowth.INDEX_OUT)) {
-//      params.set(PFPGrowth.INDEX_OUT, getOption(PFPGrowth.INDEX_OUT));
-//    }
+    // if (hasOption(PFPGrowth.INDEX_OUT)) {
+    // params.set(PFPGrowth.INDEX_OUT, getOption(PFPGrowth.INDEX_OUT));
+    // }
     
     if (hasOption(TokenIterator.PARAM_REPEAT_HASHTAG)) {
       params.set(TokenIterator.PARAM_REPEAT_HASHTAG, "true");
     }
+    
+    boolean shiftedWindow = hasOption("shift");
     
     Path inputDir = getInputPath();
     Path outputDir = getOutputPath();
@@ -223,58 +226,66 @@ public final class FPGrowthDriver extends AbstractJob {
     HadoopUtil.delete(conf, outputDir);
     
     int nThreads = Integer.parseInt(getOption(PARAM_NUM_THREADS, DEFAULT_NUM_THREADS));
-    if(PFPGrowth.FPSTREAM && nThreads != 1){
+    if (PFPGrowth.FPSTREAM && nThreads != 1) {
       throw new UnsupportedOperationException("We use mining results from earlier windows. j = 1");
     }
     ExecutorService exec = Executors.newFixedThreadPool(nThreads);
     Future<Void> lastFuture = null;
     
-    String startTimeStr = getOption(PFPGrowth.PARAM_INTERVAL_START); 
-//        params.get(PFPGrowth.PARAM_INTERVAL_START);
+    String startTimeStr = getOption(PFPGrowth.PARAM_INTERVAL_START);
+    // params.get(PFPGrowth.PARAM_INTERVAL_START);
     if (startTimeStr == null) {
       // FIXME: Will fail if not running locally.. like many things now
-//      FileSystem fs = FileSystem.getLocal(conf);
-//      startTimeStr = fs.listStatus(inputDir)[0].getPath().getName();
+      // FileSystem fs = FileSystem.getLocal(conf);
+      // startTimeStr = fs.listStatus(inputDir)[0].getPath().getName();
       startTimeStr = FileUtils.toFile(inputDir.toUri().toURL()).listFiles()[0].getName();
     }
     long startTime = Long.parseLong(startTimeStr);
     // Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP)));// GMT23JAN2011)));
     long endTime = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_END));
-//        Long.toString(Long.MAX_VALUE)));
+    // Long.toString(Long.MAX_VALUE)));
     long windowSize = Long.parseLong(params.get(PFPGrowth.PARAM_WINDOW_SIZE,
         Long.toString(endTime - startTime)));
-//int numJobs = 0;    
-while (startTime < endTime) {
-//	if(++numJobs % 100 == 0){
-//Thread.sleep(60000);
-//}
-      params.set(PFPGrowth.PARAM_INTERVAL_START, Long.toString(startTime));
-            
+    
+    // int numJobs = 0;
+    while (startTime < endTime) {
+      // if(++numJobs % 100 == 0){
+      // Thread.sleep(60000);
+      // }
+      long shift = 0;
+      if(shiftedWindow){
+        shift = (long)Math.floor(windowSize / 2.0f);
+      }
+      params.set(PFPGrowth.PARAM_INTERVAL_START, Long.toString(startTime + shift));
+      
       if (hasOption(PFPGrowth.GROUP_FIS_IN)) {
         String gfisIn = getOption(PFPGrowth.GROUP_FIS_IN);
-        gfisIn = FilenameUtils.concat(gfisIn, Long.toString(startTime));
-        gfisIn = FilenameUtils.concat(gfisIn, Long.toString(Math.min(endTime,startTime+windowSize)));
+        gfisIn = FilenameUtils.concat(gfisIn, Long.toString(startTime + shift));
+        gfisIn = FilenameUtils.concat(gfisIn,
+            Long.toString(Math.min(endTime, startTime + windowSize) + shift));
         params.set(PFPGrowth.GROUP_FIS_IN, gfisIn);
       }
       
       if (hasOption(PFPGrowth.COUNT_IN)) {
         String countIn = getOption(PFPGrowth.COUNT_IN);
-        countIn = FilenameUtils.concat(countIn, Long.toString(startTime));
-        countIn = FilenameUtils.concat(countIn, Long.toString(Math.min(endTime,startTime+windowSize)));
+        countIn = FilenameUtils.concat(countIn, Long.toString(startTime + shift));
+        countIn = FilenameUtils.concat(countIn,
+            Long.toString(Math.min(endTime, startTime + windowSize) + shift));
         params.set(PFPGrowth.COUNT_IN, countIn);
       }
-            
-      String outPathStr = FilenameUtils.concat(outputDir.toString(), Long.toString(startTime));
-      outPathStr = FilenameUtils.concat(outPathStr, Long.toString(Math.min(endTime,startTime+windowSize)));
+      
+      String outPathStr = FilenameUtils.concat(outputDir.toString(), Long.toString(startTime + shift));
+      outPathStr = FilenameUtils.concat(outPathStr,
+          Long.toString(Math.min(endTime, startTime + windowSize) + shift));
       params.set("output", outPathStr);
       
       // PFPGrowth.runPFPGrowth(params);
       lastFuture = exec.submit(new PFPGrowth(params));
       
       startTime += windowSize;
-   
-Thread.sleep(10000);
- }
+      
+//      Thread.sleep(10000);
+    }
     
     lastFuture.get();
     exec.shutdown();
