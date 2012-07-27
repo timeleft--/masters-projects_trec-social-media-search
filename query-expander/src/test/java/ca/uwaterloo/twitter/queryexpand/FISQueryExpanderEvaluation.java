@@ -51,20 +51,20 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   
   public static final int MAX_RESULTS = 10000;
   private File fisIncIxLocation = new File(
-      "/u2/yaboulnaga/Shared/datasets/twitter-trec2011/assoc-mr_supp_17days/index_closed_stemmed-stored");
+      "/u2/yaboulnaga/datasets/twitter-trec2011/indexes/fis-supp-17days_closed_stemmed-stored");
 //      "/u2/yaboulnaga/datasets/twitter-trec2011/fis/assoc-mr_0607-2100/index-closed_stemmed-stored");
   // "/u2/yaboulnaga/datasets/twitter-trec2011/fis/assoc-mr_0608-0530/index-closed_stemmed-stored");
   
   private File twtIncIxLoc = new File(
       "/u2/yaboulnaga/datasets/twitter-trec2011/indexes/" +
           // "trash/index-stemmed_8hr-incremental");
-          "stemmed-stored_8hr-increments");
+          "twt_stemmed-stored_8hr-increments");
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-stemmed_8hr-incremental");
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-tweets_8hr-increments");
   
   private static final String TWT_CHUNKS_ROOT = "/u2/yaboulnaga/datasets/twitter-trec2011/indexes/"
       // + "trash/index-stemmed_chunks";
-      + "stemmed-stored_chunks";
+      + "twt_stemmed-stored_chunks";
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-stemmed_chunks";
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-tweets_chunks";
   private static final String RESULT_PATH = "/u2/yaboulnaga/datasets/twitter-trec2011/runs";
@@ -290,7 +290,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     // openWriterForTag(TAG_FREQ_PATTERNS + 77);
     // openWriterForTag(TAG_FREQ_PATTERNS + 100);
     // openWriterForTag(TAG_FREQ_PATTERNS + 333);
-//    openWriterForTag(TAG_TOPN);
+    openWriterForTag(TAG_TOPN);
 //    openWriterForTag(TAG_TOPN + "3ql");
 //    openWriterForTag(TAG_TOPN + "7ql");
 //    openWriterForTag(TAG_TOPN + "10ql");
@@ -308,9 +308,9 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
 //     openWriterForTag(TAG_SVD_PATTERN);
     // openWriterForTag(TAG_MUTUALINF);
     // openWriterForTag(TAG_CONDENTR);
-    openWriterForTag(TAG_PAGERANK_TERMS);
-    openWriterForTag(TAG_PAGERANK_PATTERNS_NOTOP);
-    openWriterForTag(TAG_PAGERANK_PATTERNS_TOPN);    
+//    openWriterForTag(TAG_PAGERANK_TERMS);
+//    openWriterForTag(TAG_PAGERANK_PATTERNS_NOTOP);
+//    openWriterForTag(TAG_PAGERANK_PATTERNS_TOPN);    
   }
   
   private void openWriterForTag(String runTag) throws IOException {
