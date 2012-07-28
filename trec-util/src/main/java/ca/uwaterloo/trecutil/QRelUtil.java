@@ -13,9 +13,9 @@ import java.util.Map;
 import org.apache.commons.lang.mutable.MutableFloat;
 
 public class QRelUtil {
-  final LinkedHashMap<String, LinkedHashMap<String,Float>> qRel;
-  final HashSet<String> allRel;
-  final LinkedHashMap<String, MutableFloat> sizeOfNonRelevant;
+  public final LinkedHashMap<String, LinkedHashMap<String,Float>> qRel;
+  public final HashSet<String> allRel;
+  public final LinkedHashMap<String, MutableFloat> sizeOfNonRelevant;
   
   public QRelUtil(File qRelFile) throws IOException {
     qRel = new LinkedHashMap<String, LinkedHashMap<String,Float>>();

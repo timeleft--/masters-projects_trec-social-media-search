@@ -110,7 +110,7 @@ public class FISQueryExpander {
   // HAHAHAH :D
   private static final double LOG2 = Math.log(2);
   
-  static class FISCollector extends BM25Collector<Integer, String[]> {
+  public static class FISCollector extends BM25Collector<Integer, String[]> {
     
     public class ScoreThenSuppRankComparator implements Comparator<ScoreIxObj<Integer>> {
       
@@ -677,7 +677,7 @@ public class FISQueryExpander {
   
   private static boolean paramClusteringWeightInsts = true;
   
-  private static boolean paramBM25StemmedIDF = true;
+  public static boolean paramBM25StemmedIDF = true;
   
   /**
    * @param args
@@ -1180,7 +1180,7 @@ public class FISQueryExpander {
       
       for (String term : termSet) {
         
-        if (result.containsKey(term) || queryTerms.containsKey(term)) {
+        if (term.charAt(0) == '@' || result.containsKey(term) || queryTerms.containsKey(term)) {
           continue;
         }
         
@@ -2188,8 +2188,8 @@ public class FISQueryExpander {
             continue;
           }
           ++out[i];
-          double w =  insti.weight(); // propagate? : 1
-          edges.put(new PairOfInts(i, k), (float)w);
+          double w = insti.weight(); // propagate? : 1
+          edges.put(new PairOfInts(i, k), (float) w);
           totalWeight += w;
         }
       }
@@ -2197,7 +2197,7 @@ public class FISQueryExpander {
     OpenIntFloatHashMap rank = pageRank(edges,
         out,
         insts.numInstances(),
-        (float)totalWeight,
+        (float) totalWeight,
         damping,
         maxIters,
         minDelta);
@@ -2249,8 +2249,8 @@ public class FISQueryExpander {
     return result;
   }
   
-  
   public static final boolean PAGERANK_WEIGHT = false;
+  
   public static OpenIntFloatHashMap pageRank(OpenObjectFloatHashMap<PairOfInts> edges,
       int[] out, int numPages, float totalWeight, float damping, int maxIters, float minDelta) {
     
@@ -2267,16 +2267,16 @@ public class FISQueryExpander {
       for (PairOfInts e : edges.keys()) {
         int i = e.getLeftElement();
         int j = e.getRightElement();
-        r2[j] += (damping / out[i]) * r1.get(i) * (PAGERANK_WEIGHT?edges.get(e):1);
+        r2[j] += (damping / out[i]) * r1.get(i) * (PAGERANK_WEIGHT ? edges.get(e) : 1);
       }
-      float s = PAGERANK_WEIGHT?totalWeight:numPages;
+      float s = PAGERANK_WEIGHT ? totalWeight : numPages;
       for (int i = 0; i < numPages; ++i) {
         s -= r2[i];
       }
       float maxDelta = Float.MIN_VALUE;
       for (int i = 0; i < numPages; ++i) {
         float delta = r1.get(i);
-        r1.put(i, r2[i] + s / (PAGERANK_WEIGHT?totalWeight:numPages));
+        r1.put(i, r2[i] + s / (PAGERANK_WEIGHT ? totalWeight : numPages));
         delta = r1.get(i) - delta;
         if (delta >= 0 && delta > maxDelta) {
           maxDelta = delta;
@@ -2816,7 +2816,7 @@ public class FISQueryExpander {
     OpenIntFloatHashMap rank = pageRank(edges,
         out,
         insts.numInstances(),
-        (float) totalWeight, 
+        (float) totalWeight,
         damping,
         maxIters,
         minDelta);
@@ -2858,13 +2858,13 @@ public class FISQueryExpander {
   }
   
   // final QueryParser fisQparser;
-  final IndexSearcher fisSearcher;
-  final IndexReader fisIxReader;
+  IndexSearcher fisSearcher;
+  IndexReader fisIxReader;
   
-  final int fisNumHits = NUM_HITS_INTERNAL_DEFAULT;
-  final float fisBaseRankingParam = FIS_BASE_RANK_PARAM_DEFAULT;
+  int fisNumHits = NUM_HITS_INTERNAL_DEFAULT;
+  float fisBaseRankingParam = FIS_BASE_RANK_PARAM_DEFAULT;
   
-  final Similarity fisSimilarity;
+  Similarity fisSimilarity;
   
   // final QueryParser twtQparser;
   final IndexSearcher twtSearcher;
@@ -2885,10 +2885,63 @@ public class FISQueryExpander {
   
   float itemSetLenWght = ITEMSET_LEN_WEIGHT_DEFAULT;
   
-  final long queryTime;
+  private final long queryTime;
   
   // TODO command line
   // private float clusterSize = 33;
+  
+  public int getFisNumHits() {
+    return fisNumHits;
+  }
+  
+  public void setFisNumHits(int fisNumHits) {
+    this.fisNumHits = fisNumHits;
+  }
+  
+  public Similarity getFisSimilarity() {
+    return fisSimilarity;
+  }
+  
+  public void setFisSimilarity(Similarity fisSimilarity) {
+    this.fisSimilarity = fisSimilarity;
+  }
+  
+  public IndexSearcher getFisSearcher() {
+    return fisSearcher;
+  }
+  
+  public IndexSearcher getTwtSearcher() {
+    return twtSearcher;
+  }
+  
+  public MultiReader getTwtIxReader() {
+    return twtIxReader;
+  }
+  
+  public TwitterSimilarity getTwtSimilarity() {
+    return twtSimilarity;
+  }
+  
+  public void setFisIxReader(IndexReader indexReader) throws IOException {
+    if (fisSearcher != null) {
+      fisSearcher.close();
+    }
+    if (fisIxReader != null) {
+      fisIxReader.close();
+    }
+    fisIxReader = indexReader;
+    fisSearcher = new IndexSearcher(fisIxReader);
+    fisSimilarity = new ItemSetSimilarity();
+    fisSearcher.setSimilarity(fisSimilarity);
+    
+    // fisQparser = new QueryParser(Version.LUCENE_36,
+    // AssocField.STEMMED_EN.name,
+    // tweetStemmingAnalyzer);
+    // // ItemSetIndexBuilder.AssocField.ITEMSET.name,
+    // // ANALYZER);
+    // fisQparser.setDefaultOperator(Operator.AND);
+    
+  }
   
   private boolean fuzzyHashtag = false;
   
@@ -2961,40 +3014,18 @@ public class FISQueryExpander {
   
   static boolean incremental = true;
   
-  /**
-   * 
-   * @param fisIndexLocation
-   * @param twtIndexLocation
-   * @param timeFormatted
-   *          example: Sun Feb 06 10:38:43 +0000 2011
-   * @throws IOException
-   * @throws java.text.ParseException
-   */
-  public FISQueryExpander(File fisIncIxLocation,
-      File twtIncIxLoc, File[] twtChunkIxLocs, String timeFormatted)
+  public FISQueryExpander(File twtIncIxLoc, File[] twtChunkIxLocs, String timeFormatted)
       throws IOException, java.text.ParseException {
+    
     SimpleDateFormat dFmt = new SimpleDateFormat("EEE MMM dd HH:mm:ss ZZZZZ yyyy");
     if (timeFormatted != null) {
       this.timeFormatted = timeFormatted;
-      this.queryTime = dFmt.parse(timeFormatted)
+      this.queryTime = dFmt.parse(timeFormatted.trim())
           .getTime();
     } else {
       this.queryTime = System.currentTimeMillis();
-      this.timeFormatted = dFmt.format(new Date(queryTime));
+      this.timeFormatted = dFmt.format(new Date(getQueryTime()));
     }
-    
-    Directory fisdir = new MMapDirectory(fisIncIxLocation);
-    fisIxReader = IndexReader.open(fisdir);
-    fisSearcher = new IndexSearcher(fisIxReader);
-    fisSimilarity = new ItemSetSimilarity();
-    fisSearcher.setSimilarity(fisSimilarity);
-    
-    // fisQparser = new QueryParser(Version.LUCENE_36,
-    // AssocField.STEMMED_EN.name,
-    // tweetStemmingAnalyzer);
-    // // ItemSetIndexBuilder.AssocField.ITEMSET.name,
-    // // ANALYZER);
-    // fisQparser.setDefaultOperator(Operator.AND);
     
     List<IndexReader> ixRds = Lists.newLinkedList();
     // long incrEndTime = openTweetIndexesBeforeQueryTime(twtIncIxLoc,
@@ -3016,7 +3047,7 @@ public class FISQueryExpander {
     // }
     for (File ixLoc : IncrementalChuncksParallelHiers.getPathsBefore(twtIncIxLoc,
         twtChunkIxLocs,
-        queryTime)) {
+        getQueryTime())) {
       ixRds.add(IndexReader.open(NIOFSDirectory.open(new File(ixLoc, "index"))));
     }
     twtIxReader = new MultiReader(ixRds.toArray(new IndexReader[0]));
@@ -3030,6 +3061,24 @@ public class FISQueryExpander {
     // twtQparser.setDefaultOperator(Operator.AND);
     
     BooleanQuery.setMaxClauseCount(fisNumHits * fisNumHits);
+  }
+  
+  /**
+   * 
+   * @param fisIndexLocation
+   * @param twtIndexLocation
+   * @param timeFormatted
+   *          example: Sun Feb 06 10:38:43 +0000 2011
+   * @throws IOException
+   * @throws java.text.ParseException
+   */
+  public FISQueryExpander(File fisIncIxLocation,
+      File twtIncIxLoc, File[] twtChunkIxLocs, String timeFormatted)
+      throws IOException, java.text.ParseException {
+    this(twtIncIxLoc, twtChunkIxLocs, timeFormatted);
+    
+    Directory fisdir = new MMapDirectory(fisIncIxLocation);
+    setFisIxReader(IndexReader.open(fisdir));
   }
   
   public OpenIntFloatHashMap relatedItemsets(String queryStr, float minScore)
@@ -4270,7 +4319,7 @@ public class FISQueryExpander {
     NumericRangeFilter<Long> timeFilter = NumericRangeFilter
         .newLongRange(TweetField.TIMESTAMP.name,
             Long.MIN_VALUE,
-            queryTime,
+            getQueryTime(),
             true,
             true);
     
@@ -4608,9 +4657,9 @@ public class FISQueryExpander {
       for (int i = 0; i < patternItems.size(); ++i) {
         inst.setValue(patternItems.getQuick(i), 1);
       }
-      if(replaceMissing){
+      if (replaceMissing) {
         for (int i = 0; i < attrsOut.size(); ++i) {
-          inst.setValue(i,0);
+          inst.setValue(i, 0);
         }
       }
       
@@ -4620,9 +4669,9 @@ public class FISQueryExpander {
     }
     
     // This put the mean which is 1.. ya ahbal
-//    ReplaceMissingValues replaceMissingFilter = new ReplaceMissingValues();
-//    replaceMissingFilter.setInputFormat(insts);
-//    insts = Filter.useFilter(insts, replaceMissingFilter);
+    // ReplaceMissingValues replaceMissingFilter = new ReplaceMissingValues();
+    // replaceMissingFilter.setInputFormat(insts);
+    // insts = Filter.useFilter(insts, replaceMissingFilter);
     return insts;
   }
   
@@ -4773,5 +4822,13 @@ public class FISQueryExpander {
       // }
     }
     return result;
+  }
+  
+  public long getQueryTime() {
+    return queryTime;
+  }
+  
+  public IndexReader getFisIxReader() {
+    return fisIxReader;
   }
 }

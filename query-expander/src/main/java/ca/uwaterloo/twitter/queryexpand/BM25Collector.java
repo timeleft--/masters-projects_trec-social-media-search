@@ -280,7 +280,7 @@ public abstract class BM25Collector<K extends Comparable<K>, V> extends Collecto
     
     resultSet.put(new ScoreIxObj<K>(getResultKey(docId, doc), score), getResultValue(docId, doc));
     
-    while (resultSet.size() > maxResults) {
+    while (maxResults > 0 && resultSet.size() > maxResults) {
       resultSet.remove(resultSet.lastKey());
     }
   }
