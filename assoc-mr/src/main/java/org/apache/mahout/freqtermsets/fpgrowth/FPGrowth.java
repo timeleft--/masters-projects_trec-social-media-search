@@ -40,7 +40,9 @@ import org.apache.mahout.freqtermsets.convertors.StatusUpdater;
 import org.apache.mahout.freqtermsets.convertors.TopKPatternsOutputConverter;
 import org.apache.mahout.freqtermsets.convertors.TransactionIterator;
 import org.apache.mahout.freqtermsets.convertors.string.TopKStringPatterns;
+import org.apache.mahout.math.list.IntArrayList;
 import org.apache.mahout.math.map.OpenIntIntHashMap;
+import org.apache.mahout.math.map.OpenIntLongHashMap;
 import org.apache.mahout.math.map.OpenIntObjectHashMap;
 import org.apache.mahout.math.map.OpenObjectIntHashMap;
 import org.slf4j.Logger;
@@ -58,6 +60,7 @@ import com.google.common.collect.Maps;
 public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
 
   private static final Logger log = LoggerFactory.getLogger(FPGrowth.class);
+private static final float LEAST_NUM_CHILDREN_TO_VOTE_FOR_NOISE = 2;
   
   public static List<Pair<String, TopKStringPatterns>> readFrequentPattern(Configuration conf,
       Path path) {
@@ -640,7 +643,55 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
   private static void pruneFPTree(long minSupport, FPTree tree) {
     for (int i = 0; i < tree.getHeaderTableCount(); i++) {
       int currentAttribute = tree.getAttributeAtIndex(i);
-      if (tree.getHeaderSupportCount(currentAttribute) < minSupport) {
+      float attrSupport  = tree.getHeaderSupportCount(currentAttribute);
+      boolean rare = attrSupport < minSupport;
+      boolean noise = false;
+      
+      if(!rare){
+      int noiseVotes = 0;
+      
+      OpenIntLongHashMap childJointFreq = new OpenIntLongHashMap();
+      float sumOfChildSupport = 0;
+      int nextNode = tree.getHeaderNext(currentAttribute);
+      while (nextNode != -1) {
+          int mychildCount = tree.childCount(nextNode);
+          
+          for (int j = 0; j < mychildCount; j++) {
+            int myChildId = tree.childAtIndex(nextNode, j);
+            int myChildAttr = tree.attribute(myChildId);
+            long childSupport = tree.count(myChildId);
+            sumOfChildSupport += childSupport;
+            childJointFreq.put(myChildAttr, childJointFreq.get(myChildAttr) + childSupport);
+          }
+          nextNode = tree.next(nextNode);
+      }
+      
+      float numChildren = childJointFreq.size();
+      log.trace("Voting for noisiness of attribute {} with number of children: {}", currentAttribute, numChildren);
+      log.trace("Attribute support: {} - Total Children support: {}", attrSupport, sumOfChildSupport);
+      // if there is one child then the prob of random choice will be 1, so anything would be noise
+      // and if there are few then the probability that this is actually noise declines 
+      if(numChildren >= LEAST_NUM_CHILDREN_TO_VOTE_FOR_NOISE){
+      double randomSelectionLogOdds = 1/numChildren;
+      randomSelectionLogOdds = Math.log(randomSelectionLogOdds / (1-randomSelectionLogOdds));
+      randomSelectionLogOdds = Math.abs(randomSelectionLogOdds);
+      
+      IntArrayList childAttrArr = childJointFreq.keys();  
+      for(int c = 0; c < childAttrArr.size(); ++c){
+    	  float childConditional = childJointFreq.get(childAttrArr.get(c)) / attrSupport;
+    	  double childLogOdds = Math.log(childConditional / (1-childConditional)); 
+    	  if(Math.abs(childLogOdds) <= randomSelectionLogOdds){
+    		  // probability of the child given me is different than probability of choosing the child randomly 
+    		  // from among my children.. using absolute log odds because they are symmetric 
+    		  ++noiseVotes;
+    	  }
+      }
+      log.trace("Noisy if below: {} - Noise votes: {}", randomSelectionLogOdds, noiseVotes);
+      }
+      noise =  noiseVotes  == numChildren;
+      }
+      
+      if (noise || rare) {
         int nextNode = tree.getHeaderNext(currentAttribute);
         tree.removeHeaderNext(currentAttribute);
         while (nextNode != -1) {
