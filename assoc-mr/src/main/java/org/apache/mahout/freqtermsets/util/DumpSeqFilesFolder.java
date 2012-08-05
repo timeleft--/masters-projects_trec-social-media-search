@@ -35,7 +35,8 @@ public class DumpSeqFilesFolder {
     
     // int pHeapSize = 5000;
     File root = new File(args[0]);
-    for(File chunk: root.listFiles())
+    File chunk = root;
+//    for(File chunk: root.listFiles())
     for (File hourDir : chunk.listFiles()) {
       for (File minuteDir : hourDir.listFiles()) {
         String minutePath = minuteDir.getAbsolutePath();

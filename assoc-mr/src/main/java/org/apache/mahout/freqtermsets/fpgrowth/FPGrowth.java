@@ -60,7 +60,7 @@ import com.google.common.collect.Maps;
 public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
 
   private static final Logger log = LoggerFactory.getLogger(FPGrowth.class);
-private static final float LEAST_NUM_CHILDREN_TO_VOTE_FOR_NOISE = 2;
+  private static final float LEAST_NUM_CHILDREN_TO_VOTE_FOR_NOISE = 2;
   
   public static List<Pair<String, TopKStringPatterns>> readFrequentPattern(Configuration conf,
       Path path) {
@@ -642,18 +642,19 @@ private static final float LEAST_NUM_CHILDREN_TO_VOTE_FOR_NOISE = 2;
   
   private static void pruneFPTree(long minSupport, FPTree tree) {
     for (int i = 0; i < tree.getHeaderTableCount(); i++) {
+      // for (int i = tree.getHeaderTableCount() - 1; i >= 0; --i) {
       int currentAttribute = tree.getAttributeAtIndex(i);
-      float attrSupport  = tree.getHeaderSupportCount(currentAttribute);
+      float attrSupport = tree.getHeaderSupportCount(currentAttribute);
       boolean rare = attrSupport < minSupport;
       boolean noise = false;
       
-      if(!rare){
-      int noiseVotes = 0;
-      
-      OpenIntLongHashMap childJointFreq = new OpenIntLongHashMap();
-      float sumOfChildSupport = 0;
-      int nextNode = tree.getHeaderNext(currentAttribute);
-      while (nextNode != -1) {
+      if (!rare) {
+        // int noiseVotes = 0;
+        // float klDivergence = 0;
+        OpenIntLongHashMap childJointFreq = new OpenIntLongHashMap();
+        float sumOfChildSupport = 0;
+        int nextNode = tree.getHeaderNext(currentAttribute);
+        while (nextNode != -1) {
           int mychildCount = tree.childCount(nextNode);
           
           for (int j = 0; j < mychildCount; j++) {
@@ -664,31 +665,56 @@ private static final float LEAST_NUM_CHILDREN_TO_VOTE_FOR_NOISE = 2;
             childJointFreq.put(myChildAttr, childJointFreq.get(myChildAttr) + childSupport);
           }
           nextNode = tree.next(nextNode);
-      }
-      
-      float numChildren = childJointFreq.size();
-      log.trace("Voting for noisiness of attribute {} with number of children: {}", currentAttribute, numChildren);
-      log.trace("Attribute support: {} - Total Children support: {}", attrSupport, sumOfChildSupport);
-      // if there is one child then the prob of random choice will be 1, so anything would be noise
-      // and if there are few then the probability that this is actually noise declines 
-      if(numChildren >= LEAST_NUM_CHILDREN_TO_VOTE_FOR_NOISE){
-      double randomSelectionLogOdds = 1/numChildren;
-      randomSelectionLogOdds = Math.log(randomSelectionLogOdds / (1-randomSelectionLogOdds));
-      randomSelectionLogOdds = Math.abs(randomSelectionLogOdds);
-      
-      IntArrayList childAttrArr = childJointFreq.keys();  
-      for(int c = 0; c < childAttrArr.size(); ++c){
-    	  float childConditional = childJointFreq.get(childAttrArr.get(c)) / attrSupport;
-    	  double childLogOdds = Math.log(childConditional / (1-childConditional)); 
-    	  if(Math.abs(childLogOdds) <= randomSelectionLogOdds){
-    		  // probability of the child given me is different than probability of choosing the child randomly 
-    		  // from among my children.. using absolute log odds because they are symmetric 
-    		  ++noiseVotes;
-    	  }
-      }
-      log.trace("Noisy if below: {} - Noise votes: {}", randomSelectionLogOdds, noiseVotes);
-      }
-      noise =  noiseVotes  == numChildren;
+        }
+        
+        float numChildren = childJointFreq.size();
+        
+        // if there is one child then the prob of random choice will be 1, so anything would be
+        // noise
+        // and if there are few then the probability that this is actually noise declines
+        if (numChildren >= LEAST_NUM_CHILDREN_TO_VOTE_FOR_NOISE) {
+          log.info("Voting for noisiness of attribute {} with number of children: {}",
+              currentAttribute,
+              numChildren);
+          log.info("Attribute support: {} - Total Children support: {}",
+              attrSupport,
+              sumOfChildSupport);
+          // double randomSelectionLogOdds = 1.0 / numChildren;
+          // randomSelectionLogOdds = Math.log(randomSelectionLogOdds / (1 -
+          // randomSelectionLogOdds));
+          // randomSelectionLogOdds = Math.abs(randomSelectionLogOdds);
+          //
+          // IntArrayList childAttrArr = childJointFreq.keys();
+          // for (int c = 0; c < childAttrArr.size(); ++c) {
+          // double childConditional = 1.0 * childJointFreq.get(childAttrArr.get(c))
+          // / sumOfChildSupport; // attrSupport;
+          // double childLogOdds = Math.log(childConditional / (1 - childConditional));
+          // if (Math.abs(childLogOdds) <= randomSelectionLogOdds) {
+          // // probability of the child given me is different than probability of choosing the
+          // // child randomly
+          // // from among my children.. using absolute log odds because they are symmetric
+          // ++noiseVotes;
+          // }
+          // }
+          // log.info("Noisy if below: {} - Noise votes: {}", randomSelectionLogOdds, noiseVotes);
+          // noise = noiseVotes == numChildren;
+          
+          // double randomChild = 1.0 / numChildren;
+          // IntArrayList childAttrArr = childJointFreq.keys();
+          // for (int c = 0; c < childAttrArr.size(); ++c) {
+          // double childConditional = 1.0 * childJointFreq.get(childAttrArr.get(c))
+          // / attrSupport; // sumOfChildSupport;
+          // if (childConditional == 0) {
+          // continue; // a7a!
+          // }
+          // klDivergence += childConditional * Math.log(childConditional / randomChild);
+          // }
+          //
+          // noise = klDivergence < 0.5;
+          // log.info("KL-Divergence: {} - Noise less than: {}", klDivergence, 0.5);
+          
+        }
+        
       }
       
       if (noise || rare) {
