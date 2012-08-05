@@ -338,7 +338,7 @@ public final class PFPGrowth implements Callable<Void> {
    * 
    * @return Serialized String representation of List
    */
-  public static void saveFList(Iterable<Pair<String, Long>> flist, Parameters params,
+  public static void saveFList(Iterable<Pair<String, Long>> flist, //Parameters params,
       Configuration conf, Path flistPath)
       throws IOException {
     FileSystem fs = FileSystem.get(flistPath.toUri(), conf);
@@ -450,12 +450,12 @@ public final class PFPGrowth implements Callable<Void> {
    * @return Feature Frequency List
    */
   public static List<Pair<String, Long>> readFList(String countIn, int minSupport, int minFr,
-      int prunePct) throws IOException {
+      int prunePct, Configuration conf) throws IOException {
     
     Path parallelCountingPath = new Path(countIn, PARALLEL_COUNTING);
     
     Path path = new Path(parallelCountingPath, FILE_PATTERN);
-    Configuration conf = new Configuration();
+//    = new Configuration();
     // if (!FileSystem.get(path.toUri(), conf).exists(path)) {
     // throw new IOException("Cannot find flist file: " + path);
     // }
@@ -522,18 +522,20 @@ public final class PFPGrowth implements Callable<Void> {
     return result;
   }
   
-  private static int cacheFList(Parameters params, Configuration conf, String countIn,
+  public static int cacheFList(//Parameters params,
+		  Configuration conf, String countIn,
       int minSupport, int minFr, int prunePct) throws IOException {
     Path cachedPath = new Path(countIn, F_LIST);
     FileSystem fs = FileSystem.getLocal(conf);
     int result;
     if (fs.exists(cachedPath)) {
-      assert FPSTREAM;
+//      assert FPSTREAM;
       result = -1;
       DistributedCache.addCacheFile(cachedPath.toUri(), conf);
     } else {
-      List<Pair<String, Long>> flist = readFList(countIn, minSupport, minFr, prunePct);
-      saveFList(flist, params, conf, cachedPath);
+      List<Pair<String, Long>> flist = readFList(countIn, minSupport, minFr, prunePct, conf);
+      saveFList(flist, //params, 
+    		  conf, cachedPath);
       result = flist.size();
     }
     return result;
@@ -652,7 +654,7 @@ public final class PFPGrowth implements Callable<Void> {
       // List<Pair<String, Long>> fList = readFList(params);
       // saveFList(fList, params, conf);
       
-      int fListSize = cacheFList(params, conf, countIn, minSupport, minFr, prunePct);
+      int fListSize = cacheFList( conf, countIn, minSupport, minFr, prunePct);
       
       if (FPSTREAM) {
         fListSize = -1;
@@ -669,7 +671,7 @@ public final class PFPGrowth implements Callable<Void> {
         })) {
           // TODO: At such low frequency and support, does pruning out items with less frequency
           // than minFreq cause loosing itemsets that are frequent but through a longer time frame
-          cacheFList(params, conf,
+          cacheFList( conf,
               fs.listStatus(earlierWindow.getPath())[0].getPath().toString(),
               minSupport, minFr, prunePct);
         }
@@ -686,7 +688,7 @@ public final class PFPGrowth implements Callable<Void> {
       
       startParallelFPGrowth(params, conf);
     } else {
-      cacheFList(params, conf, countIn, minSupport, minFr, prunePct);
+      cacheFList( conf, countIn, minSupport, minFr, prunePct);
     }
     startAggregating(params, conf);
     

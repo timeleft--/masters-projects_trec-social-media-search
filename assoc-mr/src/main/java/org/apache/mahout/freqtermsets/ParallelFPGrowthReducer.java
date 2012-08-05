@@ -68,10 +68,10 @@ public class ParallelFPGrowthReducer extends Reducer<IntWritable,TransactionTree
 //  private double superiorityRatio;
   private boolean repeatHashTag;
 
-  private static class IteratorAdapter implements Iterator<Pair<List<Integer>,Long>> {
+  static class IteratorAdapter implements Iterator<Pair<List<Integer>,Long>> {
     private Iterator<Pair<IntArrayList,Long>> innerIter;
 
-    private IteratorAdapter(Iterator<Pair<IntArrayList,Long>> transactionIter) {
+    IteratorAdapter(Iterator<Pair<IntArrayList,Long>> transactionIter) {
       innerIter = transactionIter;
     }
 
