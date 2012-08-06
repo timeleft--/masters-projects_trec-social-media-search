@@ -28,6 +28,9 @@ import java.util.Map;
 import java.util.Map.Entry;
 
 import org.apache.commons.lang.mutable.MutableLong;
+import org.apache.commons.math.MathException;
+import org.apache.commons.math.distribution.TDistributionImpl;
+import org.apache.commons.math.stat.descriptive.SummaryStatistics;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.Writable;
@@ -36,12 +39,10 @@ import org.apache.mahout.common.Pair;
 import org.apache.mahout.common.iterator.sequencefile.SequenceFileIterable;
 import org.apache.mahout.freqtermsets.CountDescendingPairComparator;
 import org.apache.mahout.freqtermsets.PFPGrowth;
-import org.apache.mahout.freqtermsets.ParallelFPGrowthReducer.IteratorAdapter;
 import org.apache.mahout.freqtermsets.TransactionTree;
 import org.apache.mahout.freqtermsets.convertors.IntTransactionIterator;
 import org.apache.mahout.freqtermsets.convertors.StatusUpdater;
 import org.apache.mahout.freqtermsets.convertors.TopKPatternsOutputConverter;
-import org.apache.mahout.freqtermsets.convertors.TransactionIterator;
 import org.apache.mahout.freqtermsets.convertors.string.TopKStringPatterns;
 import org.apache.mahout.math.list.IntArrayList;
 import org.apache.mahout.math.map.OpenIntIntHashMap;
@@ -67,6 +68,7 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
 
 	private static final Logger log = LoggerFactory.getLogger(FPGrowth.class);
 	private static final float LEAST_NUM_CHILDREN_TO_VOTE_FOR_NOISE = 2;
+	private static final double SIGNIFICANCE = 0.05;
 
 	public static List<Pair<String, TopKStringPatterns>> readFrequentPattern(
 			Configuration conf, Path path) {
@@ -142,15 +144,15 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
 	 * @param numGroups
 	 * @param groupId
 	 * @throws IOException
+	 * @throws MathException
 	 */
 	public final void generateTopKFrequentPatterns(
-//			Iterator<Pair<List<A>, Long>> transactionStream,
-			TransactionTree cTree,
-			Collection<Pair<A, Long>> frequencyList, long minSupport, int k,
-			Collection<A> returnableFeatures,
+			// Iterator<Pair<List<A>, Long>> transactionStream,
+			TransactionTree cTree, Collection<Pair<A, Long>> frequencyList,
+			long minSupport, int k, Collection<A> returnableFeatures,
 			OutputCollector<A, List<Pair<List<A>, Long>>> output,
 			StatusUpdater updater, int groupId, int numGroups)
-			throws IOException {
+			throws IOException, MathException {
 
 		OpenIntObjectHashMap<A> reverseMapping = new OpenIntObjectHashMap<A>();
 		OpenObjectIntHashMap<A> attributeIdMapping = new OpenObjectIntHashMap<A>();
@@ -203,14 +205,13 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
 		log.info("Number of returnable features {} in group {}",
 				returnFeatures.size(), groupId);
 
-		generateTopKFrequentPatterns(
-				cTree, attributeIdMapping,
-//				new TransactionIterator<A>(
-//				transactionStream, attributeIdMapping), 
-				attributeFrequency,
-				minSupport, k, reverseMapping.size(), returnFeatures,
-				new TopKPatternsOutputConverter<A>(output, reverseMapping),
-				updater);
+		generateTopKFrequentPatterns(cTree,
+				attributeIdMapping,
+				// new TransactionIterator<A>(
+				// transactionStream, attributeIdMapping),
+				attributeFrequency, minSupport, k, reverseMapping.size(),
+				returnFeatures, new TopKPatternsOutputConverter<A>(output,
+						reverseMapping), updater);
 
 	}
 
@@ -318,19 +319,23 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
 	 * @param topKPatternsOutputCollector
 	 *            the outputCollector which transforms the given Pattern in
 	 *            integer format to the corresponding A Format
+	 * @throws MathException
 	 */
 	private void generateTopKFrequentPatterns(
-//			Iterator<Pair<int[], Long>> transactions,
+			// Iterator<Pair<int[], Long>> transactions,
 			TransactionTree cTree, OpenObjectIntHashMap<A> attributeIdMapping,
 			long[] attributeFrequency, long minSupport, int k,
 			int featureSetSize, Collection<Integer> returnFeatures,
 			TopKPatternsOutputConverter<A> topKPatternsOutputCollector,
-			StatusUpdater updater) throws IOException {
+			StatusUpdater updater) throws IOException, MathException {
 		// YA: BONSAAAAAAAII {
 		// FPTree tree = new FPTree(featureSetSize);
 		FPTree tree = null;
 		boolean change = true;
+		int pruneIters = 0;
+		IntArrayList pruneCount = new IntArrayList();
 		while (change) {
+			pruneCount.add(0);
 			change = false;
 			tree = new FPTree(featureSetSize);
 			OpenIntLongHashMap[] childJointFreq = new OpenIntLongHashMap[featureSetSize];
@@ -352,10 +357,13 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
 			}
 
 			// Constructing initial FPTree from the list of transactions
-			// YA Bonsai : To pass the tree itself the iterator now would work only with ints.. the A type argument is
-			// not checked in the constructor. TOD: remove the type argument and force using ints only
-			Iterator<Pair<int[], Long>> transactions = new IntTransactionIterator(cTree.iterator(), attributeIdMapping);
-			
+			// YA Bonsai : To pass the tree itself the iterator now would work
+			// only with ints.. the A type argument is
+			// not checked in the constructor. TOD: remove the type argument and
+			// force using ints only
+			Iterator<Pair<int[], Long>> transactions = new IntTransactionIterator(
+					cTree.iterator(), attributeIdMapping);
+
 			int nodecount = 0;
 			// int attribcount = 0;
 			int i = 0;
@@ -413,7 +421,7 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
 
 			// YA: BONSAAAAAAAII {
 			log.info("Bonsai prunining tree: {}", tree.toString());
-			
+
 			for (int a = 0; a < tree.getHeaderTableCount(); ++a) {
 				int attr = tree.getAttributeAtIndex(a);
 
@@ -425,19 +433,20 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
 					break;
 				}
 				if (sumChildSupport[attr] < attributeFrequency[attr]) {
+					// the case of . (full stop) as the next child
 					childJointFreq[attr]
 							.put(-1,
 									(long) (attributeFrequency[attr] - sumChildSupport[attr]));
 				}
 				float numChildren = childJointFreq[attr].size();
 
-				if (numChildren < LEAST_NUM_CHILDREN_TO_VOTE_FOR_NOISE) {
-					continue;
-				}
-				log.info(
+				// if (numChildren < LEAST_NUM_CHILDREN_TO_VOTE_FOR_NOISE) {
+				// continue;
+				// }
+				log.trace(
 						"Voting for noisiness of attribute {} with number of children: {}",
 						attr, numChildren);
-				log.info("Attribute support: {} - Total Children support: {}",
+				log.trace("Attribute support: {} - Total Children support: {}",
 						attributeFrequency[attr], sumChildSupport[attr]);
 				// EMD and the such.. the threshold isn't easy to define, and it
 				// also doesn't take into account the weights of children.
@@ -527,41 +536,148 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
 				// // noise = noiseVotes == numChildren;
 				// ////////////////////////////////////////////////////
 
-				// Kullback-liebler divergence from the uniform distribution
-				double randomChild = 1.0 / numChildren;
+				// // Kullback-liebler divergence from the uniform distribution
+				// double randomChild = 1.0 / numChildren;
+				// IntArrayList childAttrArr = childJointFreq[attr].keys();
+				//
+				// double klDivergence = 0;
+				// for (int c = 0; c < childAttrArr.size(); ++c) {
+				// double childConditional = 1.0
+				// * childJointFreq[attr].get(childAttrArr.get(c))
+				// / attributeFrequency[attr];
+				// if (childConditional == 0) {
+				// continue; // a7a!
+				// }
+				// klDivergence += childConditional
+				// * Math.log(childConditional / randomChild);
+				// }
+				//
+				// boolean noise = Math.abs(klDivergence) < 0.05;
+				// log.info("KL-Divergence: {} - Noise less than: {}",
+				// klDivergence, 0.05);
+				// //////////////////////////////////////
+				// Pair wise metric with different children
+				SummaryStatistics metricSummary = new SummaryStatistics();
+				// double[] metric = new double[(int) numChildren];
+
+				SummaryStatistics spreadSummary = new SummaryStatistics();
+				double uniformSpread = attributeFrequency[attr] / numChildren;
+				// If I don't take the . into account: sumChildSupport[attr] /
+				// numChildren;
+
+				double sumOfWeights = 0;
 				IntArrayList childAttrArr = childJointFreq[attr].keys();
-
-				double klDivergence = 0;
 				for (int c = 0; c < childAttrArr.size(); ++c) {
-					double childConditional = 1.0
-							* childJointFreq[attr].get(childAttrArr.get(c))
-							/ attributeFrequency[attr];
-					if (childConditional == 0) {
-						continue; // a7a!
+					int childAttr = childAttrArr.get(c);
+					double[][] contingencyTable = new double[2][2];
+					if (childAttr == -1) {
+						// this is meaningless, as yuleq will just be 1
+						contingencyTable[1][1] = childJointFreq[attr]
+								.get(childAttr);
+						contingencyTable[1][0] = sumChildSupport[attr];
+						// equals attributeFrequency[attr] -
+						// contingencyTable[1][1];
+						contingencyTable[0][1] = 0;
+						contingencyTable[0][0] = supportGrandTotal
+								- attributeFrequency[attr];
+					} else {
+						contingencyTable[1][1] = childJointFreq[attr]
+								.get(childAttr);
+						contingencyTable[1][0] = attributeFrequency[attr]
+								- contingencyTable[1][1];
+						contingencyTable[0][1] = attributeFrequency[childAttr]
+								- contingencyTable[1][1];
+						contingencyTable[0][0] = supportGrandTotal
+								- attributeFrequency[attr]
+								- attributeFrequency[childAttr]
+								+ contingencyTable[1][1];
+						// because of the meninglessness of yuleq in case of . }
+						double ad = contingencyTable[0][0]
+								* contingencyTable[1][1];
+						double bc = contingencyTable[0][1]
+								* contingencyTable[1][0];
+						double yuleq = (ad - bc) / (ad + bc);
+						double weight = attributeFrequency[childAttr];
+						sumOfWeights += weight;
+						metricSummary.addValue(Math.abs(yuleq * weight));
+						// metricSummary.addValue(yuleq * yuleq * weight);
 					}
-					klDivergence += childConditional
-							* Math.log(childConditional / randomChild);
+					spreadSummary.addValue(Math.abs(uniformSpread
+							- contingencyTable[1][1])
+							/ numChildren);
+					// spreadSummary.addValue(contingencyTable[1][1]); // *
+					// weight
 				}
+				// double weightedquadraticMean =
+				// Math.sqrt(metricSummary.getSum() / sumOfWeights);
+				double weightedMean = (metricSummary.getSum() / sumOfWeights);
 
-				boolean noise = Math.abs(klDivergence) < 0.05;
-				log.info("KL-Divergence: {} - Noise less than: {}",
-						klDivergence, 0.05);
+				boolean noise = false;
+				if(weightedMean < 0.6){
+					noise = true;
+				} else if(weightedMean < 0.9) {
+					// double spreadCentraltendency = (spreadSummary.getMax() -
+					// spreadSummary.getMin()) / 2.0;
+					// spreadSummary.getMean();
+					// double uniformSpread = sumChildSupport[attr] /
+					// numChildren;
 
+					// noise = Math.abs(spreadCentraltendency - uniformSpread) <
+					// 1e-4;
+
+					double spreadCentraltendency = spreadSummary.getMean();
+//							(spreadSummary.getMax() -
+//							 spreadSummary.getMin()) / 2.0;
+					if(spreadCentraltendency < 1e-6){
+						noise = true;
+					}
+
+					if (!noise && numChildren > 0) {
+						// see if the difference is statitically significant
+						double spreadCI = getConfidenceIntervalHalfWidth(
+								spreadSummary, SIGNIFICANCE);
+						spreadCentraltendency -= spreadCI;
+						if (spreadCentraltendency < 0) {
+							noise = true;
+						}
+						// // noise if the CI contains the uniform spread
+						// threshold
+						// if (spreadCentraltendency > uniformSpread) {
+						// noise = (spreadCentraltendency - spreadCI) <
+						// uniformSpread;
+						// } else {
+						// noise = (spreadCentraltendency + spreadCI) >
+						// uniformSpread;
+						// }
+					}
+				}
 				change |= noise;
 
 				if (noise) {
-					log.info(
-							"Pruning attribute with  freq {} and with child joint freq {}",
-							attributeFrequency[attr], childJointFreq[attr]);
+					log.info("Pruning attribute {} with child joint freq {}",
+							attr, childJointFreq[attr]);
 					returnFeatures.remove(attr);
 					attributeFrequency[attr] = -1;
+					pruneCount.set(pruneIters, pruneCount.get(pruneIters)+1);
 				}
 			}
+			++pruneIters;
 		}
 		log.info("Pruned tree: {}", tree.toString());
+		log.info("Prune iters: {} - Prune counts: {}", pruneIters, pruneCount.toString());
 		// } YA: Bonsai
 		fpGrowth(tree, minSupport, k, returnFeatures,
 				topKPatternsOutputCollector, updater);
+	}
+
+	private double getConfidenceIntervalHalfWidth(
+			SummaryStatistics summaryStatistics, double significance)
+			throws MathException {
+		TDistributionImpl tDist = new TDistributionImpl(
+				summaryStatistics.getN() - 1);
+		double a = tDist.inverseCumulativeProbability(1.0 - significance / 2);
+		return a * summaryStatistics.getStandardDeviation()
+				/ Math.sqrt(summaryStatistics.getN());
 	}
 
 	private static FrequentPatternMaxHeap growth(FPTree tree,

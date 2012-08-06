@@ -14,6 +14,7 @@ import java.util.Map.Entry;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.mutable.MutableLong;
+import org.apache.commons.math.MathException;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.IntWritable;
@@ -178,7 +179,7 @@ public class PruningTest {
 	}
 	
 	@Test
-	public void testPruneFPTree() throws IOException {
+	public void testPruneFPTree() throws IOException, MathException {
 		List<Pair<Integer, Long>> localFList = Lists.newArrayList();
 		for (Entry<Integer, MutableLong> fItem : cTree.generateFList()
 				.entrySet()) {

@@ -201,6 +201,12 @@
 			<version>1.9.0</version>
 			<scope>test</scope>
 		</dependency>
+		
+		    <dependency>
+      <groupId>nz.ac.waikato.cms.weka</groupId>
+      <artifactId>weka-stable</artifactId>
+      <version>3.6.7</version>
+    </dependency>
 	</dependencies>
 
 	<profiles>
