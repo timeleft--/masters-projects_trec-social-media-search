@@ -7,6 +7,7 @@ import java.nio.channels.Channels;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.math.stat.descriptive.SummaryStatistics;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.mahout.common.Pair;
 import org.apache.mahout.common.Parameters;
 import org.apache.mahout.freqtermsets.PFPGrowth;
@@ -44,7 +45,8 @@ public class DumpFList {
 //    params.set(PFPGrowth.COUNT_IN, inDir);
     
     SummaryStatistics flistStats = new SummaryStatistics();
-    for (Pair<String, Long> e : PFPGrowth.readFList(inDir,0,0,100)) {
+    Configuration conf = new Configuration();
+    for (Pair<String, Long> e : PFPGrowth.readFList(inDir,2,3,100, conf)) {
       wr.append(e.getFirst() + "\t" + e.getSecond() + "\n");
       flistStats.addValue(e.getFirst().length());
     }

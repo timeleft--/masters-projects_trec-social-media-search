@@ -36,6 +36,9 @@ import org.apache.mahout.common.Pair;
 import org.apache.mahout.common.iterator.sequencefile.SequenceFileIterable;
 import org.apache.mahout.freqtermsets.CountDescendingPairComparator;
 import org.apache.mahout.freqtermsets.PFPGrowth;
+import org.apache.mahout.freqtermsets.ParallelFPGrowthReducer.IteratorAdapter;
+import org.apache.mahout.freqtermsets.TransactionTree;
+import org.apache.mahout.freqtermsets.convertors.IntTransactionIterator;
 import org.apache.mahout.freqtermsets.convertors.StatusUpdater;
 import org.apache.mahout.freqtermsets.convertors.TopKPatternsOutputConverter;
 import org.apache.mahout.freqtermsets.convertors.TransactionIterator;
@@ -45,7 +48,6 @@ import org.apache.mahout.math.map.OpenIntIntHashMap;
 import org.apache.mahout.math.map.OpenIntLongHashMap;
 import org.apache.mahout.math.map.OpenIntObjectHashMap;
 import org.apache.mahout.math.map.OpenObjectIntHashMap;
-import org.apache.xerces.dom.ChildNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,7 +55,10 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
 /**
- * Implementation of PFGrowth Algorithm with FP-Bonsai pruning
+ * Implementation of PFGrowth Algorithm with FP-Bonsai pruning YA: The Bonsai
+ * pruning is really questionable.. i don't think it worked and there are enough
+ * patches adding and removing things related to it that I think it is now not
+ * part of the algorithm.
  * 
  * @param <A>
  *            object type used as the cell items in a transaction list
@@ -139,7 +144,8 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
 	 * @throws IOException
 	 */
 	public final void generateTopKFrequentPatterns(
-			Iterator<Pair<List<A>, Long>> transactionStream,
+//			Iterator<Pair<List<A>, Long>> transactionStream,
+			TransactionTree cTree,
 			Collection<Pair<A, Long>> frequencyList, long minSupport, int k,
 			Collection<A> returnableFeatures,
 			OutputCollector<A, List<Pair<List<A>, Long>>> output,
@@ -197,8 +203,11 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
 		log.info("Number of returnable features {} in group {}",
 				returnFeatures.size(), groupId);
 
-		generateTopKFrequentPatterns(new TransactionIterator<A>(
-				transactionStream, attributeIdMapping), attributeFrequency,
+		generateTopKFrequentPatterns(
+				cTree, attributeIdMapping,
+//				new TransactionIterator<A>(
+//				transactionStream, attributeIdMapping), 
+				attributeFrequency,
 				minSupport, k, reverseMapping.size(), returnFeatures,
 				new TopKPatternsOutputConverter<A>(output, reverseMapping),
 				updater);
@@ -311,38 +320,246 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
 	 *            integer format to the corresponding A Format
 	 */
 	private void generateTopKFrequentPatterns(
-			Iterator<Pair<int[], Long>> transactions,
+//			Iterator<Pair<int[], Long>> transactions,
+			TransactionTree cTree, OpenObjectIntHashMap<A> attributeIdMapping,
 			long[] attributeFrequency, long minSupport, int k,
 			int featureSetSize, Collection<Integer> returnFeatures,
 			TopKPatternsOutputConverter<A> topKPatternsOutputCollector,
 			StatusUpdater updater) throws IOException {
+		// YA: BONSAAAAAAAII {
+		// FPTree tree = new FPTree(featureSetSize);
+		FPTree tree = null;
+		boolean change = true;
+		while (change) {
+			change = false;
+			tree = new FPTree(featureSetSize);
+			OpenIntLongHashMap[] childJointFreq = new OpenIntLongHashMap[featureSetSize];
+			long[] sumChildSupport = new long[featureSetSize];
+			double supportGrandTotal = 0;
+			// } YA: BONSAAAAAAAII
 
-		FPTree tree = new FPTree(featureSetSize);
-		for (int i = 0; i < featureSetSize; i++) {
-			tree.addHeaderCount(i, attributeFrequency[i]);
-		}
+			for (int i = 0; i < featureSetSize; i++) {
+				tree.addHeaderCount(i, attributeFrequency[i]);
 
-		// Constructing initial FPTree from the list of transactions
-		int nodecount = 0;
-		// int attribcount = 0;
-		int i = 0;
-		while (transactions.hasNext()) {
-			Pair<int[], Long> transaction = transactions.next();
-			Arrays.sort(transaction.getFirst());
-			// attribcount += transaction.length;
-			nodecount += treeAddCount(tree, transaction.getFirst(),
-					transaction.getSecond(), minSupport, attributeFrequency);
-			i++;
-			if (i % 10000 == 0) {
-				log.info("FPTree Building: Read {} Transactions", i);
+				// YA: BONSAAAAAAAII {
+				if (attributeFrequency[i] < 0) {
+					continue; // this is an attribute not satisfying the
+								// monotone constraint
+				}
+				childJointFreq[i] = new OpenIntLongHashMap();
+				supportGrandTotal += attributeFrequency[i];
+				// } YA: Bonsai
+			}
+
+			// Constructing initial FPTree from the list of transactions
+			// YA Bonsai : To pass the tree itself the iterator now would work only with ints.. the A type argument is
+			// not checked in the constructor. TOD: remove the type argument and force using ints only
+			Iterator<Pair<int[], Long>> transactions = new IntTransactionIterator(cTree.iterator(), attributeIdMapping);
+			
+			int nodecount = 0;
+			// int attribcount = 0;
+			int i = 0;
+			while (transactions.hasNext()) {
+				Pair<int[], Long> transaction = transactions.next();
+				Arrays.sort(transaction.getFirst());
+				// attribcount += transaction.length;
+				// YA: Bonsai {
+				// nodecount += treeAddCount(tree, transaction.getFirst(),
+				// transaction.getSecond(), minSupport, attributeFrequency);
+				int temp = FPTree.ROOTNODEID;
+				boolean addCountMode = true;
+				for (int attribute : transaction.getFirst()) {
+					if (attributeFrequency[attribute] < 0) {
+						continue; // this is an attribute not satisfying the
+									// monotone constraint
+					}
+					if (attributeFrequency[attribute] < minSupport) {
+						break;
+					}
+					if (tree.attribute(temp) != -1) { // Root node
+						childJointFreq[tree.attribute(temp)].put(
+								attribute,
+								childJointFreq[tree.attribute(temp)]
+										.get(attribute)
+										+ transaction.getSecond());
+						sumChildSupport[tree.attribute(temp)] += transaction
+								.getSecond();
+					}
+					int child;
+					if (addCountMode) {
+						child = tree.childWithAttribute(temp, attribute);
+						if (child == -1) {
+							addCountMode = false;
+						} else {
+							tree.addCount(child, transaction.getSecond());
+							temp = child;
+						}
+					}
+					if (!addCountMode) {
+						child = tree.createNode(temp, attribute,
+								transaction.getSecond());
+						temp = child;
+						nodecount++;
+					}
+				}
+				// } YA Bonsai
+				i++;
+				if (i % 10000 == 0) {
+					log.info("FPTree Building: Read {} Transactions", i);
+				}
+			}
+
+			log.info("Number of Nodes in the FP Tree: {}", nodecount);
+
+			// YA: BONSAAAAAAAII {
+			log.info("Bonsai prunining tree: {}", tree.toString());
+			
+			for (int a = 0; a < tree.getHeaderTableCount(); ++a) {
+				int attr = tree.getAttributeAtIndex(a);
+
+				if (attributeFrequency[attr] < 0) {
+					continue; // this is an attribute not satisfying the
+								// monotone constraint
+				}
+				if (attributeFrequency[attr] < minSupport) {
+					break;
+				}
+				if (sumChildSupport[attr] < attributeFrequency[attr]) {
+					childJointFreq[attr]
+							.put(-1,
+									(long) (attributeFrequency[attr] - sumChildSupport[attr]));
+				}
+				float numChildren = childJointFreq[attr].size();
+
+				if (numChildren < LEAST_NUM_CHILDREN_TO_VOTE_FOR_NOISE) {
+					continue;
+				}
+				log.info(
+						"Voting for noisiness of attribute {} with number of children: {}",
+						attr, numChildren);
+				log.info("Attribute support: {} - Total Children support: {}",
+						attributeFrequency[attr], sumChildSupport[attr]);
+				// EMD and the such.. the threshold isn't easy to define, and it
+				// also doesn't take into account the weights of children.
+				// // double uniformProb = 1.0 / numChildren;
+				// // double uniformProb = sumChildSupport[attr] /
+				// supportGrandTotal;
+				// double uniformFreq = attributeFrequency[attr] / numChildren;
+				// IntArrayList childAttrArr = childJointFreq[attr].keys();
+				// // IntArrayList childAttrArr = new IntArrayList();
+				// // childJointFreq[attr].keysSortedByValue(childAttrArr);
+				// double totalDifference = 0;
+				// double sumOfWeights = 0;
+				// // double emd = 0;
+				// for (int c = childAttrArr.size() - 1; c >=0 ; --c) {
+				// int childAttr = childAttrArr.get(c);
+				// double childJF = childJointFreq[attr].get(childAttr);
+				// double childWeight = attributeFrequency[childAttr];
+				// totalDifference += childWeight * Math.abs(childJF -
+				// uniformFreq);
+				// sumOfWeights += childWeight;
+				//
+				// // double jointProb = childJF /
+				// // supportGrandTotal;
+				// // double childProb = attributeFrequency[childAttr] /
+				// // supportGrandTotal;
+				// // double childConditional = childJF /
+				// attributeFrequency[attr];
+				// // emd = childConditional + emd - uniformProb;
+				// // emd = childJF + emd - uniformFreq;
+				// // totalDifference += Math.abs(emd);
+				// }
+				// // Probability (D > observed ) = QKS Ne + 0.12 + 0.11/ Ne D
+				// // double pNotUniform = totalDifference / attrSupport;
+				// // double threshold = (numChildren * (numChildren - 1) * 1.0)
+				// // / (2.0 * attributeFrequency[attr]);
+				// double weightedDiff = totalDifference / sumOfWeights;
+				// double threshold = sumOfWeights / 2.0; // each child can be
+				// up to
+				// // 1 over or below the
+				// // uniform freq
+				// boolean noise = weightedDiff < threshold;
+				// log.info("EMD: {} - Threshold: {}", weightedDiff, threshold);
+				// ///////////////////////////////////
+				// Log odds.. this is my hartala, and it needs ot be shifted
+				// according to the number of children
+				// // // if there is one child then the prob of random choice
+				// // will be
+				// // // 1, so anything would be
+				// // // noise
+				// // // and if there are few then the probability that this is
+				// // // actually noise declines
+				// // if (numChildren >= LEAST_NUM_CHILDREN_TO_VOTE_FOR_NOISE)
+				// // {
+				// // log.info(
+				// //
+				// "Voting for noisiness of attribute {} with number of children: {}",
+				// // currentAttribute, numChildren);
+				// // log.info(
+				// // "Attribute support: {} - Total Children support: {}",
+				// // attrSupport, sumOfChildSupport);
+				// // int noiseVotes = 0;
+				// // double randomSelectionLogOdds = 1.0 / numChildren;
+				// // randomSelectionLogOdds = Math.log(randomSelectionLogOdds
+				// // / (1 - randomSelectionLogOdds));
+				// // randomSelectionLogOdds =
+				// // Math.abs(randomSelectionLogOdds);
+				// //
+				// // IntArrayList childAttrArr = childJointFreq.keys();
+				// // for (int c = 0; c < childAttrArr.size(); ++c) {
+				// // double childConditional = 1.0
+				// // * childJointFreq.get(childAttrArr.get(c))
+				// // / sumOfChildSupport; // attrSupport;
+				// // double childLogOdds = Math.log(childConditional
+				// // / (1 - childConditional));
+				// // if (Math.abs(childLogOdds) <= randomSelectionLogOdds) {
+				// // // probability of the child given me is different
+				// // // than
+				// // // probability of choosing the
+				// // // child randomly
+				// // // from among my children.. using absolute log odds
+				// // // because they are symmetric
+				// // ++noiseVotes;
+				// // }
+				// // }
+				// // log.info("Noisy if below: {} - Noise votes: {}",
+				// // randomSelectionLogOdds, noiseVotes);
+				// // noise = noiseVotes == numChildren;
+				// ////////////////////////////////////////////////////
+
+				// Kullback-liebler divergence from the uniform distribution
+				double randomChild = 1.0 / numChildren;
+				IntArrayList childAttrArr = childJointFreq[attr].keys();
+
+				double klDivergence = 0;
+				for (int c = 0; c < childAttrArr.size(); ++c) {
+					double childConditional = 1.0
+							* childJointFreq[attr].get(childAttrArr.get(c))
+							/ attributeFrequency[attr];
+					if (childConditional == 0) {
+						continue; // a7a!
+					}
+					klDivergence += childConditional
+							* Math.log(childConditional / randomChild);
+				}
+
+				boolean noise = Math.abs(klDivergence) < 0.05;
+				log.info("KL-Divergence: {} - Noise less than: {}",
+						klDivergence, 0.05);
+
+				change |= noise;
+
+				if (noise) {
+					log.info(
+							"Pruning attribute with  freq {} and with child joint freq {}",
+							attributeFrequency[attr], childJointFreq[attr]);
+					returnFeatures.remove(attr);
+					attributeFrequency[attr] = -1;
+				}
 			}
 		}
-
-		log.info("Number of Nodes in the FP Tree: {}", nodecount);
-
-//		pruneFPTree(minSupport, tree);
-//		log.info("Pruned Tree: {}", tree.toString());
-		// return
+		log.info("Pruned tree: {}", tree.toString());
+		// } YA: Bonsai
 		fpGrowth(tree, minSupport, k, returnFeatures,
 				topKPatternsOutputCollector, updater);
 	}
@@ -661,205 +878,205 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
 
 	}
 
-	// The FPTree strcture doesn't really support pruning.. 
-//	private static void pruneFPTree(long minSupport, FPTree tree) {
-//		log.info("Prunining conditional Tree: {}", tree.toString());
-//		for (int i = 0; i < tree.getHeaderTableCount(); i++) {
-//			// for (int i = tree.getHeaderTableCount() - 1; i >= 0; --i) {
-//			int currentAttribute = tree.getAttributeAtIndex(i);
-//			float attrSupport = tree.getHeaderSupportCount(currentAttribute);
-//			boolean rare = attrSupport < minSupport;
-//			boolean noise = false;
-//
-//			if (!rare) {
-//
-//				OpenIntLongHashMap childJointFreq = new OpenIntLongHashMap();
-//				float sumOfChildSupport = 0;
-//				int nextNode = tree.getHeaderNext(currentAttribute);
-//				while (nextNode != -1) {
-//					int mychildCount = tree.childCount(nextNode);
-//
-//					for (int j = 0; j < mychildCount; j++) {
-//						int myChildId = tree.childAtIndex(nextNode, j);
-//						int myChildAttr = tree.attribute(myChildId);
-//						long childSupport = tree.count(myChildId);
-//						sumOfChildSupport += childSupport;
-//						childJointFreq.put(myChildAttr,
-//								childJointFreq.get(myChildAttr) + childSupport);
-//					}
-//					nextNode = tree.next(nextNode);
-//				}
-//
-//				if (sumOfChildSupport < attrSupport) {
-//					childJointFreq.put(-1,
-//							(long) (attrSupport - sumOfChildSupport));
-//				}
-//				float numChildren = childJointFreq.size();
-//
-//				if (numChildren >= LEAST_NUM_CHILDREN_TO_VOTE_FOR_NOISE) {
-//					log.info(
-//							"Voting for noisiness of attribute {} with number of children: {}",
-//							currentAttribute, numChildren);
-//					log.info(
-//							"Attribute support: {} - Total Children support: {}",
-//							attrSupport, sumOfChildSupport);
-//					double uniformProb = 1.0 / numChildren;
-//
-//					IntArrayList childAttrArr = childJointFreq.keys();
-//					double totalDifference = 0;
-//					double emd = 0;
-//					for (int c = 0; c < childAttrArr.size(); ++c) {
-//						double childConditional = 1.0
-//								* childJointFreq.get(childAttrArr.get(c))
-//								/ attrSupport;
-//						emd = childConditional + emd - uniformProb;
-//						totalDifference += Math.abs(emd);
-//					}
-//					// Probability (D > observed ) = QKS Ne + 0.12 + 0.11/ Ne D
-//					// double pNotUniform = totalDifference / attrSupport;
-//					double threshold = (attrSupport / numChildren);
-//					noise = totalDifference < threshold;
-//					log.info("EMD: {} - Threshold: {}", totalDifference,
-//							threshold);
-//
-//					// // if there is one child then the prob of random choice
-//					// will be
-//					// // 1, so anything would be
-//					// // noise
-//					// // and if there are few then the probability that this is
-//					// // actually noise declines
-//					// if (numChildren >= LEAST_NUM_CHILDREN_TO_VOTE_FOR_NOISE)
-//					// {
-//					// log.info(
-//					// "Voting for noisiness of attribute {} with number of children: {}",
-//					// currentAttribute, numChildren);
-//					// log.info(
-//					// "Attribute support: {} - Total Children support: {}",
-//					// attrSupport, sumOfChildSupport);
-//					// int noiseVotes = 0;
-//					// double randomSelectionLogOdds = 1.0 / numChildren;
-//					// randomSelectionLogOdds = Math.log(randomSelectionLogOdds
-//					// / (1 - randomSelectionLogOdds));
-//					// randomSelectionLogOdds =
-//					// Math.abs(randomSelectionLogOdds);
-//					//
-//					// IntArrayList childAttrArr = childJointFreq.keys();
-//					// for (int c = 0; c < childAttrArr.size(); ++c) {
-//					// double childConditional = 1.0
-//					// * childJointFreq.get(childAttrArr.get(c))
-//					// / sumOfChildSupport; // attrSupport;
-//					// double childLogOdds = Math.log(childConditional
-//					// / (1 - childConditional));
-//					// if (Math.abs(childLogOdds) <= randomSelectionLogOdds) {
-//					// // probability of the child given me is different
-//					// // than
-//					// // probability of choosing the
-//					// // child randomly
-//					// // from among my children.. using absolute log odds
-//					// // because they are symmetric
-//					// ++noiseVotes;
-//					// }
-//					// }
-//					// log.info("Noisy if below: {} - Noise votes: {}",
-//					// randomSelectionLogOdds, noiseVotes);
-//					// noise = noiseVotes == numChildren;
-//
-//					// double randomChild = 1.0 / numChildren;
-//					// IntArrayList childAttrArr = childJointFreq.keys();
-//					//
-//					// float klDivergence = 0;
-//					// for (int c = 0; c < childAttrArr.size(); ++c) {
-//					// double childConditional = 1.0
-//					// * childJointFreq.get(childAttrArr.get(c))
-//					// / attrSupport; // sumOfChildSupport;
-//					// if (childConditional == 0) {
-//					// continue; // a7a!
-//					// }
-//					// klDivergence += childConditional
-//					// * Math.log(childConditional / randomChild);
-//					// }
-//					//
-//					// noise = Math.abs(klDivergence) < 0.05;
-//					// log.info("KL-Divergence: {} - Noise less than: {}",
-//					// klDivergence, 0.05);
-//
-//				}
-//
-//			}
-//
-//			if (noise || rare) {
-//				int nextNode = tree.getHeaderNext(currentAttribute);
-//				tree.removeHeaderNext(currentAttribute);
-//				while (nextNode != -1) {
-//
-//					int mychildCount = tree.childCount(nextNode);
-//					int parentNode = tree.parent(nextNode);
-//
-//					if (mychildCount > 0) {
-//						tree.replaceChild(parentNode, nextNode,
-//								tree.childAtIndex(nextNode, 0));
-//						for (int j = 1; j < mychildCount; j++) {
-//							Integer myChildId = tree.childAtIndex(nextNode, j);
-//							// YA: This will work for the first child only
-//							// tree.replaceChild(parentNode, nextNode,
-//							// myChildId);
-//							tree.addChild(parentNode, myChildId);
-//							tree.setParent(myChildId, parentNode);
-//						}
-//					} else {
-//						// There is no support for deleting children.. so leaf
-//						// nodes will stay!!
-//						// tree.replaceChild(parentNode, nextNode, childnodeId)
-//					}
-//					nextNode = tree.next(nextNode);
-//				}
-//
-//			}
-//		}
-//
-////		for (int i = 0; i < tree.getHeaderTableCount(); i++) {
-////			int currentAttribute = tree.getAttributeAtIndex(i);
-////			int nextNode = tree.getHeaderNext(currentAttribute);
-////
-////			OpenIntIntHashMap prevNode = new OpenIntIntHashMap();
-////			int justPrevNode = -1;
-////			while (nextNode != -1) {
-////
-////				int parent = tree.parent(nextNode);
-////
-////				if (prevNode.containsKey(parent)) {
-////					int prevNodeId = prevNode.get(parent);
-////					if (tree.childCount(prevNodeId) <= 1
-////							&& tree.childCount(nextNode) <= 1) {
-////						tree.addCount(prevNodeId, tree.count(nextNode));
-////						tree.addCount(nextNode, -1 * tree.count(nextNode));
-////						if (tree.childCount(nextNode) == 1) {
-////							tree.addChild(prevNodeId,
-////									tree.childAtIndex(nextNode, 0));
-////							tree.setParent(tree.childAtIndex(nextNode, 0),
-////									prevNodeId);
-////						}
-////						tree.setNext(justPrevNode, tree.next(nextNode));
-////					}
-////				} else {
-////					prevNode.put(parent, nextNode);
-////				}
-////				justPrevNode = nextNode;
-////				nextNode = tree.next(nextNode);
-////			}
-////		}
-//
-//		// prune Conditional Tree
-//
-//	}
+	// The FPTree strcture doesn't really support pruning..
+	// private static void pruneFPTree(long minSupport, FPTree tree) {
+	// log.info("Prunining conditional Tree: {}", tree.toString());
+	// for (int i = 0; i < tree.getHeaderTableCount(); i++) {
+	// // for (int i = tree.getHeaderTableCount() - 1; i >= 0; --i) {
+	// int currentAttribute = tree.getAttributeAtIndex(i);
+	// float attrSupport = tree.getHeaderSupportCount(currentAttribute);
+	// boolean rare = attrSupport < minSupport;
+	// boolean noise = false;
+	//
+	// if (!rare) {
+	//
+	// OpenIntLongHashMap childJointFreq = new OpenIntLongHashMap();
+	// float sumOfChildSupport = 0;
+	// int nextNode = tree.getHeaderNext(currentAttribute);
+	// while (nextNode != -1) {
+	// int mychildCount = tree.childCount(nextNode);
+	//
+	// for (int j = 0; j < mychildCount; j++) {
+	// int myChildId = tree.childAtIndex(nextNode, j);
+	// int myChildAttr = tree.attribute(myChildId);
+	// long childSupport = tree.count(myChildId);
+	// sumOfChildSupport += childSupport;
+	// childJointFreq.put(myChildAttr,
+	// childJointFreq.get(myChildAttr) + childSupport);
+	// }
+	// nextNode = tree.next(nextNode);
+	// }
+	//
+	// if (sumOfChildSupport < attrSupport) {
+	// childJointFreq.put(-1,
+	// (long) (attrSupport - sumOfChildSupport));
+	// }
+	// float numChildren = childJointFreq.size();
+	//
+	// if (numChildren >= LEAST_NUM_CHILDREN_TO_VOTE_FOR_NOISE) {
+	// log.info(
+	// "Voting for noisiness of attribute {} with number of children: {}",
+	// currentAttribute, numChildren);
+	// log.info(
+	// "Attribute support: {} - Total Children support: {}",
+	// attrSupport, sumOfChildSupport);
+	// double uniformProb = 1.0 / numChildren;
+	//
+	// IntArrayList childAttrArr = childJointFreq.keys();
+	// double totalDifference = 0;
+	// double emd = 0;
+	// for (int c = 0; c < childAttrArr.size(); ++c) {
+	// double childConditional = 1.0
+	// * childJointFreq.get(childAttrArr.get(c))
+	// / attrSupport;
+	// emd = childConditional + emd - uniformProb;
+	// totalDifference += Math.abs(emd);
+	// }
+	// // Probability (D > observed ) = QKS Ne + 0.12 + 0.11/ Ne D
+	// // double pNotUniform = totalDifference / attrSupport;
+	// double threshold = (attrSupport / numChildren);
+	// noise = totalDifference < threshold;
+	// log.info("EMD: {} - Threshold: {}", totalDifference,
+	// threshold);
+	//
+	// // // if there is one child then the prob of random choice
+	// // will be
+	// // // 1, so anything would be
+	// // // noise
+	// // // and if there are few then the probability that this is
+	// // // actually noise declines
+	// // if (numChildren >= LEAST_NUM_CHILDREN_TO_VOTE_FOR_NOISE)
+	// // {
+	// // log.info(
+	// // "Voting for noisiness of attribute {} with number of children: {}",
+	// // currentAttribute, numChildren);
+	// // log.info(
+	// // "Attribute support: {} - Total Children support: {}",
+	// // attrSupport, sumOfChildSupport);
+	// // int noiseVotes = 0;
+	// // double randomSelectionLogOdds = 1.0 / numChildren;
+	// // randomSelectionLogOdds = Math.log(randomSelectionLogOdds
+	// // / (1 - randomSelectionLogOdds));
+	// // randomSelectionLogOdds =
+	// // Math.abs(randomSelectionLogOdds);
+	// //
+	// // IntArrayList childAttrArr = childJointFreq.keys();
+	// // for (int c = 0; c < childAttrArr.size(); ++c) {
+	// // double childConditional = 1.0
+	// // * childJointFreq.get(childAttrArr.get(c))
+	// // / sumOfChildSupport; // attrSupport;
+	// // double childLogOdds = Math.log(childConditional
+	// // / (1 - childConditional));
+	// // if (Math.abs(childLogOdds) <= randomSelectionLogOdds) {
+	// // // probability of the child given me is different
+	// // // than
+	// // // probability of choosing the
+	// // // child randomly
+	// // // from among my children.. using absolute log odds
+	// // // because they are symmetric
+	// // ++noiseVotes;
+	// // }
+	// // }
+	// // log.info("Noisy if below: {} - Noise votes: {}",
+	// // randomSelectionLogOdds, noiseVotes);
+	// // noise = noiseVotes == numChildren;
+	//
+	// // double randomChild = 1.0 / numChildren;
+	// // IntArrayList childAttrArr = childJointFreq.keys();
+	// //
+	// // float klDivergence = 0;
+	// // for (int c = 0; c < childAttrArr.size(); ++c) {
+	// // double childConditional = 1.0
+	// // * childJointFreq.get(childAttrArr.get(c))
+	// // / attrSupport; // sumOfChildSupport;
+	// // if (childConditional == 0) {
+	// // continue; // a7a!
+	// // }
+	// // klDivergence += childConditional
+	// // * Math.log(childConditional / randomChild);
+	// // }
+	// //
+	// // noise = Math.abs(klDivergence) < 0.05;
+	// // log.info("KL-Divergence: {} - Noise less than: {}",
+	// // klDivergence, 0.05);
+	//
+	// }
+	//
+	// }
+	//
+	// if (noise || rare) {
+	// int nextNode = tree.getHeaderNext(currentAttribute);
+	// tree.removeHeaderNext(currentAttribute);
+	// while (nextNode != -1) {
+	//
+	// int mychildCount = tree.childCount(nextNode);
+	// int parentNode = tree.parent(nextNode);
+	//
+	// if (mychildCount > 0) {
+	// tree.replaceChild(parentNode, nextNode,
+	// tree.childAtIndex(nextNode, 0));
+	// for (int j = 1; j < mychildCount; j++) {
+	// Integer myChildId = tree.childAtIndex(nextNode, j);
+	// // YA: This will work for the first child only
+	// // tree.replaceChild(parentNode, nextNode,
+	// // myChildId);
+	// tree.addChild(parentNode, myChildId);
+	// tree.setParent(myChildId, parentNode);
+	// }
+	// } else {
+	// // There is no support for deleting children.. so leaf
+	// // nodes will stay!!
+	// // tree.replaceChild(parentNode, nextNode, childnodeId)
+	// }
+	// nextNode = tree.next(nextNode);
+	// }
+	//
+	// }
+	// }
+	//
+	// // for (int i = 0; i < tree.getHeaderTableCount(); i++) {
+	// // int currentAttribute = tree.getAttributeAtIndex(i);
+	// // int nextNode = tree.getHeaderNext(currentAttribute);
+	// //
+	// // OpenIntIntHashMap prevNode = new OpenIntIntHashMap();
+	// // int justPrevNode = -1;
+	// // while (nextNode != -1) {
+	// //
+	// // int parent = tree.parent(nextNode);
+	// //
+	// // if (prevNode.containsKey(parent)) {
+	// // int prevNodeId = prevNode.get(parent);
+	// // if (tree.childCount(prevNodeId) <= 1
+	// // && tree.childCount(nextNode) <= 1) {
+	// // tree.addCount(prevNodeId, tree.count(nextNode));
+	// // tree.addCount(nextNode, -1 * tree.count(nextNode));
+	// // if (tree.childCount(nextNode) == 1) {
+	// // tree.addChild(prevNodeId,
+	// // tree.childAtIndex(nextNode, 0));
+	// // tree.setParent(tree.childAtIndex(nextNode, 0),
+	// // prevNodeId);
+	// // }
+	// // tree.setNext(justPrevNode, tree.next(nextNode));
+	// // }
+	// // } else {
+	// // prevNode.put(parent, nextNode);
+	// // }
+	// // justPrevNode = nextNode;
+	// // nextNode = tree.next(nextNode);
+	// // }
+	// // }
+	//
+	// // prune Conditional Tree
+	//
+	// }
 
 	private static void pruneFPTree(long minSupport, FPTree tree) {
-		if(log.isTraceEnabled())
-		log.trace("Prunining conditional Tree: {}", tree.toString());
+		if (log.isTraceEnabled())
+			log.trace("Prunining conditional Tree: {}", tree.toString());
 		for (int i = 0; i < tree.getHeaderTableCount(); i++) {
 			int currentAttribute = tree.getAttributeAtIndex(i);
 			float attrSupport = tree.getHeaderSupportCount(currentAttribute);
-			if(attrSupport < minSupport){
+			if (attrSupport < minSupport) {
 				int nextNode = tree.getHeaderNext(currentAttribute);
 				tree.removeHeaderNext(currentAttribute);
 				while (nextNode != -1) {
@@ -925,52 +1142,53 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
 
 	}
 
-	/**
-	 * Create FPTree with node counts incremented by addCount variable given the
-	 * root node and the List of Attributes in transaction sorted by support
-	 * 
-	 * @param tree
-	 *            object to which the transaction has to be added to
-	 * @param myList
-	 *            List of transactions sorted by support
-	 * @param addCount
-	 *            amount by which the Node count has to be incremented
-	 * @param minSupport
-	 *            the MutableLong value which contains the current
-	 *            value(dynamic) of support
-	 * @param attributeFrequency
-	 *            the list of attributes and their frequency
-	 * @return the number of new nodes added
-	 */
-	private static int treeAddCount(FPTree tree, int[] myList, long addCount,
-			long minSupport, long[] attributeFrequency) {
-
-		int temp = FPTree.ROOTNODEID;
-		int ret = 0;
-		boolean addCountMode = true;
-
-		for (int attribute : myList) {
-			if (attributeFrequency[attribute] < minSupport) {
-				return ret;
-			}
-			int child;
-			if (addCountMode) {
-				child = tree.childWithAttribute(temp, attribute);
-				if (child == -1) {
-					addCountMode = false;
-				} else {
-					tree.addCount(child, addCount);
-					temp = child;
-				}
-			}
-			if (!addCountMode) {
-				child = tree.createNode(temp, attribute, addCount);
-				temp = child;
-				ret++;
-			}
-		}
-
-		return ret;
-
-	}
+	// /**
+	// * Create FPTree with node counts incremented by addCount variable given
+	// the
+	// * root node and the List of Attributes in transaction sorted by support
+	// *
+	// * @param tree
+	// * object to which the transaction has to be added to
+	// * @param myList
+	// * List of transactions sorted by support
+	// * @param addCount
+	// * amount by which the Node count has to be incremented
+	// * @param minSupport
+	// * the MutableLong value which contains the current
+	// * value(dynamic) of support
+	// * @param attributeFrequency
+	// * the list of attributes and their frequency
+	// * @return the number of new nodes added
+	// */
+	// private static int treeAddCount(FPTree tree, int[] myList, long addCount,
+	// long minSupport, long[] attributeFrequency) {
+	//
+	// int temp = FPTree.ROOTNODEID;
+	// int ret = 0;
+	// boolean addCountMode = true;
+	//
+	// for (int attribute : myList) {
+	// if (attributeFrequency[attribute] < minSupport) {
+	// return ret;
+	// }
+	// int child;
+	// if (addCountMode) {
+	// child = tree.childWithAttribute(temp, attribute);
+	// if (child == -1) {
+	// addCountMode = false;
+	// } else {
+	// tree.addCount(child, addCount);
+	// temp = child;
+	// }
+	// }
+	// if (!addCountMode) {
+	// child = tree.createNode(temp, attribute, addCount);
+	// temp = child;
+	// ret++;
+	// }
+	// }
+	//
+	// return ret;
+	//
+	// }
 }
