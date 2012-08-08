@@ -29,8 +29,10 @@ import java.util.Map.Entry;
 
 import org.apache.commons.lang.mutable.MutableLong;
 import org.apache.commons.math.MathException;
+import org.apache.commons.math.distribution.ChiSquaredDistributionImpl;
 import org.apache.commons.math.distribution.TDistributionImpl;
 import org.apache.commons.math.stat.descriptive.SummaryStatistics;
+import org.apache.commons.math.stat.inference.ChiSquareTestImpl;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.Writable;
@@ -333,9 +335,13 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
 		FPTree tree = null;
 		boolean change = true;
 		int pruneIters = 0;
-		IntArrayList pruneCount = new IntArrayList();
+		IntArrayList pruneByContingencyCount = new IntArrayList();
+		IntArrayList pruneBySpreadCount = new IntArrayList();
+		
 		while (change) {
-			pruneCount.add(0);
+			pruneByContingencyCount.add(0);
+			pruneBySpreadCount.add(0);
+			
 			change = false;
 			tree = new FPTree(featureSetSize);
 			OpenIntLongHashMap[] childJointFreq = new OpenIntLongHashMap[featureSetSize];
@@ -560,8 +566,10 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
 				SummaryStatistics metricSummary = new SummaryStatistics();
 				// double[] metric = new double[(int) numChildren];
 
-				SummaryStatistics spreadSummary = new SummaryStatistics();
-				double uniformSpread = attributeFrequency[attr] / numChildren;
+				// SummaryStatistics spreadSummary = new SummaryStatistics();
+				// double uniformSpread = attributeFrequency[attr] /
+				// numChildren;
+				double goodnessOfFit = 0.0;
 				// If I don't take the . into account: sumChildSupport[attr] /
 				// numChildren;
 
@@ -602,54 +610,70 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
 						metricSummary.addValue(Math.abs(yuleq * weight));
 						// metricSummary.addValue(yuleq * yuleq * weight);
 					}
-					spreadSummary.addValue(Math.abs(uniformSpread
-							- contingencyTable[1][1])
-							/ numChildren);
+					// spreadSummary.addValue(Math.abs(uniformSpread
+					// - contingencyTable[1][1])
+					// / numChildren);
 					// spreadSummary.addValue(contingencyTable[1][1]); // *
 					// weight
+					goodnessOfFit += contingencyTable[1][1]
+							* contingencyTable[1][1];
 				}
 				// double weightedquadraticMean =
 				// Math.sqrt(metricSummary.getSum() / sumOfWeights);
 				double weightedMean = (metricSummary.getSum() / sumOfWeights);
 
 				boolean noise = false;
-				if(weightedMean < 0.6){
-					noise = true;
-				} else if(weightedMean < 0.9) {
-					// double spreadCentraltendency = (spreadSummary.getMax() -
-					// spreadSummary.getMin()) / 2.0;
-					// spreadSummary.getMean();
-					// double uniformSpread = sumChildSupport[attr] /
-					// numChildren;
-
-					// noise = Math.abs(spreadCentraltendency - uniformSpread) <
-					// 1e-4;
-
-					double spreadCentraltendency = spreadSummary.getMean();
-//							(spreadSummary.getMax() -
-//							 spreadSummary.getMin()) / 2.0;
-					if(spreadCentraltendency < 1e-6){
+//				if (weightedMean < 0.5) {
+//					pruneByContingencyCount.set(pruneIters, pruneByContingencyCount.get(pruneIters) + 1);
+//					noise = true;
+//				} else if (weightedMean < 0.95) {
+				if(numChildren > 1){
+					goodnessOfFit /= (attributeFrequency[attr] / numChildren);
+					goodnessOfFit -= attributeFrequency[attr];
+					ChiSquaredDistributionImpl chisqDist = new ChiSquaredDistributionImpl(
+							numChildren - 1);
+					double criticalPoint = chisqDist
+							.inverseCumulativeProbability(1.0 - SIGNIFICANCE / 2.0);
+					if (goodnessOfFit < criticalPoint) {
+						pruneBySpreadCount.set(pruneIters, pruneBySpreadCount.get(pruneIters) + 1);
 						noise = true;
 					}
-
-					if (!noise && numChildren > 0) {
-						// see if the difference is statitically significant
-						double spreadCI = getConfidenceIntervalHalfWidth(
-								spreadSummary, SIGNIFICANCE);
-						spreadCentraltendency -= spreadCI;
-						if (spreadCentraltendency < 0) {
-							noise = true;
-						}
-						// // noise if the CI contains the uniform spread
-						// threshold
-						// if (spreadCentraltendency > uniformSpread) {
-						// noise = (spreadCentraltendency - spreadCI) <
-						// uniformSpread;
-						// } else {
-						// noise = (spreadCentraltendency + spreadCI) >
-						// uniformSpread;
-						// }
-					}
+					// // double spreadCentraltendency = (spreadSummary.getMax()
+					// -
+					// // spreadSummary.getMin()) / 2.0;
+					// // spreadSummary.getMean();
+					// // double uniformSpread = sumChildSupport[attr] /
+					// // numChildren;
+					//
+					// // noise = Math.abs(spreadCentraltendency -
+					// uniformSpread) <
+					// // 1e-4;
+					//
+					// double spreadCentraltendency = spreadSummary.getMean();
+					// // (spreadSummary.getMax() -
+					// // spreadSummary.getMin()) / 2.0;
+					// if(spreadCentraltendency < 1e-6){
+					// noise = true;
+					// }
+					//
+					// if (!noise && numChildren > 0) {
+					// // see if the difference is statitically significant
+					// double spreadCI = getConfidenceIntervalHalfWidth(
+					// spreadSummary, SIGNIFICANCE);
+					// spreadCentraltendency -= spreadCI;
+					// if (spreadCentraltendency < 0) {
+					// noise = true;
+					// }
+					// // // noise if the CI contains the uniform spread
+					// // threshold
+					// // if (spreadCentraltendency > uniformSpread) {
+					// // noise = (spreadCentraltendency - spreadCI) <
+					// // uniformSpread;
+					// // } else {
+					// // noise = (spreadCentraltendency + spreadCI) >
+					// // uniformSpread;
+					// // }
+					// }
 				}
 				change |= noise;
 
@@ -658,13 +682,14 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
 							attr, childJointFreq[attr]);
 					returnFeatures.remove(attr);
 					attributeFrequency[attr] = -1;
-					pruneCount.set(pruneIters, pruneCount.get(pruneIters)+1);
+					
 				}
 			}
 			++pruneIters;
 		}
 		log.info("Pruned tree: {}", tree.toString());
-		log.info("Prune iters: {} - Prune counts: {}", pruneIters, pruneCount.toString());
+		log.info("Prune by contingency: {} - Prune by spread: {}", pruneByContingencyCount.toString(),
+				pruneBySpreadCount.toString());
 		// } YA: Bonsai
 		fpGrowth(tree, minSupport, k, returnFeatures,
 				topKPatternsOutputCollector, updater);
