@@ -438,12 +438,12 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
 				if (attributeFrequency[attr] < minSupport) {
 					break;
 				}
-				if (sumChildSupport[attr] < attributeFrequency[attr]) {
-					// the case of . (full stop) as the next child
-					childJointFreq[attr]
-							.put(-1,
-									(long) (attributeFrequency[attr] - sumChildSupport[attr]));
-				}
+//				if (sumChildSupport[attr] < attributeFrequency[attr]) {
+//					// the case of . (full stop) as the next child
+//					childJointFreq[attr]
+//							.put(-1,
+//									(long) (attributeFrequency[attr] - sumChildSupport[attr]));
+//				}
 				float numChildren = childJointFreq[attr].size();
 
 				// if (numChildren < LEAST_NUM_CHILDREN_TO_VOTE_FOR_NOISE) {
@@ -628,8 +628,9 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
 //					noise = true;
 //				} else if (weightedMean < 0.95) {
 				if(numChildren > 1){
-					goodnessOfFit /= (attributeFrequency[attr] / numChildren);
-					goodnessOfFit -= attributeFrequency[attr];
+					double n = sumChildSupport[attr]; // attributeFrequency[attr];
+					goodnessOfFit /= (n / numChildren);
+					goodnessOfFit -= n;
 					ChiSquaredDistributionImpl chisqDist = new ChiSquaredDistributionImpl(
 							numChildren - 1);
 					double criticalPoint = chisqDist
