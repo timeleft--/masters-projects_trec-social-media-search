@@ -348,8 +348,12 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
       
       change = false;
       tree = new FPTree(featureSetSize);
-      OpenIntLongHashMap[] childJointFreq = new OpenIntLongHashMap[featureSetSize];
-      long[] sumChildSupport = new long[featureSetSize];
+      OpenIntLongHashMap[] childJointFreq;
+      long[] sumChildSupport;
+      if (BONSAI_PRUNE) {
+        childJointFreq = new OpenIntLongHashMap[featureSetSize];
+        sumChildSupport = new long[featureSetSize];
+      }
       double supportGrandTotal = 0;
       // } YA: BONSAAAAAAAII
       
@@ -361,8 +365,10 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
           continue; // this is an attribute not satisfying the
           // monotone constraint
         }
-        childJointFreq[i] = new OpenIntLongHashMap();
-        supportGrandTotal += attributeFrequency[i];
+        if (BONSAI_PRUNE) {
+          childJointFreq[i] = new OpenIntLongHashMap();
+          supportGrandTotal += attributeFrequency[i];
+        }
         // } YA: Bonsai
       }
       
@@ -394,7 +400,7 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
           if (attributeFrequency[attribute] < minSupport) {
             break;
           }
-          if (tree.attribute(temp) != -1) { // Root node
+          if (BONSAI_PRUNE && tree.attribute(temp) != -1) { // Root node
             childJointFreq[tree.attribute(temp)].put(
                 attribute,
                 childJointFreq[tree.attribute(temp)]
