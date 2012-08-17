@@ -29,6 +29,7 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.PriorityQueue;
 import java.util.concurrent.Callable;
 
 import org.apache.commons.io.FileUtils;
@@ -50,6 +51,7 @@ import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.hadoop.mapreduce.lib.input.SequenceFileInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.mapreduce.lib.output.SequenceFileOutputFormat;
+import org.apache.hadoop.util.StringUtils;
 import org.apache.lucene.queryParser.ParseException;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.MMapDirectory;
@@ -66,8 +68,8 @@ import org.apache.mahout.math.list.IntArrayList;
 import org.apache.mahout.math.map.OpenIntObjectHashMap;
 import org.apache.mahout.math.map.OpenObjectIntHashMap;
 import org.apache.mahout.math.map.OpenObjectLongHashMap;
-
-import ca.uwaterloo.twitter.ItemSetIndexBuilder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.common.collect.Lists;
 import com.google.common.hash.Hashing;
@@ -81,6 +83,7 @@ import com.twitter.corpus.data.util.PartitionByTimestamp;
  * 
  */
 public final class PFPGrowth implements Callable<Void> {
+  private static final Logger LOG = LoggerFactory.getLogger(PFPGrowth.class);
   
   public static final String ENCODING = "encoding";
   public static final String F_LIST = "fList";
@@ -89,6 +92,7 @@ public final class PFPGrowth implements Callable<Void> {
   public static final int NUM_GROUPS_DEFAULT = 1000;
   public static final String MAX_PER_GROUP = "maxPerGroup";
   public static final String OUTPUT = "output";
+  public static final String OUTROOT = "outroot";
   public static final String MIN_SUPPORT = "minSupport";
   public static final String MAX_HEAPSIZE = "maxHeapSize";
   public static final String INPUT = "input";
@@ -113,9 +117,16 @@ public final class PFPGrowth implements Callable<Void> {
   // public static final String INDEX_OUT = "index";
   
   public static final String PARAM_WINDOW_SIZE = "windowSize";
+  public static final String PARAM_STEP_SIZE = "stepSize";
   
   // TODO command line
-  static final boolean FPSTREAM = false;
+  // static final boolean FPSTREAM = false;
+  public static enum RunningMode {
+    Batch, BlockUpdate, SlidingWin
+  };
+  
+  public static final RunningMode runMode = RunningMode.SlidingWin;
+  
   public static final float FPSTREAM_LINEAR_DECAY_COEFF = 0.9f;
   // private static final double AVG_TOKENS_PER_DOC = 7;
   public static final String PARAM_MAX_PATTERN_LOAD_LAG = "maxLag";
@@ -133,7 +144,8 @@ public final class PFPGrowth implements Callable<Void> {
   // private PFPGrowth() {
   // }
   
-  public static void loadEarlierFlists(JobContext context, Parameters params, long intervalStart,
+  public static void loadEarlierFHashMaps(JobContext context, Parameters params,
+      long intervalStart,
       OpenIntObjectHashMap<String> idStringMapOut, OpenObjectIntHashMap<String> stringIdMapOut)
       throws IOException {
     // I resist the urge to cache this list because I don't know what exactly would happen
@@ -168,17 +180,20 @@ public final class PFPGrowth implements Callable<Void> {
     }
   }
   
-  public static long readFMap(Configuration conf, OpenObjectLongHashMap<String> fMap)
+  public static long readTermFreqHashMap(Configuration conf, OpenObjectLongHashMap<String> fMap)
       throws IOException {
     
     long totalNterms = 0;
     
-    if (!FPSTREAM) {
+    switch (runMode) {
+    case Batch:
+    case SlidingWin:
       for (Pair<String, Long> e : readCachedFList(conf)) {
         fMap.put(e.getFirst(), e.getSecond());
         totalNterms += e.getSecond();
       }
-    } else {
+      break;
+    case BlockUpdate:
       
       Parameters params = new Parameters(conf.get(PFPGrowth.PFP_PARAMETERS, ""));
       long currWindowStart = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_START));
@@ -196,39 +211,39 @@ public final class PFPGrowth implements Callable<Void> {
         fMap.put(t, freq);
         totalNterms += freq;
       }
-      
+      break;
     }
     return totalNterms;
   }
   
-  public static List<Pair<String, Long>> readFList(Configuration conf) throws IOException {
-    if (!FPSTREAM) {
-      
-      return readCachedFList(conf);
-      
-    } else {
-      
-      Parameters params = new Parameters(conf.get(PFPGrowth.PFP_PARAMETERS, ""));
-      long currWindowStart = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_START));
-      
-      OpenObjectLongHashMap<String> prevFLists = readOlderCachedFLists(conf,
-          currWindowStart,
-          TimeWeightFunction.getDefault(params));
-      LinkedList<String> terms = Lists.newLinkedList();
-      prevFLists.keysSortedByValue(terms);
-      Iterator<String> termsIter = terms.descendingIterator();
-      
-      List<Pair<String, Long>> result =
-          Lists.<Pair<String, Long>> newArrayListWithCapacity(terms.size());
-      while (termsIter.hasNext()) {
-        String t = termsIter.next();
-        result.add(new Pair<String, Long>(t, prevFLists.get(t)));
-      }
-      
-      return result;
-    }
-  }
-  
+  // public static List<Pair<String, Long>> readFList(Configuration conf) throws IOException {
+  // if (runMode.equals(RunningMode.Batch)) {
+  //
+  // return readCachedFList(conf);
+  //
+  // } else {
+  //
+  // Parameters params = new Parameters(conf.get(PFPGrowth.PFP_PARAMETERS, ""));
+  // long currWindowStart = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_START));
+  //
+  // OpenObjectLongHashMap<String> prevFLists = readOlderCachedFLists(conf,
+  // currWindowStart,
+  // TimeWeightFunction.getDefault(params));
+  // LinkedList<String> terms = Lists.newLinkedList();
+  // prevFLists.keysSortedByValue(terms);
+  // Iterator<String> termsIter = terms.descendingIterator();
+  //
+  // List<Pair<String, Long>> result =
+  // Lists.<Pair<String, Long>> newArrayListWithCapacity(terms.size());
+  // while (termsIter.hasNext()) {
+  // String t = termsIter.next();
+  // result.add(new Pair<String, Long>(t, prevFLists.get(t)));
+  // }
+  //
+  // return result;
+  // }
+  // }
+  //
   /**
    * Generates the fList from the serialized string representation
    * 
@@ -338,12 +353,12 @@ public final class PFPGrowth implements Callable<Void> {
    * 
    * @return Serialized String representation of List
    */
-  public static void saveFList(Iterable<Pair<String, Long>> flist, //Parameters params,
+  public static void saveFList(Iterable<Pair<String, Long>> flist, // Parameters params,
       Configuration conf, Path flistPath)
       throws IOException {
     FileSystem fs = FileSystem.get(flistPath.toUri(), conf);
     flistPath = fs.makeQualified(flistPath);
-    HadoopUtil.delete(conf, flistPath);
+    // HadoopUtil.delete(conf, flistPath);
     SequenceFile.Writer writer = new SequenceFile.Writer(fs, conf, flistPath, Text.class,
         LongWritable.class);
     try {
@@ -439,103 +454,208 @@ public final class PFPGrowth implements Callable<Void> {
   // return fList; // This prevents a null exception when using FP2 --> .subList(0, fList.size());
   // }
   
-  /**
-   * read the feature frequency List which is built at the end of the Parallel counting job
-   * 
-   * @param countIn
-   * @param minSupport
-   * @param minFr
-   * @param prunePct
-   * 
-   * @return Feature Frequency List
-   */
-  public static List<Pair<String, Long>> readFList(String countIn, int minSupport, int minFr,
-      int prunePct, Configuration conf) throws IOException {
+  public static void appendParallelCountingResults(String countIn,
+      Configuration conf, OpenObjectLongHashMap<String> freqMapOut) throws IOException {
     
     Path parallelCountingPath = new Path(countIn, PARALLEL_COUNTING);
     
     Path path = new Path(parallelCountingPath, FILE_PATTERN);
-//    = new Configuration();
-    // if (!FileSystem.get(path.toUri(), conf).exists(path)) {
-    // throw new IOException("Cannot find flist file: " + path);
-    // }
     
-    assert minFr >= minSupport;
-    double totalFreq = 0;
-    List<Pair<String, Long>> freqList = Lists.newLinkedList();
     for (Pair<Text, LongWritable> record : new SequenceFileDirIterable<Text, LongWritable>(
         path, PathType.GLOB, null, null, true, conf)) {
       long freq = record.getSecond().get();
       String token = record.getFirst().toString();
       
-      // char ch0 = token.charAt(0);
-      // No special treatment for mentions: || ch0 == '@'
-      // or hashtags: (ch0 == '#') ||
-      if ((freq >= minFr)) {
-        freqList.add(new Pair<String, Long>(token, freq));
-        totalFreq += freq;
-      }
+      freqMapOut.put(token, freqMapOut.get(token) + freq);
     }
     
-    Comparator<Pair<String, Long>> descComp =
-        new Comparator<Pair<String, Long>>() {
-          @Override
-          public int compare(Pair<String, Long> o1, Pair<String, Long> o2) {
-            int ret = o2.getSecond().compareTo(o1.getSecond());
-            if (ret != 0) {
-              return ret;
-            }
-            return o1.getFirst().compareTo(o2.getFirst());
-          }
-        };
+  }
+  
+  /**
+   * read the feature frequency List which is built at the end of the Parallel counting job
+   * 
+   * @param countIn
+   * 
+   * @return Feature Frequency Map
+   */
+  public static OpenObjectLongHashMap<String> readParallelCountingResults(String countIn,
+      Configuration conf) throws IOException {
     
-    @SuppressWarnings("unchecked")
-    Pair<String, Long>[] freqArr = freqList.toArray(new Pair[0]);
-    Arrays.sort(freqArr, descComp);
+    OpenObjectLongHashMap<String> result = new OpenObjectLongHashMap<String>();
+    Path parallelCountingPath = new Path(countIn, PARALLEL_COUNTING);
     
-    List<Pair<String, Long>> result = null; // = Lists.newLinkedList();
-    // YA: language indipendent stop words.. the 5% most frequent
-    // FIXME: this will remove words from only the mostly used lang
-    // i.e. cannot be used for a multilingual task
-    // Percentile: Pretty aggressive since the Zipfe distribution is very steep
-    int minIx = (int) Math.round(1.0f * (freqArr.length + 1) * (100 - prunePct) / 100);
-    long maxFreq = freqArr[minIx].getSecond();
-    // double maxFreq = (1.0f * MathUtils.log(2,freqArr[0].getSecond()) * prunePct / 100);
-    // double maxFreq = (1.0f * totalFreq * prunePct / 100);
-    boolean withinUpperBound = false;
-    for (int i = 0; i < freqArr.length; ++i) {
-      if (!withinUpperBound) {
-        // totalFreq -= freqArr[i].getSecond();
-        // withinUpperBound = totalFreq <= maxFreq;
-        // withinUpperBound = MathUtils.log(2,freqArr[i].getSecond()) <= maxFreq;
-        withinUpperBound = freqArr[i].getSecond() <= maxFreq;
-        if (withinUpperBound) {
-          result = Lists.newArrayListWithCapacity(freqArr.length - i);
-        }
-      }
+    Path path = new Path(parallelCountingPath, FILE_PATTERN);
+    
+    for (Pair<Text, LongWritable> record : new SequenceFileDirIterable<Text, LongWritable>(
+        path, PathType.GLOB, null, null, true, conf)) {
+      long freq = record.getSecond().get();
+      String token = record.getFirst().toString();
       
-      if (withinUpperBound) {
-        result.add(freqArr[i]);
-      }
+      result.put(token, freq);
     }
     
     return result;
   }
   
-  public static int cacheFList(//Parameters params,
-		  Configuration conf, String countIn,
+  public static List<Pair<String, Long>> pruneParallelCountingResults(
+      OpenObjectLongHashMap<String> freqMap,
       int minSupport, int minFr, int prunePct) throws IOException {
-    Path cachedPath = new Path(countIn, F_LIST);
+    
+    List<String> termsSorted = Lists.newArrayListWithCapacity(freqMap.size());
+    freqMap.keysSortedByValue(termsSorted);
+    
+    // FIXME: this will remove words from only the mostly used lang
+    // i.e. cannot be used for a multilingual task
+    // Percentile: Pretty aggressive since the Zipfe distribution is very steep
+    int maxIx = (int) Math.round(((freqMap.size() - 1) * prunePct / 100.0) + 1);
+    long maxFreq = freqMap.get(termsSorted.get(maxIx));
+    // Alternatives
+    // double maxFreq = (1.0f * MathUtils.log(2,freqArr[0].getSecond()) * prunePct / 100);
+    // double maxFreq = (1.0f * totalFreq * prunePct / 100); //FIX this to be weighted percentile
+    
+    // This will ALWAYS prune something; even the 100th percentile (i.e. highest rank)
+    while (freqMap.get(termsSorted.get(maxIx - 1)) == maxFreq) {
+      --maxIx;
+    }
+    
+    assert minFr >= minSupport;
+    int minIx = 0;
+    while (freqMap.get(termsSorted.get(minIx)) < minFr) {
+      ++minIx;
+    }
+    List<Pair<String, Long>> result = Lists.newArrayListWithExpectedSize(maxIx - minIx);
+    
+    for (int i = maxIx - 1; i >= minIx; --i) {
+      String term = termsSorted.get(i);
+      result.add(new Pair(term, freqMap.get(term)));
+    }
+    
+    return result;
+  }
+  
+  // public static List<Pair<String, Long>> readParallelCountingResults(String countIn, int
+  // minSupport, int minFr,
+  // int prunePct, Configuration conf) throws IOException {
+  //
+  // Path parallelCountingPath = new Path(countIn, PARALLEL_COUNTING);
+  //
+  // Path path = new Path(parallelCountingPath, FILE_PATTERN);
+  // // = new Configuration();
+  // // if (!FileSystem.get(path.toUri(), conf).exists(path)) {
+  // // throw new IOException("Cannot find flist file: " + path);
+  // // }
+  //
+  // // Won't hold in case of steps
+  // assert minFr >= minSupport;
+  // double totalFreq = 0;
+  // List<Pair<String, Long>> freqList = Lists.newLinkedList();
+  // for (Pair<Text, LongWritable> record : new SequenceFileDirIterable<Text, LongWritable>(
+  // path, PathType.GLOB, null, null, true, conf)) {
+  // long freq = record.getSecond().get();
+  // String token = record.getFirst().toString();
+  //
+  // // char ch0 = token.charAt(0);
+  // // No special treatment for mentions: || ch0 == '@'
+  // // or hashtags: (ch0 == '#') ||
+  // if ((freq >= minFr)) {
+  // freqList.add(new Pair<String, Long>(token, freq));
+  // totalFreq += freq;
+  // }
+  // }
+  //
+  // Comparator<Pair<String, Long>> descComp =
+  // new Comparator<Pair<String, Long>>() {
+  // @Override
+  // public int compare(Pair<String, Long> o1, Pair<String, Long> o2) {
+  // int ret = o2.getSecond().compareTo(o1.getSecond());
+  // if (ret != 0) {
+  // return ret;
+  // }
+  // return o1.getFirst().compareTo(o2.getFirst());
+  // }
+  // };
+  //
+  // @SuppressWarnings("unchecked")
+  // Pair<String, Long>[] freqArr = freqList.toArray(new Pair[0]);
+  // Arrays.sort(freqArr, descComp);
+  //
+  // List<Pair<String, Long>> result = null; // = Lists.newLinkedList();
+  // // YA: language indipendent stop words.. the 5% most frequent
+  // // FIXME: this will remove words from only the mostly used lang
+  // // i.e. cannot be used for a multilingual task
+  // // Percentile: Pretty aggressive since the Zipfe distribution is very steep
+  // int minIx = (int) Math.round(1.0f * (freqArr.length + 1) * (100 - prunePct) / 100);
+  // long maxFreq = freqArr[minIx].getSecond();
+  // // double maxFreq = (1.0f * MathUtils.log(2,freqArr[0].getSecond()) * prunePct / 100);
+  // // double maxFreq = (1.0f * totalFreq * prunePct / 100);
+  // boolean withinUpperBound = false;
+  // for (int i = 0; i < freqArr.length; ++i) {
+  // if (!withinUpperBound) {
+  // // totalFreq -= freqArr[i].getSecond();
+  // // withinUpperBound = totalFreq <= maxFreq;
+  // // withinUpperBound = MathUtils.log(2,freqArr[i].getSecond()) <= maxFreq;
+  // withinUpperBound = freqArr[i].getSecond() <= maxFreq;
+  // if (withinUpperBound) {
+  // result = Lists.newArrayListWithCapacity(freqArr.length - i);
+  // }
+  // }
+  //
+  // if (withinUpperBound) {
+  // result.add(freqArr[i]);
+  // }
+  // }
+  //
+  // return result;
+  // }
+  //
+  public static int cacheFList(Parameters params,
+      Configuration conf, String countIn,
+      int minSupport, int minFr, int prunePct) throws IOException {
+    
+    long startTime = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_START));
+    long endTime = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_END));
+    long windowSize = Long.parseLong(params.get(PFPGrowth.PARAM_WINDOW_SIZE,
+        Long.toString(endTime - startTime)));
+    long stepSize = Long
+        .parseLong(params.get(PFPGrowth.PARAM_STEP_SIZE, Long.toString(windowSize)));
+    endTime = Math.min(endTime, startTime + windowSize);
+    
+    Path cachedPath = new Path(countIn, Long.toString(startTime));
+    cachedPath = new Path(cachedPath, Long.toString(Math.min(endTime, startTime + windowSize)));
+    cachedPath = new Path(cachedPath, F_LIST);
+    
     FileSystem fs = FileSystem.getLocal(conf);
     int result;
     if (fs.exists(cachedPath)) {
-//      assert FPSTREAM;
+      // assert FPSTREAM;
       result = -1;
       DistributedCache.addCacheFile(cachedPath.toUri(), conf);
     } else {
-      List<Pair<String, Long>> flist = readFList(countIn, minSupport, minFr, prunePct, conf);
-      saveFList(flist, //params, 
-    		  conf, cachedPath);
+      OpenObjectLongHashMap<String> freqMap;
+      if (runMode.equals(RunningMode.SlidingWin)) {
+        freqMap = new OpenObjectLongHashMap<String>();
+        while (startTime < endTime) {
+          String stepCount = FilenameUtils.concat(countIn, Long.toString(startTime));
+          stepCount = FilenameUtils.concat(stepCount,
+              Long.toString(Math.min(endTime, startTime + stepSize)));
+          
+          appendParallelCountingResults(stepCount, conf, freqMap);
+          startTime += stepSize;
+        }
+      } else {
+        countIn = FilenameUtils.concat(countIn, Long.toString(startTime));
+        countIn = FilenameUtils.concat(countIn,
+            Long.toString(Math.min(endTime, startTime + windowSize)));
+        freqMap = readParallelCountingResults(countIn, conf);
+      }
+      List<Pair<String, Long>> flist = pruneParallelCountingResults(
+          freqMap,
+          minSupport,
+          minFr,
+          prunePct);
+      saveFList(flist, // params,
+          conf,
+          cachedPath);
       result = flist.size();
     }
     return result;
@@ -637,10 +757,14 @@ public final class PFPGrowth implements Callable<Void> {
     long endTime = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_END));
     long windowSize = Long.parseLong(params.get(PFPGrowth.PARAM_WINDOW_SIZE,
         Long.toString(endTime - startTime)));
+    long stepSize = Long
+        .parseLong(params.get(PFPGrowth.PARAM_STEP_SIZE, Long.toString(windowSize)));
+    endTime = Math.min(endTime, startTime + windowSize);
+    
     int minSupport = Integer.valueOf(params.get(MIN_SUPPORT, "3"));
     String countIn = params.get(COUNT_IN);
     if (countIn == null) {
-      countIn = params.get(OUTPUT);
+      countIn = params.get(OUTROOT); // PUT);
     }
     int minFr = params.getInt(MIN_FREQ, MIN_FREQ_DEFAULT);
     int prunePct = params.getInt(PRUNE_PCTILE, PRUNE_PCTILE_DEFAULT);
@@ -654,9 +778,9 @@ public final class PFPGrowth implements Callable<Void> {
       // List<Pair<String, Long>> fList = readFList(params);
       // saveFList(fList, params, conf);
       
-      int fListSize = cacheFList( conf, countIn, minSupport, minFr, prunePct);
+      int fListSize = cacheFList(params, conf, countIn, minSupport, minFr, prunePct);
       
-      if (FPSTREAM) {
+      if (runMode.equals(RunningMode.BlockUpdate)) {
         fListSize = -1;
         Path timeRoot = new Path(countIn).getParent().getParent();
         FileSystem fs = FileSystem.getLocal(conf);
@@ -671,7 +795,7 @@ public final class PFPGrowth implements Callable<Void> {
         })) {
           // TODO: At such low frequency and support, does pruning out items with less frequency
           // than minFreq cause loosing itemsets that are frequent but through a longer time frame
-          cacheFList( conf,
+          cacheFList(params, conf,
               fs.listStatus(earlierWindow.getPath())[0].getPath().toString(),
               minSupport, minFr, prunePct);
         }
@@ -688,25 +812,26 @@ public final class PFPGrowth implements Callable<Void> {
       
       startParallelFPGrowth(params, conf);
     } else {
-      cacheFList( conf, countIn, minSupport, minFr, prunePct);
+      cacheFList(params, conf, countIn, minSupport, minFr, prunePct);
     }
     startAggregating(params, conf);
     
-    String indexDirStr;// = params.get(INDEX_OUT);
-    // if (indexDirStr == null || indexDirStr.isEmpty()) {
-    indexDirStr = FilenameUtils.concat(params.get(OUTPUT), "index");
-    // } else {
-    // indexDirStr = FilenameUtils.concat(indexDirStr, startTime);
-    // indexDirStr = FilenameUtils.concat(indexDirStr, endTime);
-    // }
-    File indexDir = FileUtils.toFile(new URL(indexDirStr));
-    
-    // clean up
-    FileUtils.deleteQuietly(indexDir);
-    
-    Path seqPath = new Path(params.get(OUTPUT), FREQUENT_PATTERNS);
-    Directory earlierIndex = null;
-    if (FPSTREAM) {
+    if (runMode.equals(RunningMode.BlockUpdate)) {
+      String indexDirStr;// = params.get(INDEX_OUT);
+      // if (indexDirStr == null || indexDirStr.isEmpty()) {
+      indexDirStr = FilenameUtils.concat(params.get(OUTPUT), "index");
+      // } else {
+      // indexDirStr = FilenameUtils.concat(indexDirStr, startTime);
+      // indexDirStr = FilenameUtils.concat(indexDirStr, endTime);
+      // }
+      File indexDir = FileUtils.toFile(new URL(indexDirStr));
+      
+      // clean up
+      FileUtils.deleteQuietly(indexDir);
+      
+      Path seqPath = new Path(params.get(OUTPUT), FREQUENT_PATTERNS);
+      Directory earlierIndex = null;
+      
       Path timeRoot = new Path(params.get(OUTPUT)).getParent().getParent();
       FileSystem fs = FileSystem.getLocal(conf);
       
@@ -776,7 +901,7 @@ public final class PFPGrowth implements Callable<Void> {
     job.setReducerClass(AggregatorReducer.class);
     job.setOutputFormatClass(SequenceFileOutputFormat.class);
     
-    HadoopUtil.delete(conf, outPath);
+    // HadoopUtil.delete(conf, outPath);
     boolean succeeded = job.waitForCompletion(true);
     if (!succeeded) {
       throw new IllegalStateException("Job failed!");
@@ -804,38 +929,100 @@ public final class PFPGrowth implements Callable<Void> {
     
     // String input = params.get(INPUT);
     // Job job = new Job(conf, "Parallel Counting Driver running over input: " + input);
-    String startTime = params.get(PFPGrowth.PARAM_INTERVAL_START);
+    long startTime = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_START));
     // Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP)); //GMT23JAN2011));
-    String endTime = params.get(PFPGrowth.PARAM_INTERVAL_END);
+    long endTime = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_END));
     // Long.toString(Long.MAX_VALUE));
-    Job job = new Job(conf, "PFP Growth Driver running over inerval " + startTime + "-" + endTime);
     
-    job.setJarByClass(PFPGrowth.class);
+    long windowSize = Long.parseLong(params.get(PFPGrowth.PARAM_WINDOW_SIZE,
+        Long.toString(endTime - startTime)));
+    long stepSize = Long
+        .parseLong(params.get(PFPGrowth.PARAM_STEP_SIZE, Long.toString(windowSize)));
     
-    job.setOutputKeyClass(Text.class);
-    job.setOutputValueClass(LongWritable.class);
+    endTime = Math.min(endTime, startTime + windowSize);
     
-    // FileSystem fs = FileSystem.get(conf); //TODONE: do I need?getLocal(conf);
-    PartitionByTimestamp.setInputPaths(job, params, conf);
-    // FileInputFormat.addInputPath(job, new Path(input));
+    FileSystem fs = FileSystem.get(conf); // TODONE: do I need?getLocal(conf);
     
-    Path outPath = new Path(params.get(OUTPUT), PARALLEL_COUNTING);
-    FileOutputFormat.setOutputPath(job, outPath);
-    
-    HadoopUtil.delete(conf, outPath);
-    
-    // job.setInputFormatClass(HtmlTweetInputFormat.class);
-    job.setInputFormatClass(CSVTweetInputFormat.class);
-    job.setMapperClass(ParallelCountingMapper.class);
-    job.setCombinerClass(ParallelCountingReducer.class);
-    job.setReducerClass(ParallelCountingReducer.class);
-    job.setOutputFormatClass(SequenceFileOutputFormat.class);
-    
-    boolean succeeded = job.waitForCompletion(true);
-    if (!succeeded) {
-      throw new IllegalStateException("Job failed!");
+    Job[] jobArr = new Job[(int) Math.ceil(windowSize / stepSize)];
+    for (int j = 0; startTime < endTime; startTime += stepSize, ++j) {
+      long jobEnd = startTime + stepSize;
+      Job job = new Job(conf, "Parallel counting running over inerval " + startTime + "-" + jobEnd); // endTime);
+
+      // Path outPath = new Path(params.get(OUTPUT), PARALLEL_COUNTING);
+      Path outRoot = new Path(params.get(OUTROOT));
+      Path stepOutput = new Path(outRoot, startTime + "");
+      stepOutput = new Path(stepOutput, jobEnd + "");
+      if (fs.exists(stepOutput)) {
+        continue;
+      }
+      jobArr[j] = job;
+      Path outPath = new Path(stepOutput, PARALLEL_COUNTING);
+      FileOutputFormat.setOutputPath(job, outPath);
+      // HadoopUtil.delete(conf, outPath);
+
+      
+      job.setJarByClass(PFPGrowth.class);
+      
+      job.setOutputKeyClass(Text.class);
+      job.setOutputValueClass(LongWritable.class);
+      
+      PartitionByTimestamp.setInputPaths(job, params, conf);
+      // FileInputFormat.addInputPath(job, new Path(input));
+
+      // job.setInputFormatClass(HtmlTweetInputFormat.class);
+      job.setInputFormatClass(CSVTweetInputFormat.class);
+      job.setMapperClass(ParallelCountingMapper.class);
+      job.setCombinerClass(ParallelCountingReducer.class);
+      job.setReducerClass(ParallelCountingReducer.class);
+      job.setOutputFormatClass(SequenceFileOutputFormat.class);
+      
+      job.submit();
+      
+      // boolean succeeded = job.waitForCompletion(true);
+      // if (!succeeded) {
+      // throw new IllegalStateException("Job failed!");
+      // }
     }
     
+    boolean allCompleted;
+    do {
+      Thread.sleep(1000);
+      allCompleted = true;
+      for (int j = 0; j < jobArr.length; ++j) {
+        if(jobArr[j] == null){
+          continue;
+        }
+        boolean complete = jobArr[j].isComplete();
+        allCompleted &= complete;
+        if (!complete) {
+          String report =
+              (j + " (" + jobArr[j].getJobName() + "): map "
+                  + StringUtils.formatPercent(jobArr[j].mapProgress(), 0) +
+                  " reduce " +
+                  StringUtils.formatPercent(jobArr[j].reduceProgress(), 0) + " - Tracking: " + jobArr[j]
+                  .getTrackingURL());
+          LOG.info(report);
+        }
+      }
+    } while (!allCompleted);
+    
+    boolean allSuccess = true;
+    for (int j = 0; j < jobArr.length; ++j) {
+      if(jobArr[j] == null){
+        continue;
+      }
+      boolean success = jobArr[j].isSuccessful();
+      allSuccess &= success;
+      if (!success) {
+        String report =
+            (j + " (" + jobArr[j].getJobName() + "): FAILED - Tracking: " + jobArr[j]
+                .getTrackingURL());
+        LOG.info(report);
+      }
+    }
+    if (!allSuccess) {
+      throw new IllegalStateException("Job failed!");
+    }
   }
   
   /**
@@ -859,13 +1046,14 @@ public final class PFPGrowth implements Callable<Void> {
     conf.set("mapred.child.java.opts", "-XX:-UseGCOverheadLimit -XX:+HeapDumpOnOutOfMemoryError");
     // END YA
     
-    // Path input = new Path(params.get(INPUT));
-    // Job job = new Job(conf, "PFP Growth Driver running over inputs" + Arrays.toString(input));
-    String startTime = params.get(PFPGrowth.PARAM_INTERVAL_START);
-    // Long.toString(PFPGrowth.TREC2011_MIN_TIMESTAMP)); //GMT23JAN2011));
-    String endTime = params.get(PFPGrowth.PARAM_INTERVAL_END);
-    // Long.toString(Long.MAX_VALUE));
-    Job job = new Job(conf, "PFP Growth Driver running over inerval " + startTime + "-" + endTime);
+    long startTime = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_START));
+    long endTime = Long.parseLong(params.get(PFPGrowth.PARAM_INTERVAL_END));
+    long windowSize = Long.parseLong(params.get(PFPGrowth.PARAM_WINDOW_SIZE,
+        Long.toString(endTime - startTime)));
+    long stepSize = Long
+        .parseLong(params.get(PFPGrowth.PARAM_STEP_SIZE, Long.toString(windowSize)));
+    endTime = Math.min(endTime, startTime + windowSize);
+    Job job = new Job(conf, "PFPGrowth running over inerval " + startTime + "-" + endTime);
     
     job.setJarByClass(PFPGrowth.class);
     
@@ -882,11 +1070,11 @@ public final class PFPGrowth implements Callable<Void> {
     Path outPath = new Path(params.get(OUTPUT), FPGROWTH);
     FileOutputFormat.setOutputPath(job, outPath);
     
-    HadoopUtil.delete(conf, outPath);
+    // HadoopUtil.delete(conf, outPath);
     
     // job.setInputFormatClass(HtmlTweetInputFormat.class);
     job.setInputFormatClass(CSVTweetInputFormat.class);
-    if (FPSTREAM) {
+    if (runMode.equals(RunningMode.BlockUpdate)) {
       job.setMapperClass(ParallelFPStreamMapper.class);
       // job.setCombinerClass(ParallelFPStreamCombiner.class);
       job.setCombinerClass(ParallelFPGrowthCombiner.class);

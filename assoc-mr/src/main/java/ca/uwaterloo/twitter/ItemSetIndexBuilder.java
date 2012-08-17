@@ -69,6 +69,25 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 
 public class ItemSetIndexBuilder {
+  public class DoneDeletingException extends RuntimeException {
+    
+    public DoneDeletingException() {
+    }
+    
+    public DoneDeletingException(String message) {
+      super(message);
+    }
+    
+    public DoneDeletingException(Throwable cause) {
+      super(cause);
+    }
+    
+    public DoneDeletingException(String message, Throwable cause) {
+      super(message, cause);
+    }
+    
+  }
+  
   private static Logger LOG = LoggerFactory
       .getLogger(ItemSetIndexBuilder.class);
   
@@ -94,12 +113,15 @@ public class ItemSetIndexBuilder {
   private static final Analyzer ANALYZER = new PerFieldAnalyzerWrapper(
       PLAIN_ANALYZER, ImmutableMap.<String, Analyzer> of(
           AssocField.STEMMED_EN.name, ENGLISH_ANALYZER));
+  
   private static final boolean STATS = true;
   
+  private static final boolean STORE_UNIGRAMS = false;
   private static final float MIN_UNI_SUPP_RATIO = 0.05f;
   private static final float MAX_UNI_SUPP_RATIO = 0.95f;
-
   private static final float ORIG_SUPPORT = 3;
+  
+  private static final boolean CLOSED_PATTERNS_ONLY = false;
   
   private QueryParser twtQparser;
   private IndexSearcher twtSearcher;
@@ -291,7 +313,7 @@ public class ItemSetIndexBuilder {
         // continue;
       }
       
-      closedPatterns = closedPatterns.getCompressedTree(true);
+      closedPatterns = closedPatterns.getCompressedTree(CLOSED_PATTERNS_ONLY);
       
       List<String> terms = Lists.newArrayListWithCapacity(termIds.size());
       termIds.keysSortedByValue(terms);
@@ -440,7 +462,7 @@ public class ItemSetIndexBuilder {
         }
       }
       
-      LOG.info(String.format("Total of %s closed patterns indexed", cnt));
+      LOG.info(String.format("Total of %s patterns indexed from compressed tree", cnt));
       
       // ////////////////////////////////////////////////////////
       // Delete duplicates
@@ -449,7 +471,8 @@ public class ItemSetIndexBuilder {
       // writer.optimize();
       writer.close();
       
-      int minUniSuppThreshold = Math.round(((ORIG_SUPPORT / maxUnigramSupport) + MIN_UNI_SUPP_RATIO) * maxUnigramSupport);
+      int minUniSuppThreshold = Math
+          .round(((ORIG_SUPPORT / maxUnigramSupport) + MIN_UNI_SUPP_RATIO) * maxUnigramSupport);
       int maxUniSuppThreshold = Math.round(MAX_UNI_SUPP_RATIO * maxUnigramSupport);
       
       final SummaryStatistics lengthStat;
@@ -488,7 +511,7 @@ public class ItemSetIndexBuilder {
         final int supp1 = Integer.parseInt(document
             .get(AssocField.SUPPORT.name));
         
-        if (tSet1.size() == 1) {
+        if (STORE_UNIGRAMS && tSet1.size() == 1) {
           // double entropy = supp1 / totalUnigramSupport;
           // entropy = -entropy * Math.log(entropy) / LOG2;
           if (supp1 >= maxUniSuppThreshold || supp1 <= minUniSuppThreshold) {
@@ -504,7 +527,9 @@ public class ItemSetIndexBuilder {
           }
         }
         
-        final MutableBoolean doc1Deleted = new MutableBoolean(false);
+        //
+        // final MutableBoolean doc1Deleted = new MutableBoolean(false);
+        boolean doc1Deleted = false;
         // if (LOG.isTraceEnabled()) {
         // LOG.debug("Looking for duplicates for itemset {} with support {}",
         // termVector.getTerms(),
@@ -524,14 +549,21 @@ public class ItemSetIndexBuilder {
           @Override
           public void collect(int doc2) throws IOException {
             doc2 += docBase;
-            if (doc2 == doc1 || doc1Deleted.booleanValue() || deleted.contains(doc2)) {
+            if (doc2 == doc1 || /* doc1Deleted.booleanValue() || */deleted.contains(doc2)) {
               return;
             }
             TermFreqVector tv2 = fisIxReader.getTermFreqVector(
                 doc2, AssocField.ITEMSET.name);
             Set<String> tSet2 = Sets.newCopyOnWriteArraySet(Arrays
                 .asList(tv2.getTerms()));
-            Set<String> interSet = Sets.intersection(tSet1, tSet2);
+            Set<String> interSet;
+            if (CLOSED_PATTERNS_ONLY) {
+              interSet = Sets.intersection(tSet1, tSet2);
+            } else {
+              // If we allow non-closed patterns, then we only need to delete
+              // exact matches
+              interSet = tSet2;
+            }
             
             if (interSet.equals(tSet1)) {
               // This will be checked when doc2 is processed: ||
@@ -547,9 +579,10 @@ public class ItemSetIndexBuilder {
                         + supp2);
               
               fisIxReader.deleteDocument(doc1);
-              doc1Deleted.setValue(true);
               deleted.add(doc1);
               
+              // doc1Deleted.setValue(true);
+              throw new DoneDeletingException();
             }
             
             //
@@ -575,9 +608,13 @@ public class ItemSetIndexBuilder {
             return true;
           }
         };
-        fisSearcher.search(query, duplicateDeletionCollector);
+        try {
+          fisSearcher.search(query, duplicateDeletionCollector);
+        } catch (DoneDeletingException ignored) {
+          doc1Deleted = true;
+        }
         
-        if (STATS && !doc1Deleted.booleanValue()) {
+        if (STATS && !doc1Deleted) { // !doc1Deleted.booleanValue()) {
           lengthStat.addValue(tSet1.size());
           supportStat.addValue(Integer.parseInt(document.get(AssocField.SUPPORT.name)));
         }

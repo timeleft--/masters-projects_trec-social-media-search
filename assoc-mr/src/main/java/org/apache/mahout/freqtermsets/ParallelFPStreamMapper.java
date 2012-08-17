@@ -123,7 +123,7 @@ public class ParallelFPStreamMapper extends
         Long.toString(intervalEnd - intervalStart)));
     endTimestamp = Math.min(intervalEnd, intervalStart + windowSize - 1);
     
-    PFPGrowth.loadEarlierFlists(context,
+    PFPGrowth.loadEarlierFHashMaps(context,
         params,
         intervalStart,
         new OpenIntObjectHashMap<String>(),

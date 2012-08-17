@@ -262,7 +262,8 @@ public class ParallelFPStreamReducer extends
     FPGrowth<Integer> fpGrowth = new FPGrowth<Integer>();
     fpGrowth
         .generateTopKFrequentPatterns(
-            new IteratorAdapter(cTree.iterator()),
+            //new IteratorAdapter(cTree.iterator()),
+            cTree,
             localFList,
             minSupport,
             maxHeapSize,
@@ -292,7 +293,7 @@ public class ParallelFPStreamReducer extends
         Long.toString(intervalEnd - intervalStart)));
     endTimestamp = Math.min(intervalEnd, intervalStart + windowSize - 1);
     
-    PFPGrowth.loadEarlierFlists(context, params, intervalStart, idStringMap, stringIdMap);
+    PFPGrowth.loadEarlierFHashMaps(context, params, intervalStart, idStringMap, stringIdMap);
     
     maxHeapSize = Integer.valueOf(params.get(PFPGrowth.MAX_HEAPSIZE, "50"));
     minSupport = Integer.valueOf(params.get(PFPGrowth.MIN_SUPPORT, "3"));

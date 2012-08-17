@@ -78,7 +78,7 @@ public class TwitterIndexBuilder implements Callable<Void> {
   private static final String END_TIME_OPTION = "end";
   private static final String WINDOW_LEN_OPTION = "win";
   private static final String WINDOW_LEN_DEFAULT = "3600000";
-  private static final boolean INCREMENTAL_DEFAULT = true;
+  private static final boolean INCREMENTAL_DEFAULT = false;
   // /u2/yaboulnaga/datasets/twitter-trec2011/indexes/stemmed-stored_8hr-increments/1295740800000/1296633600000/index
   // start 1296604800000
   
@@ -89,8 +89,8 @@ public class TwitterIndexBuilder implements Callable<Void> {
   
   private static final boolean APPEND = false;
   private static final boolean TRUST_LUCENE_ADD_INDEX = true;
-  private static final TermVector STORE_UNSTEMMED_TERMVECTOR = TermVector.NO;
-  private static final TermVector STORE_STEMMED_TERMVECTOR = TermVector.YES;
+  private static final TermVector STORE_UNSTEMMED_TERMVECTOR = TermVector.WITH_POSITIONS;
+  private static final TermVector STORE_STEMMED_TERMVECTOR = TermVector.WITH_POSITIONS;
   
   /**
    * @param args

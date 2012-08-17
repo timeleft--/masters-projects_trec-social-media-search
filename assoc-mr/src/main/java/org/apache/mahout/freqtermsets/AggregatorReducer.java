@@ -201,7 +201,7 @@ public class AggregatorReducer extends Reducer<Text, TopKStringPatterns, Text, T
 //      totalNterms += e.getSecond();
 //    }
     
-    totalNterms = PFPGrowth.readFMap(conf,fMap);
+    totalNterms = PFPGrowth.readTermFreqHashMap(conf,fMap);
     
     lnTotalNTerms = Math.log(totalNterms);
     sortByMutualInfo = "true".equals(params.get(MUTUAL_INFO_FLAG));
