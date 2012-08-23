@@ -77,7 +77,7 @@ public class TwitterIndexBuilder implements Callable<Void> {
   private static final String START_TIME_OPTION = "start";
   private static final String END_TIME_OPTION = "end";
   private static final String WINDOW_LEN_OPTION = "win";
-  private static final String WINDOW_LEN_DEFAULT = "3600000";
+//  private static final String WINDOW_LEN_DEFAULT = "3600000";
   private static final boolean INCREMENTAL_DEFAULT = false;
   // /u2/yaboulnaga/datasets/twitter-trec2011/indexes/stemmed-stored_8hr-increments/1295740800000/1296633600000/index
   // start 1296604800000
@@ -174,7 +174,7 @@ public class TwitterIndexBuilder implements Callable<Void> {
     
     long startTime = Long.parseLong(startTimeStr);
     long endTime = Long.parseLong(cmdline.getOptionValue(END_TIME_OPTION, "" + Long.MAX_VALUE));
-    long winLen = Long.parseLong(cmdline.getOptionValue(WINDOW_LEN_OPTION, WINDOW_LEN_DEFAULT));
+    long winLen = Long.parseLong(cmdline.getOptionValue(WINDOW_LEN_OPTION, "" + (endTime - startTime)));
     
     List<Path> tweetFiles = Lists.newArrayListWithExpectedSize((int) winLen / 300000);
     
