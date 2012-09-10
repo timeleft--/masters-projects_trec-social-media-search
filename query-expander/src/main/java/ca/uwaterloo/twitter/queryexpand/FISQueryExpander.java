@@ -633,7 +633,7 @@ public class FISQueryExpander {
   // // EnglishAnalyzer(Version.LUCENE_36);
   private static final boolean CHAR_BY_CHAR = false;
   
-  private static final int MIN_ITEMSET_SIZE = 1;
+  private static final int MIN_ITEMSET_SIZE = 2;
   
   private static final String RETWEET_TERM = "rt";
   
@@ -1943,17 +1943,14 @@ public class FISQueryExpander {
     
     List<OpenIntFloatHashMap> bWordDocTemp = Lists.newArrayList();
     
-    int rank = -1;
+    int rank = 0;
     int nextId = 0;
     
     IntArrayList keyList = new IntArrayList(fisRs.size());
     fisRs.keysSortedByValue(keyList);
     
     for (int i = fisRs.size() - 1; i >= 0; --i) {
-      if (++rank >= numItemsetsToUse) {
-        break;
-      }
-      
+            
       int hit = keyList.getQuick(i);
       
       Pair<Set<String>, Float> patternPair = getPattern(hit);
@@ -1962,6 +1959,9 @@ public class FISQueryExpander {
       if (termSet.size() < MIN_ITEMSET_SIZE || itemsetsMap.containsKey(termSet)) {
         continue;
       }
+      if (++rank == numItemsetsToUse) {
+          break;
+        }
       
       itemsetsMap.put(termSet, patternPair.getSecond());
       
@@ -2038,7 +2038,7 @@ public class FISQueryExpander {
     for (int d = 0; d < numItemsetsToUse; ++d) {
       Instance instance = new Instance(attrs.size());
       for (int w = 0; w < bWordDocTemp.size(); ++w) {
-        instance.setValue(w, bPWD[w][d] - colStats[d].getMean()); // TODO divide by standard
+        instance.setValue(w, (bPWD[w][d] - colStats[d].getMean())/ colStats[d].getStandardDeviation()); // TODONE divide by standard
                                                                   // deviation??
       }
       
@@ -2069,6 +2069,10 @@ public class FISQueryExpander {
     int d = -1;
     for (Set<String> patternItems : itemsetsMap.keySet()) {
       ++d;
+      if(insts.numInstances() == d){
+    	  LOG.warn("Wrong number of itemsetsMap ({}) or instances ({})", itemsetsMap.size(), insts.numInstances()); 
+    	  break;
+      }
       Instance inst = insts.instance(d);
       for (String item : patternItems) {
         int termId = termIdMap.get(item);
@@ -3691,6 +3695,7 @@ public class FISQueryExpander {
         if (queryTerms.contains(term)) {
           continue;
         }
+        LOG.trace("Added extra term {} from patter with frequency {}", term, termWeight);
         // scoreDoc.score or fusion didn't change performance in a visible way
         extraTerms.add(new ScoreIxObj<String>(term, termWeight)); // TODO: is it better to ignore
                                                                   // this??
