@@ -49,7 +49,7 @@ import com.ibm.icu.text.SimpleDateFormat;
 public class FISQueryExpanderEvaluation implements Callable<Void> {
   private static final Logger LOG = LoggerFactory.getLogger(FISQueryExpanderEvaluation.class);
   
-  public static final int MAX_RESULTS = 10000;
+  public static final int MAX_RESULTS = 1000;
   private File fisIncIxLocation = new File(
       "/home/yaboulnaga/data/twitter-trec2011/indexes/fis-supp-17days_closed_stemmed-stored");
   // "/u2/yaboulnaga/datasets/twitter-trec2011/fis/assoc-mr_0607-2100/index-closed_stemmed-stored");
@@ -123,6 +123,11 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   private static final String TAG_PAGERANK_TERMS = "pagerankTerms";
   private static final String TAG_PAGERANK_PATTERNS_NOTOP = "pageRankPatternsNoTop";
   private static final String TAG_PAGERANK_PATTERNS_TOPN = "pageRankPatternsTopN";
+  
+  static final List<String> topicSelection = null; // Arrays.asList("MB084", "MB087", "MB090",
+                                                   // "MB099");
+  
+  private static final boolean SEARCH_WITH_EXPANDED = true;
   
   private static File[] twtChunkIxLocs;
   
@@ -219,8 +224,6 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     }
   }
   
-  static final List<String> topicSelection = Arrays.asList("MB084", "MB087", "MB090", "MB099");
-  
   @BeforeClass
   public static void setUpBeforeClass() throws Exception {
     SAXBuilder docBuild = new SAXBuilder();
@@ -257,7 +260,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
       String topicId = topic.getChildText("num");
       topicId = topicId.substring(topicId.indexOf(':') + 1).trim();
       
-      if(topicSelection != null && !topicSelection.contains(topicId)){
+      if (topicSelection != null && !topicSelection.contains(topicId)) {
         continue;
       }
       
@@ -294,7 +297,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     resultWriters = Maps.newHashMap();
     resultFiles = Maps.newHashMap();
     
-    openWriterForTag(TAG_BASELINE);
+    // openWriterForTag(TAG_BASELINE);
     // openWriterForTag(TAG_FROM_TWEETS);
     // openWriterForTag(TAG_FREQ_PATTERNS);
     // openWriterForTag(TAG_FREQ_PATTERNS + 50);
@@ -314,7 +317,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     openWriterForTag(TAG_CLUSTER_PATTERNS_DISTANCE);
     openWriterForTag(TAG_CLUSTER_PATTERNS_CLOSENESS);
     // openWriterForTag(TAG_CLUSTER_TWEETS);
-    openWriterForTag(TAG_CLUSTER_TERMS);
+    // openWriterForTag(TAG_CLUSTER_TERMS);
     // openWriterForTag(TAG_MARKOV);
     // openWriterForTag(TAG_SVD_PATTERN);
     // openWriterForTag(TAG_MUTUALINF);
@@ -500,12 +503,17 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
               maxXTermScores.toArray(new MutableFloat[0]),
               numTermsToAppend * (paramAppendPerQueryTerm ? queryLen.intValue() : 1),
               xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
-          
-          collector = new TrecResultFileCollector(target, topicIds.get(i),
-              TAG_CLUSTER_TWEETS, // queryStr,
-              xQueryTerms, xQueryLen.intValue());
-          target.twtSearcher.search(timedQuery, collector);
-          collector.writeResults();
+          if (SEARCH_WITH_EXPANDED) {
+            collector = new TrecResultFileCollector(target, topicIds.get(i),
+                TAG_CLUSTER_TWEETS, // queryStr,
+                xQueryTerms, xQueryLen.intValue());
+            target.twtSearcher.search(timedQuery, collector);
+            collector.writeResults();
+          } else {
+            LOG.info("These were the expansions for runtag: {}, Query: {}", TAG_CLUSTER_TWEETS,
+                xQueryTerms);
+            LOG.info("==================== END of QID: {} ===============", topicIds.get(i));
+          }
         }
       }
       // ////////////////////////////////////////
@@ -748,11 +756,16 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
             numTermsToAppend * (paramAppendPerQueryTerm ? queryLen.intValue() : 1),
             xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
         
-        collector = new TrecResultFileCollector(target, topicIds.get(i),
-            TAG_TOPN, // queryStr,
-            xQueryTerms, xQueryLen.intValue());
-        target.twtSearcher.search(timedQuery, collector);
-        collector.writeResults();
+        if (SEARCH_WITH_EXPANDED) {
+          collector = new TrecResultFileCollector(target, topicIds.get(i),
+              TAG_TOPN, // queryStr,
+              xQueryTerms, xQueryLen.intValue());
+          target.twtSearcher.search(timedQuery, collector);
+          collector.writeResults();
+        } else {
+          LOG.info("These were the expansions for runtag: {}, Query: {}", TAG_TOPN, xQueryTerms);
+          LOG.info("==================== END of QID: {} ===============", topicIds.get(i));
+        }
       }
       // /////////////////////////////////////////////////////////////
       if (resultWriters.containsKey(TAG_TOPN + "3ql")) {
@@ -1224,12 +1237,17 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
             maxXTermScores.toArray(new MutableFloat[0]),
             numTermsToAppend * (paramAppendPerQueryTerm ? queryLen.intValue() : 1),
             xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
-        
-        collector = new TrecResultFileCollector(target, topicIds.get(i),
-            TAG_CLUSTER_PATTERNS_DISTANCE, // queryStr,
-            xQueryTerms, xQueryLen.intValue());
-        target.twtSearcher.search(timedQuery, collector);
-        collector.writeResults();
+        if (SEARCH_WITH_EXPANDED) {
+          collector = new TrecResultFileCollector(target, topicIds.get(i),
+              TAG_CLUSTER_PATTERNS_DISTANCE, // queryStr,
+              xQueryTerms, xQueryLen.intValue());
+          target.twtSearcher.search(timedQuery, collector);
+          collector.writeResults();
+        } else {
+          LOG.info("These were the expansions for runtag: {}, Query: {}",
+              TAG_CLUSTER_PATTERNS_DISTANCE, xQueryTerms);
+          LOG.info("==================== END of QID: {} ===============", topicIds.get(i));
+        }
       }
       
       // ///////////////////////////////////////////////////////
@@ -1254,12 +1272,17 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
             maxXTermScores.toArray(new MutableFloat[0]),
             numTermsToAppend * (paramAppendPerQueryTerm ? queryLen.intValue() : 1),
             xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
-        
-        collector = new TrecResultFileCollector(target, topicIds.get(i),
-            TAG_CLUSTER_PATTERNS_CLOSENESS, // queryStr,
-            xQueryTerms, xQueryLen.intValue());
-        target.twtSearcher.search(timedQuery, collector);
-        collector.writeResults();
+        if (SEARCH_WITH_EXPANDED) {
+          collector = new TrecResultFileCollector(target, topicIds.get(i),
+              TAG_CLUSTER_PATTERNS_CLOSENESS, // queryStr,
+              xQueryTerms, xQueryLen.intValue());
+          target.twtSearcher.search(timedQuery, collector);
+          collector.writeResults();
+        } else {
+          LOG.info("These were the expansions for runtag: {}, Query: {}",
+              TAG_CLUSTER_PATTERNS_CLOSENESS, xQueryTerms);
+          LOG.info("==================== END of QID: {} ===============", topicIds.get(i));
+        }
       }
       
       // ///////////////////////////////////////////////////////
@@ -1286,12 +1309,17 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
             maxXTermScores.toArray(new MutableFloat[0]),
             numTermsToAppend * (paramAppendPerQueryTerm ? queryLen.intValue() : 1),
             xQueryTerms, xQueryLen, ExpandMode.DIVERSITY);
-        
-        collector = new TrecResultFileCollector(target, topicIds.get(i),
-            TAG_CLUSTER_TERMS, // queryStr,
-            xQueryTerms, xQueryLen.intValue());
-        target.twtSearcher.search(timedQuery, collector);
-        collector.writeResults();
+        if (SEARCH_WITH_EXPANDED) {
+          collector = new TrecResultFileCollector(target, topicIds.get(i),
+              TAG_CLUSTER_TERMS, // queryStr,
+              xQueryTerms, xQueryLen.intValue());
+          target.twtSearcher.search(timedQuery, collector);
+          collector.writeResults();
+        } else {
+          LOG.info("These were the expansions for runtag: {}, Query: {}", TAG_CLUSTER_TERMS,
+              xQueryTerms);
+          LOG.info("==================== END of QID: {} ===============", topicIds.get(i));
+        }
       }
       
     }

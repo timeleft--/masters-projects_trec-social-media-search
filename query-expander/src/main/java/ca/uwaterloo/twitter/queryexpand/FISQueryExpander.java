@@ -1145,7 +1145,8 @@ public class FISQueryExpander {
       MutableFloat minScoreOut, MutableFloat maxScoreOut, MutableFloat totalScoreOut)
       throws IOException, org.apache.lucene.queryParser.ParseException {
     if (numTermsToReturn <= 0) {
-      numTermsToReturn = Integer.MAX_VALUE;
+      throw new IllegalArgumentException("Da kan zaman!");
+      // numTermsToReturn = Integer.MAX_VALUE;
     }
     OpenObjectFloatHashMap<String> queryTerms = queryTermFreq(query,
         null,
@@ -1160,31 +1161,55 @@ public class FISQueryExpander {
     if (maxScoreOut != null) {
       maxScoreOut.setValue(Float.MIN_VALUE);
     }
-    
-    LinkedHashMap<Set<String>, Float> rankedItemsetScore = Maps.newLinkedHashMap();
+    // YA 20121005: Allowing terms to be added from more than one itemset to sum its support
+    // LinkedHashMap<Set<String>, Float> rankedItemsetScore = Maps.newLinkedHashMap();
     
     IntArrayList keyList = new IntArrayList(fisRs.size());
     fisRs.keysSortedByValue(keyList);
-    for (int i = fisRs.size() - 1; i >= 0 && numTermsToReturn > 0; --i) {
+    for (int i = fisRs.size() - 1; i >= 0
+     // YA 20121005: Allowing terms to be added from more than one itemset to sum its support
+//        && numTermsToReturn > 0
+        ; --i) {
       int hit = keyList.getQuick(i);
       
       Pair<Set<String>, Float> patternPair = getPattern(hit);
       Set<String> termSet = patternPair.getFirst();
-      if ((termSet.size() < MIN_ITEMSET_SIZE) || (rankedItemsetScore.containsKey(termSet))) {
+      if ((termSet.size() < MIN_ITEMSET_SIZE)) {
+        // YA 20121005: Allowing terms to be added from more than one itemset to sum its support
+        // || (rankedItemsetScore.containsKey(termSet))) {
         continue;
       }
       
       float patternFreq = patternPair.getSecond();
       
-      rankedItemsetScore.put(termSet, patternFreq);
+      // YA 20121005: Allowing terms to be added from more than one itemset to sum its support
+      // rankedItemsetScore.put(termSet, patternFreq);
       
       for (String term : termSet) {
         
-        if (term.charAt(0) == '@' || result.containsKey(term) || queryTerms.containsKey(term)) {
+        if (// term.charAt(0) == '@' || WHEN WAS THIS ADDED???? ADHERE TO YOUR STANDARDS DAMN IT!
+        
+        // YA 20121005: Allowing terms to be added from more than one itemset to sum its support
+        // result.containsKey(term) ||
+        
+        queryTerms.containsKey(term)) {
           continue;
         }
         
-        float score = numTermsToReturn--;
+     // YA 20121005: Allowing terms to be added from more than one itemset to sum its support
+        if(result.containsKey(term)){
+          if(numTermsToReturn==0){
+            continue;
+          }
+        } else {
+          --numTermsToReturn;
+        }
+        
+        // WHEN WAS THIS ARBITRARY SHIT INTRODUCED??
+        // float score = numTermsToReturn--;
+        
+        float score = result.get(term) + patternFreq;
+        
         result.put(term, score);
         
         if (minScoreOut != null && score < minScoreOut.floatValue()) {
@@ -1950,7 +1975,7 @@ public class FISQueryExpander {
     fisRs.keysSortedByValue(keyList);
     
     for (int i = fisRs.size() - 1; i >= 0; --i) {
-            
+      
       int hit = keyList.getQuick(i);
       
       Pair<Set<String>, Float> patternPair = getPattern(hit);
@@ -1960,8 +1985,8 @@ public class FISQueryExpander {
         continue;
       }
       if (++rank == numItemsetsToUse) {
-          break;
-        }
+        break;
+      }
       
       itemsetsMap.put(termSet, patternPair.getSecond());
       
@@ -2029,7 +2054,11 @@ public class FISQueryExpander {
           // shit happens!!!
           bPWD[w][d] = 0;
         } else {
-          bPWD[w][d] *= Math.log(fisIDF / corpusIDF);
+          // TODO: While writing the paper I suddenly became suspicious that is upside down..
+          // is it? In this case the lower IDF gets, the more "central" the word has become
+          // formula used officially: bPWD[w][d] *= Math.log(fisIDF / corpusIDF);
+          // formula I'm trying on October 5th, 2012
+          bPWD[w][d] *= Math.log(corpusIDF / fisIDF);
         }
         colStats[d].addValue(bPWD[w][d]);
       }
@@ -2038,8 +2067,11 @@ public class FISQueryExpander {
     for (int d = 0; d < numItemsetsToUse; ++d) {
       Instance instance = new Instance(attrs.size());
       for (int w = 0; w < bWordDocTemp.size(); ++w) {
-        instance.setValue(w, (bPWD[w][d] - colStats[d].getMean())/ colStats[d].getStandardDeviation()); // TODONE divide by standard
-                                                                  // deviation??
+        instance.setValue(w,
+            (bPWD[w][d] - colStats[d].getMean()) / colStats[d].getStandardDeviation()); // TODONE
+                                                                                        // divide by
+                                                                                        // standard
+        // deviation??
       }
       
       insts.add(instance);
@@ -2069,9 +2101,10 @@ public class FISQueryExpander {
     int d = -1;
     for (Set<String> patternItems : itemsetsMap.keySet()) {
       ++d;
-      if(insts.numInstances() == d){
-    	  LOG.warn("Wrong number of itemsetsMap ({}) or instances ({})", itemsetsMap.size(), insts.numInstances()); 
-    	  break;
+      if (insts.numInstances() == d) {
+        LOG.warn("Wrong number of itemsetsMap ({}) or instances ({})", itemsetsMap.size(),
+            insts.numInstances());
+        break;
       }
       Instance inst = insts.instance(d);
       for (String item : patternItems) {
@@ -3097,7 +3130,8 @@ public class FISQueryExpander {
     // }
     
     MutableLong qLen = new MutableLong(0);
-    OpenObjectFloatHashMap<String> queryTermWeight = queryTermFreq(queryStr,
+    OpenObjectFloatHashMap<String> queryTermWeight = queryTermFreq(
+        queryStr,
         qLen,
         (FISQueryExpander.SEARCH_NON_STEMMED ? FISQueryExpander.tweetNonStemmingAnalyzer
             : FISQueryExpander.tweetStemmingAnalyzer),
@@ -4099,7 +4133,10 @@ public class FISQueryExpander {
               t += (numTermsToAppend - t) / extraTerms.length;
             
             if (emptyQueues.size() == extraTerms.length) {
-              numTermsToAppend = -1;
+              // YA 20121005.. WTF is this?? This meant no expansion terms were ever added
+              // for techinques that pass through this method.. WHEN WAS IT ADDED??
+              //numTermsToAppend = -1;
+              t = numTermsToAppend;
               break;
             }
           }
@@ -4169,6 +4206,7 @@ public class FISQueryExpander {
     Set<String> encounteredXTerms = Sets.newHashSet(origQueryTerms.keys());
     int t = 0;
     OpenIntHashSet emptyQueues = new OpenIntHashSet(extraTerms.length);
+    float totalXtermsWeight = 0;
     while (t < numTermsToAppend && extraTerms.length > 0) {
       for (int c = 0; c < extraTerms.length; ++c) {
         if (extraTerms[c].isEmpty()) {
@@ -4206,18 +4244,43 @@ public class FISQueryExpander {
         }
         
         // Wholly shitt
-        // if (xQueryTermsOut != null)
+        // if (xQueryTermsOut != xtermnull)
         // // Whatever I was doing earlier.. the term maps now store occurrence count
         // xQueryTermsOut.put(xterm.obj, 1);
         
         if (xQueryLenOut != null)
           xQueryLenOut.add(1);
         
+        // YA 20121004 Trying more weight to explain the no effect phenomenon
+        // TODO: more elaborate weighting
+        float termWeight;
+        int TERM_WEIGHT_MODE = 2;
+        switch (TERM_WEIGHT_MODE) {
+        case 0:
+          termWeight = origQueryLen / numTermsToAppend;
+          break;
+        case 1:
+          termWeight = 1;
+          break;
+        case 2:
+          termWeight = xterm.score;
+          break;
+        // TODO
+        // case 3:
+        // termWeight = fisidf OR its increase compared to corpus idf;
+        // break;
+        default:
+          termWeight = -1;
+        }
+        
+        totalXtermsWeight += termWeight;
+        
         ScoreIxObj<Query> xtermQuery = createTermQuery(xterm,
             TweetField.TEXT.name,
             twtIxReader,
             minXTermScoreFloats[c],
-            maxXTermScoreFloats[c], origQueryLen / numTermsToAppend);
+            maxXTermScoreFloats[c],
+            termWeight);
         
         if (mode.equals(ExpandMode.FILTERING)) {
           for (String qterm : origQueryTerms.keys()) {
@@ -4261,6 +4324,16 @@ public class FISQueryExpander {
         }
       }
     }
+    
+    // YA 20121004 Trying more weight to explain the no effect phenomenon
+    // Adjust the original query term weeights so that their total is equal to the expansion total
+    for (String oTerm : origQueryTerms.keys()) {
+      float value = origQueryTerms.get(oTerm);
+      // Whatever I was doing earlier.. the term maps now store occurrence count for orig query
+      xQueryTermsOut.put(oTerm, value * totalXtermsWeight / origQueryLen);
+    }
+    /////////////////////
+    
     
     LOG.debug("Expanded by {} terms. Query: {}", t, result);
     

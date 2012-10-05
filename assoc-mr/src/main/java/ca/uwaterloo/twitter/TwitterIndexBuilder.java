@@ -23,6 +23,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.PathFilter;
 import org.apache.hadoop.mapreduce.lib.input.CombineFileSplit;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.PerFieldAnalyzerWrapper;
@@ -89,8 +90,8 @@ public class TwitterIndexBuilder implements Callable<Void> {
   
   private static final boolean APPEND = false;
   private static final boolean TRUST_LUCENE_ADD_INDEX = true;
-  private static final TermVector STORE_UNSTEMMED_TERMVECTOR = TermVector.WITH_POSITIONS;
-  private static final TermVector STORE_STEMMED_TERMVECTOR = TermVector.WITH_POSITIONS;
+  private static final TermVector STORE_UNSTEMMED_TERMVECTOR = TermVector.YES; //WITH_POSITIONS;
+  private static final TermVector STORE_STEMMED_TERMVECTOR = TermVector.YES; //WITH_POSITIONS;
   
   /**
    * @param args
@@ -196,7 +197,14 @@ public class TwitterIndexBuilder implements Callable<Void> {
       
       folderStart = Long.parseLong(startFolders[i].getName());
       List<Path> endFileList = Lists.newLinkedList();
-      for (FileStatus f : fs.listStatus(startFolders[i])) {
+      for (FileStatus f : fs.listStatus(startFolders[i], new PathFilter() {
+        
+        @Override
+        public boolean accept(Path arg0) {
+          
+          return !arg0.getName().startsWith(".");
+        }
+      })) {
         endFileList.add(f.getPath());
       }
       Path[] endFiles = endFileList.toArray(new Path[0]);
@@ -345,9 +353,9 @@ public class TwitterIndexBuilder implements Callable<Void> {
         doc.add(new NumericField(TweetField.TIMESTAMP.name, Store.YES, true)
             .setLongValue(timestamp));
         doc.add(new Field(TweetField.TEXT.name, tweet, Store.YES,
-            Index.ANALYZED, STORE_STEMMED_TERMVECTOR));
-        doc.add(new Field(TweetField.STEMMED_EN.name, tweet, Store.NO,
             Index.ANALYZED, STORE_UNSTEMMED_TERMVECTOR));
+        doc.add(new Field(TweetField.STEMMED_EN.name, tweet, Store.NO,
+            Index.ANALYZED, STORE_STEMMED_TERMVECTOR));
         
         writer.addDocument(doc);
         if (++cnt % 10000 == 0) {
