@@ -72,8 +72,8 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   private static final String RESULT_PATH = "/home/yaboulnaga/data/twitter-trec2011/runs2012";
   private static final String TOPICS_XML_PATH =
       "/home/yaboulnaga/data/twitter-trec2011/"
-          + "2012.topics.MB51-110.xml";
-  // + "2011.topics.MB1-50.xml";
+          // + "2012.topics.MB51-110.xml";
+          + "2011.topics.MB1-50.xml";
   private static final String QREL_PATH = null;
   // "/home/yaboulnaga/data/twitter-trec2011/microblog12-qrels.txt";
   // "/u2/yaboulnaga/datasets/twitter-trec2011/microblog11-qrels.txt";
@@ -297,14 +297,14 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     resultWriters = Maps.newHashMap();
     resultFiles = Maps.newHashMap();
     
-    // openWriterForTag(TAG_BASELINE);
+     openWriterForTag(TAG_BASELINE);
     // openWriterForTag(TAG_FROM_TWEETS);
     // openWriterForTag(TAG_FREQ_PATTERNS);
     // openWriterForTag(TAG_FREQ_PATTERNS + 50);
     // openWriterForTag(TAG_FREQ_PATTERNS + 77);
     // openWriterForTag(TAG_FREQ_PATTERNS + 100);
     // openWriterForTag(TAG_FREQ_PATTERNS + 333);
-    openWriterForTag(TAG_TOPN);
+    // openWriterForTag(TAG_TOPN);
     // openWriterForTag(TAG_TOPN + "3ql");
     // openWriterForTag(TAG_TOPN + "7ql");
     // openWriterForTag(TAG_TOPN + "10ql");
@@ -314,9 +314,9 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     // openWriterForTag(TAG_TOPN + "100abs");
     // openWriterForTag(TAG_QUERY_CONDPROB);
     // openWriterForTag(TAG_KL_DIVER);
-    openWriterForTag(TAG_CLUSTER_PATTERNS_DISTANCE);
-    openWriterForTag(TAG_CLUSTER_PATTERNS_CLOSENESS);
-    // openWriterForTag(TAG_CLUSTER_TWEETS);
+    // openWriterForTag(TAG_CLUSTER_PATTERNS_DISTANCE);
+    // openWriterForTag(TAG_CLUSTER_PATTERNS_CLOSENESS);
+    openWriterForTag(TAG_CLUSTER_TWEETS);
     // openWriterForTag(TAG_CLUSTER_TERMS);
     // openWriterForTag(TAG_MARKOV);
     // openWriterForTag(TAG_SVD_PATTERN);
