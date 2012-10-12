@@ -10,7 +10,7 @@ import static ca.uwaterloo.twitter.queryexpand.FISQueryExpander.pageRank;
 
 public class PageRankTest {
   
-  @Test
+//  @Test
   public void testFromBook() {
     //see fig 15.1 page 510
     float damping = 0.75f;

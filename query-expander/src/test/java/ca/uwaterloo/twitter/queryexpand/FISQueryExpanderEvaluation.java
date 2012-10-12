@@ -72,8 +72,8 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   private static final String RESULT_PATH = "/home/yaboulnaga/data/twitter-trec2011/runs2012";
   private static final String TOPICS_XML_PATH =
       "/home/yaboulnaga/data/twitter-trec2011/"
-          // + "2012.topics.MB51-110.xml";
-          + "2011.topics.MB1-50.xml";
+           + "2012.topics.MB51-110.xml";
+          //+ "2011.topics.MB1-50.xml";
   private static final String QREL_PATH = null;
   // "/home/yaboulnaga/data/twitter-trec2011/microblog12-qrels.txt";
   // "/u2/yaboulnaga/datasets/twitter-trec2011/microblog11-qrels.txt";
@@ -127,7 +127,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   static final List<String> topicSelection = null; // Arrays.asList("MB084", "MB087", "MB090",
                                                    // "MB099");
   
-  private static final boolean SEARCH_WITH_EXPANDED = true;
+  private static final boolean SEARCH_WITH_EXPANDED = false;
   
   private static File[] twtChunkIxLocs;
   
@@ -151,7 +151,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   public class TrecResultFileCollector extends QueryExpansionBM25Collector {
     final String runTag;
     final String topicId;
-    
+   @SuppressWarnings("unchecked") 
     public TrecResultFileCollector(FISQueryExpander pTarget, String pTopicId, String pRunTag,
         /* String pQueryStr, */OpenObjectFloatHashMap<String> pQueryTerms, int pQueryLen)
         throws IOException, IllegalArgumentException, SecurityException, InstantiationException,
@@ -160,7 +160,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
       super(pTarget, TweetField.TEXT.name,
           /* pQueryStr, */pQueryTerms, pQueryLen,
           paramNumEnglishStopWords, MAX_RESULTS,
-          (Class<? extends Comparator<ScoreIxObj<String>>>) ScoreThenObjDescComparator.class,
+          (Class<? extends Comparator<ScoreIxObj<String>>>)ScoreThenObjDescComparator.class, 
           paramBM25StemmedIDF);
       runTag = pRunTag;
       
@@ -314,7 +314,7 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
     // openWriterForTag(TAG_TOPN + "100abs");
     // openWriterForTag(TAG_QUERY_CONDPROB);
     // openWriterForTag(TAG_KL_DIVER);
-    // openWriterForTag(TAG_CLUSTER_PATTERNS_DISTANCE);
+     openWriterForTag(TAG_CLUSTER_PATTERNS_DISTANCE);
     // openWriterForTag(TAG_CLUSTER_PATTERNS_CLOSENESS);
     openWriterForTag(TAG_CLUSTER_TWEETS);
     // openWriterForTag(TAG_CLUSTER_TERMS);
