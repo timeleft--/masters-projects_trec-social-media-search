@@ -1,6 +1,7 @@
 package org.apache.mahout.freqtermsets.util;
 
 import java.io.File;
+import java.io.FileFilter;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -9,6 +10,7 @@ import java.util.Arrays;
 import java.util.Date;
 import java.util.Map;
 
+import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
@@ -32,20 +34,27 @@ public class DumpSeqFilesFolder {
    * @throws Exception
    */
   public static void main(String[] args) {
-    
+    FileFilter noHiddenFilter = new FileFilter() {
+		
+		@Override
+		public boolean accept(File arg0) {
+			return !arg0.getName().startsWith(".");
+		}
+	};
     // int pHeapSize = 5000;
     File root = new File(args[0]);
     File chunk = root;
-//    for(File chunk: root.listFiles())
-    for (File hourDir : chunk.listFiles()) {
-      for (File minuteDir : hourDir.listFiles()) {
+//    for(File chunk: root.listFiles(noHiddenFilter))
+    for (File hourDir : chunk.listFiles(noHiddenFilter)) {
+      for (File minuteDir : hourDir.listFiles(noHiddenFilter)) {
         String minutePath = minuteDir.getAbsolutePath();
         try {
           dumpFrequentPatterns(minutePath + File.separator + PFPGrowth.FREQUENT_PATTERNS,
               minutePath);
           System.out.println("Dumped: " + minutePath);
         } catch (IOException e) {
-          System.err.println("Error while processing: " + minutePath + "\n" + e.getMessage());
+          System.err.println("Error while processing: " + minutePath + "\n"); // + e.getMessage());
+          e.printStackTrace();
         }
       }
     }
@@ -55,8 +64,9 @@ public class DumpSeqFilesFolder {
     FileSystem fs = FileSystem.get(new Configuration());
     Path inPath = new Path(seqPath);
     if (!fs.exists(inPath)) {
-      System.err.println("Error: " + inPath + " does not exist!");
-      System.exit(-1);
+    	throw new IllegalArgumentException(inPath + " does not exist!");
+//      System.err.println("Error: " + inPath + " does not exist!");
+//      System.exit(-1);
     }
     
     Path confPath = new Path(inPath, "_logs/history");
@@ -86,14 +96,17 @@ public class DumpSeqFilesFolder {
       Arrays.sort(keys);
       
       for (String key : keys) {
-        outFilename.append('_').append(key).append(params.get(key));
+    	 if(key.equals("outroot")){
+    		 continue; //a path
+    	 }
+        outFilename.append('_').append(key).append(params.get(key).replaceAll("[\\:/\\\\]", "+"));
       }
     }
     SimpleDateFormat dateFmt = new SimpleDateFormat("MMddHHmm");
     outFilename.append('_').append(dateFmt.format(new Date()));
     
-    PrintStream out = new PrintStream(new FileOutputStream(
-        outPath + File.separator + outFilename.toString() + ".csv"), true, "UTF-8");
+    PrintStream out = new PrintStream(FileUtils.openOutputStream(new File(
+        outPath + File.separator + outFilename.toString() + ".csv")), true, "UTF-8");
     
     CorpusReader<Writable, TopKStringPatterns> stream = new CorpusReader<Writable, TopKStringPatterns>(
         inPath, fs, "part.*");

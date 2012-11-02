@@ -1918,6 +1918,21 @@ public class FISQueryExpander {
     return result;
   }
   
+  
+  
+  /**
+   * Following the paper: 
+   * @param fisRs
+   * @param query
+   * @param numItemsetsToUse
+   * @param minXTermScoresOut
+   * @param maxXTermScoresOut
+   * @param totalXTermScoresOut
+   * @param pdwFromTwitter
+   * @param oneMinusInTheEnd
+   * @return
+   * @throws Exception
+   */
   public PriorityQueue<ScoreIxObj<String>>[] weightedTermsClusterPatterns(
       OpenIntFloatHashMap fisRs,
       String query,
@@ -2029,7 +2044,10 @@ public class FISQueryExpander {
           // shit happens!!!
           bPWD[w][d] = 0;
         } else {
-          bPWD[w][d] *= Math.log(fisIDF / corpusIDF);
+        	// a7aaaaaaa... this is the inverse of what it should be
+//          bPWD[w][d] *= Math.log(fisIDF / corpusIDF);
+        	//correct, the decrease in IDF should be a good thing
+        	bPWD[w][d] *= Math.log( corpusIDF / fisIDF);
         }
         colStats[d].addValue(bPWD[w][d]);
       }
