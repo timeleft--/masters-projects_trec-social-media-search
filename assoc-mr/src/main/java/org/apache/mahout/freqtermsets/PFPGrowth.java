@@ -507,15 +507,20 @@ public final class PFPGrowth implements Callable<Void> {
     // FIXME: this will remove words from only the mostly used lang
     // i.e. cannot be used for a multilingual task
     // Percentile: Pretty aggressive since the Zipfe distribution is very steep
-    int maxIx = (int) Math.round(((freqMap.size() - 1) * prunePct / 100.0) + 1);
-    long maxFreq = freqMap.get(termsSorted.get(maxIx));
-    // Alternatives
-    // double maxFreq = (1.0f * MathUtils.log(2,freqArr[0].getSecond()) * prunePct / 100);
-    // double maxFreq = (1.0f * totalFreq * prunePct / 100); //FIX this to be weighted percentile
-    
-    // This will ALWAYS prune something; even the 100th percentile (i.e. highest rank)
-    while (freqMap.get(termsSorted.get(maxIx - 1)) == maxFreq) {
-      --maxIx;
+    int maxIx;
+    if (prunePct == 100) {
+      maxIx = freqMap.size();
+    } else {
+      maxIx = (int) Math.round(((freqMap.size() - 1) * prunePct / 100.0) + 1);
+      long maxFreq = freqMap.get(termsSorted.get(maxIx));
+      // Alternatives
+      // double maxFreq = (1.0f * MathUtils.log(2,freqArr[0].getSecond()) * prunePct / 100);
+      // double maxFreq = (1.0f * totalFreq * prunePct / 100); //FIX this to be weighted percentile
+      
+      // This will ALWAYS prune something; even the 100th percentile (i.e. highest rank)
+      while (freqMap.get(termsSorted.get(maxIx - 1)) == maxFreq) {
+        --maxIx;
+      }
     }
     
     assert minFr >= minSupport;
@@ -741,8 +746,7 @@ public final class PFPGrowth implements Callable<Void> {
    * 
    * @param params
    *          params should contain input and output locations as a string value, the additional
-   *          parameters
-   *          include minSupport(3), maxHeapSize(50), numGroups(1000)
+   *          parameters include minSupport(3), maxHeapSize(50), numGroups(1000)
    * @throws NoSuchAlgorithmException
    * @throws ParseException
    */
@@ -861,8 +865,7 @@ public final class PFPGrowth implements Callable<Void> {
   
   /**
    * Run the aggregation Job to aggregate the different TopK patterns and group each Pattern by the
-   * features
-   * present in it and thus calculate the final Top K frequent Patterns for each feature
+   * features present in it and thus calculate the final Top K frequent Patterns for each feature
    */
   public static void startAggregating(Parameters params, Configuration conf)
       throws IOException, InterruptedException, ClassNotFoundException {
@@ -947,7 +950,7 @@ public final class PFPGrowth implements Callable<Void> {
     for (int j = 0; startTime < endTime; startTime += stepSize, ++j) {
       long jobEnd = startTime + stepSize;
       Job job = new Job(conf, "Parallel counting running over inerval " + startTime + "-" + jobEnd); // endTime);
-
+      
       // Path outPath = new Path(params.get(OUTPUT), PARALLEL_COUNTING);
       Path outRoot = new Path(params.get(OUTROOT));
       Path stepOutput = new Path(outRoot, startTime + "");
@@ -959,7 +962,6 @@ public final class PFPGrowth implements Callable<Void> {
       Path outPath = new Path(stepOutput, PARALLEL_COUNTING);
       FileOutputFormat.setOutputPath(job, outPath);
       // HadoopUtil.delete(conf, outPath);
-
       
       job.setJarByClass(PFPGrowth.class);
       
@@ -968,7 +970,7 @@ public final class PFPGrowth implements Callable<Void> {
       
       PartitionByTimestamp.setInputPaths(job, params, conf);
       // FileInputFormat.addInputPath(job, new Path(input));
-
+      
       // job.setInputFormatClass(HtmlTweetInputFormat.class);
       job.setInputFormatClass(CSVTweetInputFormat.class);
       job.setMapperClass(ParallelCountingMapper.class);
@@ -989,7 +991,7 @@ public final class PFPGrowth implements Callable<Void> {
       Thread.sleep(1000);
       allCompleted = true;
       for (int j = 0; j < jobArr.length; ++j) {
-        if(jobArr[j] == null){
+        if (jobArr[j] == null) {
           continue;
         }
         boolean complete = jobArr[j].isComplete();
@@ -1008,7 +1010,7 @@ public final class PFPGrowth implements Callable<Void> {
     
     boolean allSuccess = true;
     for (int j = 0; j < jobArr.length; ++j) {
-      if(jobArr[j] == null){
+      if (jobArr[j] == null) {
         continue;
       }
       boolean success = jobArr[j].isSuccessful();
@@ -1026,8 +1028,7 @@ public final class PFPGrowth implements Callable<Void> {
   }
   
   /**
-   * Run the Parallel FPGrowth Map/Reduce Job to calculate the Top K features of group dependent
-   * shards
+   * Run the Parallel FPGrowth Map/Reduce Job to calculate the Top K features of group dependent shards
    */
   public static void startParallelFPGrowth(Parameters params, Configuration conf)
       throws IOException, InterruptedException, ClassNotFoundException {

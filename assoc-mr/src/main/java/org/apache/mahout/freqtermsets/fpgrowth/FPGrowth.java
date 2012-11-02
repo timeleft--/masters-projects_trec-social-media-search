@@ -72,6 +72,7 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
   private static final float LEAST_NUM_CHILDREN_TO_VOTE_FOR_NOISE = 2;
   private static final double SIGNIFICANCE = 0.05;
   private static final boolean BONSAI_PRUNE = false;
+  private static final boolean AUTOINCREASE_SUPPORT = true;
   
   public static List<Pair<String, TopKStringPatterns>> readFrequentPattern(
       Configuration conf, Path path) {
@@ -246,6 +247,8 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
     // Map<Integer,FrequentPatternMaxHeap> patterns = Maps.newHashMap();
     
     FPTreeDepthCache treeCache = new FPTreeDepthCache();
+    
+//    YA 20121101 [ABANDONED} Will the order of calling growth matter in avoiding regenerating patterns?
     for (int i = tree.getHeaderTableCount() - 1; i >= 0; i--) {
       int attribute = tree.getAttributeAtIndex(i);
       if (requiredFeatures.contains(attribute)) {
@@ -266,11 +269,13 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
         // patterns.put(attribute, frequentPatterns);
         outputCollector.collect(attribute, frequentPatterns);
         
-        minSupportValue = Math.max(minSupportValue,
+        if(AUTOINCREASE_SUPPORT){
+          minSupportValue = Math.max(minSupportValue,
             minSupport.longValue() / 2);
-        log.info("Found {} Patterns with Least Support {}",
+          log.info("Found {} Patterns with Least Support {}",
             frequentPatterns.count(),
             frequentPatterns.leastSupport());
+        }
       }
     }
     log.info("Tree Cache: First Level: Cache hits={} Cache Misses={}",
@@ -740,11 +745,13 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
       return new FrequentPatternMaxHeap(k, true); // frequentPatterns;
     }
     
+    int headerTableCount = tree.getHeaderTableCount();
+    
     // YA: The frequent pattern returned should be k PER item.. so the total
     // size of the heap should be k * number of items (headerTableCount - i)
-    int headerTableCount = tree.getHeaderTableCount();
     FrequentPatternMaxHeap frequentPatterns = new FrequentPatternMaxHeap(k
         * (headerTableCount - i), true);
+//    FrequentPatternMaxHeap frequentPatterns = new FrequentPatternMaxHeap(k,true);
     
     while (i < headerTableCount) {
       int attribute = tree.getAttributeAtIndex(i);
@@ -979,6 +986,10 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
     // Build Subtable
     int conditionalNode = firstConditionalNode;
     
+//    // YA 20121101 Don't regenerate FIMs for higher support attrs
+//    long conditionalNodeSupp = tree.getHeaderSupportCount(tree.attribute(conditionalNode));
+    
+    
     while (conditionalNode != -1) {
       long nextNodeCount = tree.count(conditionalNode);
       int pathNode = tree.parent(conditionalNode);
@@ -1039,7 +1050,12 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
     
     tree.clearConditional();
     conditionalTree.reorderHeaderTable();
+    
+// // YA 20121101 Don't regenerate FIMs for higher support attrs
     pruneFPTree(minSupport, conditionalTree);
+//    pruneFPTree(minSupport, conditionalTree, conditionalNodeSupp);
+    
+    
     // prune Conditional Tree
     
   }
@@ -1236,13 +1252,19 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
   //
   // }
   
-  private static void pruneFPTree(long minSupport, FPTree tree) {
+  private static void pruneFPTree(long minSupport, FPTree tree 
+//      //YA 20121101 Don't regenerate FIMs for higher support attrs
+//      long conditionalNodeSupp
+      ) {
     if (log.isTraceEnabled())
       log.trace("Prunining conditional Tree: {}", tree.toString());
     for (int i = 0; i < tree.getHeaderTableCount(); i++) {
       int currentAttribute = tree.getAttributeAtIndex(i);
       float attrSupport = tree.getHeaderSupportCount(currentAttribute);
-      if (attrSupport < minSupport) {
+      if (attrSupport < minSupport
+//          //YA 20121101 Don't regenerate FIMs for higher support attrs
+//          || attrSupport > conditionalNodeSupp
+          ) {
         int nextNode = tree.getHeaderNext(currentAttribute);
         tree.removeHeaderNext(currentAttribute);
         while (nextNode != -1) {

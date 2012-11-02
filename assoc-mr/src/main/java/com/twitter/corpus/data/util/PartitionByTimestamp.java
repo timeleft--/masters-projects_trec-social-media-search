@@ -398,7 +398,11 @@ public class PartitionByTimestamp {
     } else {
       windowSize = Long.parseLong(wsStr);
     }
-    endTime = Math.min(endTime, startTime + windowSize - 1);
+    // YA 20121101
+    long stepSize = Long
+        .parseLong(params.get(PFPGrowth.PARAM_STEP_SIZE, Long.toString(windowSize)));
+    endTime = Math.min(endTime, startTime + stepSize - 1);
+//    endTime = Math.min(endTime, startTime + windowSize - 1);
     
     long rhs = endTime + FILE_INTERVAL_MILLIS;
     while (startTime < endTime) {
