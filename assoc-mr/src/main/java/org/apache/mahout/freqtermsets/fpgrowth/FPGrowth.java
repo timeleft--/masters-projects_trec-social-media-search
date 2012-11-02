@@ -72,7 +72,7 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
   private static final float LEAST_NUM_CHILDREN_TO_VOTE_FOR_NOISE = 2;
   private static final double SIGNIFICANCE = 0.05;
   private static final boolean BONSAI_PRUNE = false;
-  private static final boolean AUTOINCREASE_SUPPORT = true;
+  private static final boolean AUTOINCREASE_SUPPORT = false; //Original is true
   
   public static List<Pair<String, TopKStringPatterns>> readFrequentPattern(
       Configuration conf, Path path) {
@@ -747,7 +747,7 @@ public class FPGrowth<A extends Integer> {// Comparable<? super A>> {
     
     int headerTableCount = tree.getHeaderTableCount();
     
-    // YA: The frequent pattern returned should be k PER item.. so the total
+//    // YA: The frequent pattern returned should be k PER item.. so the total
     // size of the heap should be k * number of items (headerTableCount - i)
     FrequentPatternMaxHeap frequentPatterns = new FrequentPatternMaxHeap(k
         * (headerTableCount - i), true);

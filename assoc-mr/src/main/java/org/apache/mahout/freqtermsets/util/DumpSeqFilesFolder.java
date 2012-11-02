@@ -52,7 +52,7 @@ public class DumpSeqFilesFolder {
           dumpFrequentPatterns(minutePath + File.separator + PFPGrowth.FREQUENT_PATTERNS,
               minutePath);
           System.out.println("Dumped: " + minutePath);
-        } catch (IOException e) {
+        } catch (Exception e) {
           System.err.println("Error while processing: " + minutePath + "\n"); // + e.getMessage());
           e.printStackTrace();
         }
