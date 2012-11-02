@@ -52,6 +52,8 @@ public class ParallelFPGrowthMapper extends
   private boolean repeatHashTag;
   private long windowSize;
   private long endTimestamp;
+  private long stepSize;
+  
   private boolean prependUserName;
   
   @Override
@@ -98,7 +100,7 @@ public class ParallelFPGrowthMapper extends
     for (int j = itemArr.size() - 1; j >= 0; j--) {
       // generate group dependent shards
       int item = itemArr.get(j);
-      int groupID = PFPGrowth.getGroup(item, maxPerGroup);
+      int groupID = PFPGrowth.getGroup(item, maxPerGroup); //, timestamp, endTimestamp, stepSize);
       
       if (!groups.contains(groupID)) {
         IntArrayList tempItems = new IntArrayList(j + 1);
@@ -139,6 +141,9 @@ public class ParallelFPGrowthMapper extends
     windowSize = Long.parseLong(params.get(PFPGrowth.PARAM_WINDOW_SIZE,
         Long.toString(intervalEnd - intervalStart)));
     endTimestamp = Math.min(intervalEnd, intervalStart + windowSize - 1);
+    stepSize = Long
+            .parseLong(params.get(PFPGrowth.PARAM_STEP_SIZE, Long.toString(windowSize)));
+        
     
     prependUserName = true;
   }

@@ -1960,6 +1960,21 @@ public class FISQueryExpander {
     return result;
   }
   
+  
+  
+  /**
+   * Following the paper: 
+   * @param fisRs
+   * @param query
+   * @param numItemsetsToUse
+   * @param minXTermScoresOut
+   * @param maxXTermScoresOut
+   * @param totalXTermScoresOut
+   * @param pdwFromTwitter
+   * @param oneMinusInTheEnd
+   * @return
+   * @throws Exception
+   */
   public PriorityQueue<ScoreIxObj<String>>[] weightedTermsClusterPatterns(
       OpenIntFloatHashMap fisRs,
       String query,

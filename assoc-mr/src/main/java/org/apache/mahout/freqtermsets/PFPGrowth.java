@@ -666,8 +666,13 @@ public final class PFPGrowth implements Callable<Void> {
     return result;
   }
   
-  public static int getGroup(int itemId, int maxPerGroup) {
-    return itemId / maxPerGroup;
+  public static int getGroup(int itemId, int maxPerGroup) { //, long timestamp, long endTimestamp, long stepSize) {
+    int result = itemId / maxPerGroup;
+//    if(runMode.equals(RunningMode.SlidingWin)){
+//    	long lag = (endTimestamp - timestamp) / stepSize;
+//    	// oops, this will cause transactions to be grouped by timestamp, but no according to the amount of lag needed for different items
+//    }
+    return result;
   }
   
   public static IntArrayList getGroupMembers(int groupId,
