@@ -92,6 +92,8 @@ import ca.uwaterloo.twitter.ItemSetIndexBuilder.AssocField;
 import ca.uwaterloo.twitter.ItemSetSimilarity;
 import ca.uwaterloo.twitter.TwitterAnalyzer;
 import ca.uwaterloo.twitter.TwitterIndexBuilder.TweetField;
+import ca.uwaterloo.twitter.queryexpand.BM25Collector.ScoreThenObjDescComparator;
+import ca.uwaterloo.twitter.queryexpand.FISQueryExpanderEvaluation.TrecResultFileCollector;
 import ca.uwaterloo.twitter.TwitterSimilarity;
 
 import com.google.common.collect.ImmutableList;
@@ -643,7 +645,7 @@ public class FISQueryExpander {
   // // This is enough recall and the concept doesn't drift much.. one more level pulls trash..
   // // less is more precise, but I'm afraid won't have enough recall; will use score to block trash
   private static final int MAX_LEVELS_EXPANSION = 1;
-  private static final int NUM_HITS_SHOWN_DEFAULT = 1000;
+  private static final int NUM_HITS_SHOWN_DEFAULT = 33;
   
   // private static final Analyzer ANALYZER = new TwitterAnalyzer();// new
   // // EnglishAnalyzer(Version.LUCENE_36);
@@ -785,7 +787,12 @@ public class FISQueryExpander {
         tweetNonStemmingAnalyzer);
     FISQueryExpander qEx = null;
     try {
-      qEx = new FISQueryExpander(fisIndexLocation, twtIncIxLocation, null, null);
+      qEx = new FISQueryExpander(fisIndexLocation, twtIncIxLocation, twtChnkIxLocs, null); // null, null);
+      //set qEx params here!!!
+   // qEx.setBoostQuerySubsets(paramsScoreSubsets);
+      qEx.setBoostQuerySubsetByIdf(true);
+      qEx.setParseToTermQueries(true);
+      
       StringBuilder query = new StringBuilder();
       do {
         out.print(">");
@@ -809,7 +816,7 @@ public class FISQueryExpander {
         int mode = -1;
         String cmd = query.substring(0, 2);
         if (cmd.equals("i:")) {
-          mode = 0; // itemsets
+          mode = 26; //0; // itemsets
         } else if (cmd.equals("l:")) {
           mode = 1; // close itemsets
         } else if (cmd.equals("n:")) {
@@ -837,7 +844,9 @@ public class FISQueryExpander {
           mode = 9;
           termWeighting = TermWeigting.SVD_TERMCOCC;
         } else if (cmd.equals("r:")) {
-          mode = 10; // results
+          mode = 10; // results by lucene search
+        } else if (cmd.equals("b:")) {
+          mode = 25; //results by BM25 ranking 
         } else if (cmd.equals("e:")) {
           mode = 20; // expanded
         } else if (cmd.equals("t:")) {
@@ -873,7 +882,7 @@ public class FISQueryExpander {
         out.println();
         out.println(query.toString());
         OpenIntFloatHashMap fisRs = null;
-        if (mode != 10) {
+        if (!(mode == 10 || mode == 25 || mode == 26)) {
           fisRs = qEx.relatedItemsets(query.toString(), minScore);
         }
         
@@ -1048,6 +1057,82 @@ public class FISQueryExpander {
             ScoreIxObj<String> t = weightedTerms.poll();
             out.println(++i + " (" + t.score + "): " + t.obj);
           }
+        } else if(mode == 25) {
+          MutableLong queryLen = new MutableLong();
+          String queryStr = query.toString();
+          OpenObjectFloatHashMap<String> queryTerms = qEx.queryTermFreq(queryStr,queryLen,
+              (FISQueryExpander.SEARCH_NON_STEMMED ? FISQueryExpander.tweetNonStemmingAnalyzer
+                  : FISQueryExpander.tweetStemmingAnalyzer),
+              (FISQueryExpander.SEARCH_NON_STEMMED ? TweetField.TEXT.name
+                  : TweetField.STEMMED_EN.name));
+          QueryExpansionBM25Collector collector = new QueryExpansionBM25Collector(qEx, 
+              TweetField.TEXT.name, queryTerms, queryLen.floatValue(), 0, NUM_HITS_SHOWN_DEFAULT, 
+              (Class<? extends Comparator<ScoreIxObj<String>>>)BM25Collector.ScoreThenObjDescComparator.class, 
+              true);
+          Query untimedQuery = qEx.parseQueryIntoTerms(queryTerms,
+              queryLen.floatValue(),
+              QueryParseMode.DISJUNCTIVE,
+              false,
+              // TweetField.STEMMED_EN.name,
+              (FISQueryExpander.SEARCH_NON_STEMMED ?TweetField.TEXT.name:TweetField.STEMMED_EN.name),
+              qEx.twtIxReader);
+          Query timedQuery = qEx.filterQuery(untimedQuery);
+          
+          LOG.debug("Querying Twitter by: " + timedQuery.toString());
+          
+          qEx.twtSearcher.search(timedQuery, collector);
+          
+          TreeMap<ScoreIxObj<String>, String> rs = collector.resultSet;
+          int rank = 1;
+          for (ScoreIxObj<String> scoredTweet : rs.keySet()) {
+            String tweet = null;
+            tweet = rs.get(scoredTweet);
+            System.out.println(rank++ + "\t" + tweet + "\t" + scoredTweet.score + "\t" + scoredTweet.obj);
+          }
+        } else if(mode == 26) {
+          String queryStr = query.toString();
+          MutableLong qLen = new MutableLong(0);
+          OpenObjectFloatHashMap<String> queryTermWeight = qEx.queryTermFreq(
+              queryStr,
+              qLen,
+              (FISQueryExpander.SEARCH_NON_STEMMED ? FISQueryExpander.tweetNonStemmingAnalyzer
+                  : FISQueryExpander.tweetStemmingAnalyzer),
+              (FISQueryExpander.SEARCH_NON_STEMMED ? AssocField.ITEMSET.name : AssocField.STEMMED_EN.name));
+          // tweetStemmingAnalyzer,
+          // AssocField.STEMMED_EN.name);
+          // tweetNonStemmingAnalyzer,
+          // AssocField.ITEMSET.name);
+          
+          Query untimedQuery = qEx.parseQueryIntoTerms(
+              queryTermWeight,
+              qLen.floatValue(),
+              // fisQparser,
+              // YA 20121006 Increasing specificity of itemset to overcome concept drift
+              // in official runs it was: DISJUNCTIVE,
+              // this hardly gets any expansion terms: QueryParseMode.CONJUNGTIVE,
+              // thjis is exactly like disjuntive: QueryParseMode.POWERSET,
+              QueryParseMode.DISJUNCTIVE,
+              false,
+              (FISQueryExpander.SEARCH_NON_STEMMED ? AssocField.ITEMSET.name : AssocField.STEMMED_EN.name),
+              // AssocField.ITEMSET.name,
+              // AssocField.STEMMED_EN.name,
+              qEx.fisIxReader);
+          // QUERY_SUBSET_BOOST_YESNO_DEFAULT);
+          
+          LOG.debug("Querying FIS by: " + untimedQuery.toString());
+          
+          FISCollector bm25Coll = new FISCollector(qEx, queryStr, queryTermWeight, qLen.floatValue(),
+              NUM_HITS_SHOWN_DEFAULT);
+          // TODO timedQuery add filter
+          qEx.fisSearcher.search(untimedQuery, bm25Coll);
+          
+          TreeMap<ScoreIxObj<Integer>, String[]> rs = bm25Coll.resultSet;
+          int rank = 1;
+          for (ScoreIxObj<Integer> scoredTweet : rs.keySet()) {
+            String[] itemset = null;
+            itemset = rs.get(scoredTweet);
+            System.out.println(rank++ + "\t" + Arrays.toString(itemset) + "\t" + scoredTweet.score + "\t" + scoredTweet.obj);
+          }
           
         } else {
           Query twtQ = null;
@@ -1089,6 +1174,7 @@ public class FISQueryExpander {
           
           LOG.debug("Querying Twitter by: " + twtQ.toString());
           int t = 0;
+          
           for (ScoreDoc scoreDoc : qEx.twtSearcher.search(twtQ, NUM_HITS_SHOWN_DEFAULT).scoreDocs) {
             Document hit = qEx.twtIxReader.document(scoreDoc.doc);
             Fieldable created = hit.getFieldable(TweetField.TIMESTAMP.name);

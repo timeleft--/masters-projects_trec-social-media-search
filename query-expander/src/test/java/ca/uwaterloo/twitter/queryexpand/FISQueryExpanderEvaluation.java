@@ -58,15 +58,15 @@ public class FISQueryExpanderEvaluation implements Callable<Void> {
   private File twtIncIxLoc = new File(
       "/home/yaboulnaga/data/twitter-trec2011/indexes/" +
           // "trash/index-stemmed_8hr-incremental");
-          // "twt_pos-stored_8hr_incr");
-          "twt_stemmed-stored_8hr-increments");
+           "twt_pos-stored_8hr_incr");
+//          "twt_stemmed-stored_8hr-increments");
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-stemmed_8hr-incremental");
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-tweets_8hr-increments");
   
   private static final String TWT_CHUNKS_ROOT = "/home/yaboulnaga/data/twitter-trec2011/indexes/"
       // + "trash/index-stemmed_chunks";
-      // +"twt_pos-stored_chunks";
-      + "twt_stemmed-stored_chunks";
+       +"twt_pos-stored_chunks";
+//      + "twt_stemmed-stored_chunks";
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-stemmed_chunks";
   // "/u2/yaboulnaga/datasets/twitter-trec2011/index-tweets_chunks";
   private static final String RESULT_PATH = "/home/yaboulnaga/data/twitter-trec2011/runs2012";
