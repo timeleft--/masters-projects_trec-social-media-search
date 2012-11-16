@@ -65,17 +65,25 @@ public class CSVTweetRecordReader extends RecordReader<PairOfLongs, PairOfString
     if (fields.length < 4) {
       return nextKeyValue();
     }
+    try {
+      String tweet = StringEscapeUtils.unescapeJava(fields[3]);
+      
+      String screenName = fields[1];
+      
+      long id = Long.parseLong(fields[0]);
+      long timestamp = Long.parseLong(fields[2]);
+      
+      myKey = new PairOfLongs(id, timestamp);
+      
+      myValue = new PairOfStrings(screenName, tweet);
+      
+      return true;
+      
+    } catch (Exception ex) {
+      LOG.error(ex.getMessage(), ex);
+      return nextKeyValue();
+    }
     
-    String tweet = StringEscapeUtils.unescapeJava(fields[3]);
-    
-    String screenName = fields[1];
-    long id = Long.parseLong(fields[0]);
-    long timestamp = Long.parseLong(fields[2]);
-    
-    myKey = new PairOfLongs(id, timestamp);
-    
-    myValue = new PairOfStrings(screenName,tweet);
-    return true;
   }
   
   @Override
