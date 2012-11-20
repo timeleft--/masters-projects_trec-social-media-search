@@ -2,6 +2,7 @@ package ca.uwaterloo.twitter;
 
 import java.util.Arrays;
 import java.util.concurrent.LinkedBlockingDeque;
+import java.util.regex.Pattern;
 
 import org.apache.hadoop.io.Text;
 import org.apache.mahout.math.set.OpenCharHashSet;
@@ -44,22 +45,46 @@ public class TokenIterator extends AbstractIterator<String> {
       // Latin and Latin extended are all below '\u024F'
       return super.isTokenChar(c) && c <= (int) '\u024F';
     }
+    
   }
   
   public static final String URL_PLACEHOLDER = "URL";
   
   public static final String PARAM_REPEAT_HASHTAG = "repHT";
   
+  private static final Pattern numberPattern = Pattern.compile("\\d+\\z");
+  private static final Pattern noLettersOrNumbersPattern = Pattern.compile("[^\\p{Alnum}]+");
+  
   // TODONE: is it really better to work with ints?? or is char[] good? Yes.. so that you can have
   // -1 place holders
   private final char[] chs;
   private int cIx = 0;
+  /**
+   * Used to Store hashtags that will be repeated, so if repeatedHashTagAtTheEnd is true the content
+   * will be repeated at the end of the tweet
+   */
   private LinkedBlockingDeque<String> pendingRes = Queues
       .<String> newLinkedBlockingDeque();
   private static int[] BLANK_3CH = { -1, -1, -1 };
   private int[] repeatedChs = Arrays.copyOf(BLANK_3CH, 3);
   private OpenCharHashSet punctuation;
+  /**
+   * If true the hashtag is returned twice, first without the # then with it
+   */
   private boolean repeatHashTag = false;
+  /**
+   * Has effect only if repeatHashTag is true. If true the tags are returned at the end of the Tweet
+   */
+  private boolean repeatedHashTagAtTheEnd = false;
+  public boolean isRepeatedHashTagAtTheEnd() {
+    return repeatedHashTagAtTheEnd;
+  }
+
+  public void setRepeatedHashTagAtTheEnd(boolean repeatedHashTagAtTheEnd) {
+    this.repeatedHashTagAtTheEnd = repeatedHashTagAtTheEnd;
+  }
+
+  private boolean endReached = false;
   
   public TokenIterator(Text input) {
     // TODONOT: create a map reduce step for language categorization first
@@ -70,8 +95,9 @@ public class TokenIterator extends AbstractIterator<String> {
     // }
     
     this.chs = input.toString().toCharArray();
-    //  removed _ because it can be used in usernames..  
-    String punctuationStr = "!$%&()*+,./:;<=>?[\\]^{|}~\"'`-"; 
+    // removed _ because it can be used in usernames..
+    // handling ' alone to take into account its to shorten "not" in English
+    String punctuationStr = "!$%&()*+,./:;<=>?[\\]^{|}~\"`-";
     punctuation = new OpenCharHashSet(punctuationStr.length(), 0, 0.999);
     for (char ch : punctuationStr.toCharArray()) {
       punctuation.add(ch);
@@ -93,55 +119,73 @@ public class TokenIterator extends AbstractIterator<String> {
   
   @Override
   protected String computeNext() {
-    if (!pendingRes.isEmpty()) {
-      return pendingRes.removeFirst();
-    }
-    
-    if (cIx > chs.length - 1) {
-      return endOfData();
-    }
+    String ret;
     int ch = -1;
-    StringBuilder result = new StringBuilder();
-    while (cIx < chs.length) {
-      ch = chs[cIx++];
-      if (isTokenChar(ch)) {
-        int tch = normalize(ch);
-        
-        // normalize repetitions to 3 chars (cooooooooooooooooooool --> coool)
-        if ((repeatedChs[0] == repeatedChs[1])
-            && (repeatedChs[1] == repeatedChs[2])
-            && (repeatedChs[2] == tch)
-            && !Character.isDigit(tch)) {
-          continue;
-        } else {
-          repeatedChs[0] = repeatedChs[1];
-          repeatedChs[1] = repeatedChs[2];
-          repeatedChs[2] = tch;
+    if (!pendingRes.isEmpty() && (!repeatedHashTagAtTheEnd || endReached)) {
+      ret = pendingRes.removeFirst();
+      ch = chs[cIx-1];
+    } else {
+      if (cIx > chs.length - 1) {
+        if (!pendingRes.isEmpty()) { 
+          assert repeatedHashTagAtTheEnd;
+          assert !endReached;
+          endReached = true;
+          return computeNext();
         }
-        
-        result.append((char) tch);
-      } else {
-        
-        // reset repetition detector
-        repeatedChs = Arrays.copyOf(BLANK_3CH, 3);
-        
-        if (isDelimiter(ch)) {
-          break;
+        return endOfData();
+      }
+      StringBuilder result = new StringBuilder();
+      while (cIx < chs.length) {
+        ch = chs[cIx++];
+        if (isTokenChar(ch)) {
+          int tch = normalize(ch);
+          
+          // normalize repetitions to 3 chars (cooooooooooooooooooool --> coool)
+          if ((repeatedChs[0] == repeatedChs[1])
+              && (repeatedChs[1] == repeatedChs[2])
+              && (repeatedChs[2] == tch)
+              && !Character.isDigit(tch)) {
+            continue;
+          } else {
+            repeatedChs[0] = repeatedChs[1];
+            repeatedChs[1] = repeatedChs[2];
+            repeatedChs[2] = tch;
+          }
+          
+          result.append((char) tch);
+        } else {
+          
+          // reset repetition detector
+          repeatedChs = Arrays.copyOf(BLANK_3CH, 3);
+          
+          if (isDelimiter(ch)) {
+            break;
+          } else if (ch == '\'') {
+            // don't break if this is an apostrophe used to shorten "not"
+            // cIx already at next char
+            if (!((cIx < chs.length && chs[cIx] == 't')
+            && (cIx + 1 >= chs.length || isDelimiter(chs[cIx + 1])))) {
+              break;
+            }
+          }
         }
       }
+      
+      if (repeatHashTag && result.charAt(0) == '#') {
+        // || result.charAt(0) == '@') {
+        pendingRes.addLast(result.toString());
+        result = result.deleteCharAt(0);
+      }
+      
+      ret = result.toString();
     }
-    
-    if (result.length() == 0) { // < 3) {// || isStopWord(res)) {
+    if (ret.length() == 0
+        || noLettersOrNumbersPattern.matcher(ret).matches()) {
+      // < 3) {// || isStopWord(res)) {
       return computeNext();
     }
     
-    if (repeatHashTag && result.charAt(0) == '#' && result.length() > 1) { // || result.charAt(0) ==
-                                                                           // '@') {
-      pendingRes.addLast(result.substring(1));
-    }
-    
-    String ret = result.toString();
-    if ((ret.startsWith("http") && ch==':') || (ret.startsWith("www") && ch =='.')) {
+    if ((ret.startsWith("http") && ch == ':') || (ret.startsWith("www") && ch == '.')) {
       ret = URL_PLACEHOLDER;
       while (cIx < chs.length) {
         if (!Character.isWhitespace(ch)) {
@@ -150,7 +194,7 @@ public class TokenIterator extends AbstractIterator<String> {
           break;
         }
       }
-    } else if (ret.matches("\\d+\\z")) {
+    } else if (numberPattern.matcher(ret).matches()) {
       // A number, do not delimit on commas and dots,
       // but delimit on dashes and slashes (dates)
       // cIx is already ahead of the character that caused
@@ -159,14 +203,15 @@ public class TokenIterator extends AbstractIterator<String> {
       while (cIx < chs.length) {
         ch = chs[cIx++];
         if (isTokenChar(ch) || isDecimalSeparator(ch)) {
-          result.append((char) ch);
+          ret += (char)ch;
+//          result.append((char) ch);
         } else {
-          if(isThousandsSeparator(ch)){
+          if (isThousandsSeparator(ch)) {
             continue;
           }
           // no need to check for being delimiter, because
           // we should proceed only if we are in a number token
-          ret = result.toString();
+//          ret = result.toString();
           break;
         }
       }
@@ -189,7 +234,7 @@ public class TokenIterator extends AbstractIterator<String> {
   
   protected boolean isTokenChar(int c) {
     return Character.isLetter(c) || Character.isDigit(c) || c == (int) '#'
-        || c == (int) '@' || c == (int)'_';
+        || c == (int) '@' || c == (int) '_';
   }
   
   protected int normalize(int c) {
