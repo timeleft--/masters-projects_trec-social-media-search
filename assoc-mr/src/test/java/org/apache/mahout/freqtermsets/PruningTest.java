@@ -180,7 +180,7 @@ public class PruningTest {
     
   }
   
-  @Test
+//  @Test
   public void testPruneFPTree() throws IOException, MathException {
     List<Pair<Integer, Long>> localFList = Lists.newArrayList();
     for (Entry<Integer, MutableLong> fItem : cTree.generateFList()

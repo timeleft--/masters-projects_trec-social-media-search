@@ -6,7 +6,7 @@ import org.junit.Test;
 
 public class HtmlTweetInputFormatTest {
   
-  @Test
+//  @Test
   public void test() {
     HtmlTweetInputFormat target = new HtmlTweetInputFormat();
     

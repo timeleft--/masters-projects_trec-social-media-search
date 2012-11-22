@@ -32,7 +32,7 @@ public class TransactionTreeTest {
 		target.addPattern(pattern, 4);
 	}
 
-	@Test
+//	@Test
 	public void testSameUniquePatterns() {
 		IntArrayList pattern = new IntArrayList();
 		pattern.add(1);
@@ -53,7 +53,7 @@ public class TransactionTreeTest {
 		}
 	}
 
-	@Test
+//	@Test
 	public void testShorterUniquePatterns() {
 		IntArrayList shorter = new IntArrayList();
 		shorter.add(1);
@@ -82,7 +82,7 @@ public class TransactionTreeTest {
 		}
 	}
 
-	@Test
+//	@Test
 	public void testLongerUniquePatterns() {
 		IntArrayList longer = new IntArrayList();
 		longer.add(1);
@@ -122,7 +122,7 @@ public class TransactionTreeTest {
 		}
 	}
 
-	@Test
+//	@Test
 	public void testClosedIter() {
 		IntArrayList longer = new IntArrayList();
 		longer.add(1);

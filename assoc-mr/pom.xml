@@ -207,6 +207,11 @@
       <artifactId>weka-stable</artifactId>
       <version>3.6.7</version>
     </dependency>
+		    <dependency>
+		    	<groupId>yaboulna-thesis</groupId>
+		    	<artifactId>twitter-utils</artifactId>
+		    	<version>0.0.1-SNAPSHOT</version>
+		    </dependency>
 	</dependencies>
 
 	<profiles>
