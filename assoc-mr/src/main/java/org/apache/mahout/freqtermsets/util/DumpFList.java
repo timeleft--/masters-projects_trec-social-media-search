@@ -1,6 +1,7 @@
 package org.apache.mahout.freqtermsets.util;
 
 import java.io.File;
+import java.io.FileFilter;
 import java.io.IOException;
 import java.io.Writer;
 import java.nio.channels.Channels;
@@ -9,6 +10,10 @@ import java.util.List;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.math.stat.descriptive.SummaryStatistics;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.io.LongWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.mahout.common.Pair;
+import org.apache.mahout.common.iterator.sequencefile.SequenceFileIterable;
 import org.apache.mahout.freqtermsets.PFPGrowth;
 import org.apache.mahout.math.map.OpenObjectLongHashMap;
 
@@ -22,12 +27,19 @@ public class DumpFList {
    */
   
   public static void main(String[] args) {
+	  FileFilter noHiddenFilter = new FileFilter() {
+			
+			@Override
+			public boolean accept(File arg0) {
+				return !arg0.getName().startsWith(".");
+			}
+		};
     // String countin = "/u2/yaboulnaga/Shared/datasets/twitter-trec2011/assoc-mr_0601-2000";
     // String outPath = "/u2/yaboulnaga/Shared/datasets/twitter-trec2011/flist.txt";
     // String statPath = "/u2/yaboulnaga/Shared/datasets/twitter-trec2011/tokens-length.txt";
     File rootDir = new File(args[0]);
-    for (File hourDir : rootDir.listFiles()) {
-      for (File minuteDir : hourDir.listFiles()) {
+    for (File hourDir : rootDir.listFiles(noHiddenFilter)) {
+      for (File minuteDir : hourDir.listFiles(noHiddenFilter)) {
         String minutePath = minuteDir.getAbsolutePath();
         try {
           dumpFlist(minutePath);
@@ -50,7 +62,17 @@ public class DumpFList {
       Configuration conf = new Configuration();
       // for (Pair<String, Long> e : PFPGrowth.readParallelCountingResults(inDir,2,3,100, conf)) {
       // wr.append(e.getFirst() + "\t" + e.getSecond() + "\n");
-      OpenObjectLongHashMap<String> freqMap = PFPGrowth.readParallelCountingResults(inDir, conf);
+      OpenObjectLongHashMap<String> freqMap;
+      if(FLIST_EXISTS){
+    	  for (Pair<Text, LongWritable> record : new SequenceFileIterable<Text, LongWritable>(
+    	          fListLocalPath, true, conf)) {
+    	        String token = record.getFirst().toString();
+    	        
+    	        freqMap.put(token,record.getSecond().get());
+    	      }
+      } else {
+      freqMap = PFPGrowth.readParallelCountingResults(inDir, conf);
+      }
       List<String> termsSorted = Lists.newArrayListWithCapacity(freqMap.size());
       freqMap.keysSortedByValue(termsSorted);
       for (int i = termsSorted.size() - 1; i >= 0; --i) {
